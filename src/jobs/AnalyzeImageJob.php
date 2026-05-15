@@ -141,33 +141,43 @@ class AnalyzeImageJob extends BaseJob
 		
 		// Send notification if score is below threshold
 		if($scoreNum > 0 && $scoreNum <= $settings->notificationThreshold) {
-			$this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey);
+			$data['enhancement'] = $this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey);
 			$this->sendSlackNotification($data);
 			$this->sendEmailNotification($data);
 		} 
 	}
 
-	private function enhanceImageIfEnabled(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): void
+	private function enhanceImageIfEnabled(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): array
 	{
 		if ($settings->imageEnhancementMode === Settings::ENHANCEMENT_DISABLED) {
-			return;
+			return [
+				'label' => 'Niet vervangen',
+				'status' => 'Enhancement staat uit.',
+			];
 		}
 
 		if ($settings->imageEnhancementMode === Settings::ENHANCEMENT_SAFE) {
-			$this->safeEnhanceImage($settings, $asset, $localPath);
-			return;
+			return $this->safeEnhanceImage($settings, $asset, $localPath);
 		}
 
 		if ($settings->imageEnhancementMode === Settings::ENHANCEMENT_CREATIVE) {
-			$this->creativeEnhanceImage($client, $settings, $asset, $localPath, $apiKey);
+			return $this->creativeEnhanceImage($client, $settings, $asset, $localPath, $apiKey);
 		}
+
+		return [
+			'label' => 'Niet vervangen',
+			'status' => 'Onbekende enhancement mode.',
+		];
 	}
 
-	private function safeEnhanceImage(Settings $settings, Asset $asset, string $localPath): void
+	private function safeEnhanceImage(Settings $settings, Asset $asset, string $localPath): array
 	{
 		if (!class_exists(Imagick::class)) {
 			Craft::warning('ImageQualityChecker: Imagick is required for safe image enhancement.', __METHOD__);
-			return;
+			return [
+				'label' => 'Niet vervangen',
+				'status' => 'Safe optimization mislukt: Imagick ontbreekt.',
+			];
 		}
 
 		try {
@@ -197,18 +207,31 @@ class AnalyzeImageJob extends BaseJob
 
 			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			@unlink($tempPath);
+
+			return [
+				'label' => 'Vervangen met safe optimization',
+				'status' => 'Origineel bestand is vervangen door een lokaal geoptimaliseerde versie.',
+			];
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Safe image enhancement failed: ' . $e->getMessage(), __METHOD__);
+
+			return [
+				'label' => 'Niet vervangen',
+				'status' => 'Safe optimization mislukt.',
+			];
 		}
 	}
 
-	private function creativeEnhanceImage(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): void
+	private function creativeEnhanceImage(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): array
 	{
 		$handle = fopen($localPath, 'rb');
 
 		if ($handle === false) {
 			Craft::warning('ImageQualityChecker: Could not open image for AI enhancement.', __METHOD__);
-			return;
+			return [
+				'label' => 'Niet vervangen',
+				'status' => 'AI enhancement mislukt: bestand kon niet worden geopend.',
+			];
 		}
 
 		try {
@@ -249,15 +272,28 @@ class AnalyzeImageJob extends BaseJob
 
 			if (!$imageData) {
 				Craft::warning('ImageQualityChecker: AI image enhancement returned no image data.', __METHOD__);
-				return;
+				return [
+					'label' => 'Niet vervangen',
+					'status' => 'AI enhancement gaf geen vervangende afbeelding terug.',
+				];
 			}
 
 			$tempPath = $this->getTempReplacementPath($asset);
 			file_put_contents($tempPath, base64_decode($imageData));
 			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			@unlink($tempPath);
+
+			return [
+				'label' => 'Vervangen met AI enhancement',
+				'status' => 'Origineel bestand is vervangen door een OpenAI-geoptimaliseerde versie.',
+			];
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: AI image enhancement failed: ' . $e->getMessage(), __METHOD__);
+
+			return [
+				'label' => 'Niet vervangen',
+				'status' => 'AI enhancement mislukt.',
+			];
 		} finally {
 			fclose($handle);
 		}
@@ -314,12 +350,23 @@ class AnalyzeImageJob extends BaseJob
 						'type' => 'mrkdwn',
 						'text' => "*Afbeelding:*\n<{$data['imageUrl']}|Bekijken>"
 					],
+					isset($data['enhancement']) ? [
+						'type' => 'mrkdwn',
+						'text' => "*Vervanging:*\n{$data['enhancement']['label']}"
+					] : null,
 					$data['entryLink'] ? [
 						'type' => 'mrkdwn',
 						'text' => "*Artikel:*\n<{$data['entryLink']}|{$data['entryTitle']}>"
 					] : null,
 				])
 			],
+			isset($data['enhancement']) ? [
+				'type' => 'context',
+				'elements' => [[
+					'type' => 'mrkdwn',
+					'text' => "*Enhancement:* {$data['enhancement']['status']}"
+				]]
+			] : null,
 			/*[
 				'type' => 'context',
 				'elements' => [[
@@ -328,6 +375,7 @@ class AnalyzeImageJob extends BaseJob
 				]]
 			]*/
 		];
+		$blocks = array_values(array_filter($blocks));
 	
 		Craft::createGuzzleClient()->post('https://slack.com/api/chat.postMessage', [
 			'headers' => [
@@ -370,6 +418,7 @@ class AnalyzeImageJob extends BaseJob
 		$htmlBody = "<h2>📸 Beeldkwaliteit analyse</h2>
 			<p><strong>Score:</strong> {$data['scoreEmoji']} {$data['scoreNum']}/100 ({$data['scoreLabel']})<br>
 			<strong>Auteur:</strong> {$data['author']}<br>" .
+			(isset($data['enhancement']) ? "<strong>Vervanging:</strong> {$data['enhancement']['label']}<br>" : '') .
 			($data['entryLink'] ? "<strong>Artikel:</strong> <a href=\"{$data['entryLink']}\">{$data['entryTitle']}</a><br>" : '') .
 			"</p>" .
 			"<p><strong>Afbeelding:</strong><br>
