@@ -26,13 +26,13 @@
 		placeholder: '',
 	}) }}
 	
-	{{ forms.textField({
+	{{ forms.selectField({
 		label: 'ChatGPT Model',
 		name: 'chatGptModel',
 		id: 'chatGptModel',
-		instructions: 'The chatGPT model that should be used. Default is gpt-4-turbo',
+		instructions: 'Choose a fixed OpenAI model, or use the latest available model for this API key.',
 		value: settings.chatGptModel,
-		placeholder: '',
+		options: chatGptModelOptions,
 	}) }}
 	
 	{{ forms.selectField({
@@ -123,16 +123,14 @@
 	
 	<h1>Asset Volumes</h1>
 	
-	{% set allAssetFields = craft.app.fields.allFields
-		|filter(field => field.className == 'craft\\fields\\Assets')
-	%}
+	{% set allVolumes = craft.app.volumes.allVolumes %}
 	
-	{% set fieldOptions = [] %}
-	{% for field in allAssetFields %}
-		{% set fieldOptions = fieldOptions|merge([{
-			label: field.name ~ ' (' ~ field.handle ~ ')',
-			value: field.handle,
-			checked: field.handle in settings.allowedAssetFieldHandles
+	{% set volumeOptions = [] %}
+	{% for volume in allVolumes %}
+		{% set volumeOptions = volumeOptions|merge([{
+			label: volume.name ~ ' (' ~ volume.handle ~ ')',
+			value: volume.handle,
+			checked: volume.handle in settings.allowedAssetFieldHandles
 		}]) %}
 	{% endfor %}
 	
@@ -140,6 +138,6 @@
 		label: 'Only run the analyses on these asset volumes',
 		instructions: 'Select your volumes that should be analysed.',
 		name: 'allowedAssetFieldHandles',
-		options: fieldOptions
+		options: volumeOptions
 	}) }}
 </div>

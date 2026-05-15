@@ -7,7 +7,7 @@ use Craft;
 use arjanbrinkman\craftimagequalitychecker\models\Settings;
 use arjanbrinkman\craftimagequalitychecker\services\ImageQualityService;
 use arjanbrinkman\craftimagequalitychecker\jobs\AnalyzeImageJob;
-use arjanbrinkman\craftimagequalitychecker\assetbundles\ImageQualityCheckerAsset;
+use arjanbrinkman\craftimagequalitychecker\web\assets\imagequalitychecker\ImageQualityCheckerAsset;
 
 use yii\base\Event;
 
@@ -73,7 +73,41 @@ class ImageQualityChecker extends Plugin
 		return Craft::$app->view->renderTemplate('_image-quality-checker/_settings.twig', [
 			'plugin' => $this,
 			'settings' => $this->getSettings(),
+			'chatGptModelOptions' => $this->getChatGptModelOptions(),
 		]);
+	}
+
+	public function getChatGptModelOptions(): array
+	{
+		$models = Settings::fallbackChatGptModels();
+		$apiKey = $this->getSettings()->chatGptApiKey;
+
+		if ($apiKey) {
+			try {
+				$response = Craft::createGuzzleClient()->get('https://api.openai.com/v1/models', [
+					'headers' => [
+						'Authorization' => 'Bearer ' . $apiKey,
+					],
+				]);
+				$data = json_decode((string) $response->getBody(), true);
+
+				foreach ($data['data'] ?? [] as $model) {
+					$id = $model['id'] ?? null;
+					if ($id && Settings::isSupportedChatGptModel($id)) {
+						$models[] = $id;
+					}
+				}
+			} catch (\Throwable $e) {
+				Craft::warning('ImageQualityChecker: Could not fetch OpenAI models: ' . $e->getMessage(), __METHOD__);
+			}
+		}
+
+		$models = array_values(array_unique($models));
+
+		return array_map(static fn(string $model): array => [
+			'label' => $model === Settings::MODEL_LATEST ? 'Latest available model' : $model,
+			'value' => $model,
+		], $models);
 	}
 
 	private function _registerSettings(): void

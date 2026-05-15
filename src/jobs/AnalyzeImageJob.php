@@ -3,18 +3,15 @@
 namespace arjanbrinkman\craftimagequalitychecker\jobs;
 
 use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
+use arjanbrinkman\craftimagequalitychecker\models\Settings;
 
 use Craft;
 use craft\queue\BaseJob;
 use craft\elements\Asset;
-use GuzzleHttp\Client;
-use yii\base\Exception;
 use craft\elements\Entry;
-use craft\elements\User;
-use craft\base\ElementInterface;
 use craft\db\Query;
 use craft\db\Table;
-use craft\elements\db\EntryQuery;
+use GuzzleHttp\ClientInterface;
 
 class AnalyzeImageJob extends BaseJob
 {
@@ -61,14 +58,14 @@ class AnalyzeImageJob extends BaseJob
 		$imageBase64 = base64_encode(file_get_contents($localPath));
 		
 		$apiKey = $settings->chatGptApiKey;
-		$webhook = $settings->slackWebhookUrl;
 
-		if (!$apiKey || !$webhook) {
-			Craft::warning("AnalyzeImageJob: API key or Slack webhook missing in settings.", __METHOD__);
+		if (!$apiKey) {
+			Craft::warning("AnalyzeImageJob: API key missing in settings.", __METHOD__);
 			return;
 		}
 
 		$client = Craft::createGuzzleClient();
+		$model = $this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey);
 		$mime = $asset->mimeType;
 		$response = $client->post('https://api.openai.com/v1/chat/completions', [
 			'headers' => [
@@ -76,7 +73,7 @@ class AnalyzeImageJob extends BaseJob
 				'Content-Type'  => 'application/json',
 			],
 			'json' => [
-				'model' => $settings->chatGptModel,
+				'model' => $model,
 				'messages' => [[
 					'role' => 'user',
 					'content' => [
@@ -260,6 +257,58 @@ class AnalyzeImageJob extends BaseJob
 		}
 	
 		$mail->send();
+	}
+
+	private function resolveChatGptModel(ClientInterface $client, string $configuredModel, string $apiKey): string
+	{
+		if ($configuredModel !== Settings::MODEL_LATEST) {
+			return $configuredModel;
+		}
+
+		try {
+			$response = $client->get('https://api.openai.com/v1/models', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $apiKey,
+				],
+			]);
+			$data = json_decode((string) $response->getBody(), true);
+			$models = array_values(array_filter(
+				array_map(static fn(array $model): ?string => $model['id'] ?? null, $data['data'] ?? []),
+				static fn(?string $model): bool => $model !== null && Settings::isSupportedChatGptModel($model)
+			));
+
+			usort($models, [$this, 'compareChatGptModels']);
+
+			if (!empty($models)) {
+				return $models[0];
+			}
+		} catch (\Throwable $e) {
+			Craft::warning('ImageQualityChecker: Could not resolve latest OpenAI model: ' . $e->getMessage(), __METHOD__);
+		}
+
+		return 'gpt-4o';
+	}
+
+	private function compareChatGptModels(string $modelA, string $modelB): int
+	{
+		return $this->modelSortScore($modelB) <=> $this->modelSortScore($modelA);
+	}
+
+	private function modelSortScore(string $model): int
+	{
+		if (preg_match('/^gpt-(\d+)(?:\.(\d+))?/', $model, $matches)) {
+			$major = (int) $matches[1];
+			$minor = (int) ($matches[2] ?? 0);
+			$sizePenalty = str_contains($model, 'nano') ? 20 : (str_contains($model, 'mini') ? 10 : 0);
+
+			return ($major * 1000) + ($minor * 10) - $sizePenalty;
+		}
+
+		if (str_starts_with($model, 'gpt-4o')) {
+			return 4000;
+		}
+
+		return 0;
 	}
 
 	/**
