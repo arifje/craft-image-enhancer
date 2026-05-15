@@ -68,22 +68,23 @@ class AnalyzeImageJob extends BaseJob
 		$client = Craft::createGuzzleClient();
 		$model = $this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey);
 		$mime = $asset->mimeType;
+		$requestJson = [
+			'model' => $model,
+			'messages' => [[
+				'role' => 'user',
+				'content' => [
+					['type' => 'text', 'text' => $settings->chatGptPrompt . '. Return a JSON object without any other data, markup or styling. Example: {"score": X, "reason": "..."}. Translate the value of reason to ' . $settings->chatGptResultLanguage . '.'],
+					['type' => 'image_url', 'image_url' => ['url' => 'data:' . $mime . ';base64,' . $imageBase64]],
+				]
+			]],
+			'max_completion_tokens' => 500,
+		];
 		$response = $client->post('https://api.openai.com/v1/chat/completions', [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $apiKey,
 				'Content-Type'  => 'application/json',
 			],
-			'json' => [
-				'model' => $model,
-				'messages' => [[
-					'role' => 'user',
-					'content' => [
-						['type' => 'text', 'text' => $settings->chatGptPrompt . '. Return a JSON object without any other data, markup or styling. Example: {"score": X, "reason": "..."}. Translate the value of reason to ' . $settings->chatGptResultLanguage . '.'],
-						['type' => 'image_url', 'image_url' => ['url' => 'data:' . $mime . ';base64,' . $imageBase64]],
-					]
-				]],
-				'max_tokens' => 500,
-			],
+			'json' => $requestJson,
 		]);
 
 		$json = json_decode((string) $response->getBody(), true);
