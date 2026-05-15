@@ -74,6 +74,7 @@ class ImageQualityChecker extends Plugin
 			'plugin' => $this,
 			'settings' => $this->getSettings(),
 			'chatGptModelOptions' => $this->getChatGptModelOptions(),
+			'imageEnhancementModeOptions' => Settings::imageEnhancementModeOptions(),
 		]);
 	}
 
@@ -123,6 +124,7 @@ class ImageQualityChecker extends Plugin
 				$e->variables["tabs"] = [
 					["label" => "ChatGPT", "url" => "#settings-tab-chatgpt"],
 					["label" => "Notifications", "url" => "#settings-tab-notifications"],									
+					["label" => "Enhancement", "url" => "#settings-tab-enhancement"],
 					["label" => "Volumes", "url" => "#settings-tab-volumes"],
 				];
 			}

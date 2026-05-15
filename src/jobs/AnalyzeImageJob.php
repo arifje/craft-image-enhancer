@@ -12,6 +12,7 @@ use craft\elements\Entry;
 use craft\db\Query;
 use craft\db\Table;
 use GuzzleHttp\ClientInterface;
+use Imagick;
 
 class AnalyzeImageJob extends BaseJob
 {
@@ -138,11 +139,142 @@ class AnalyzeImageJob extends BaseJob
 			'reason' => $reason,
 		];
 		
-		// Send notification if score of below treshhold
-		if($score && $score <= $settings->notificationThreshold) {
+		// Send notification if score is below threshold
+		if($scoreNum > 0 && $scoreNum <= $settings->notificationThreshold) {
+			$this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey);
 			$this->sendSlackNotification($data);
 			$this->sendEmailNotification($data);
 		} 
+	}
+
+	private function enhanceImageIfEnabled(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): void
+	{
+		if ($settings->imageEnhancementMode === Settings::ENHANCEMENT_DISABLED) {
+			return;
+		}
+
+		if ($settings->imageEnhancementMode === Settings::ENHANCEMENT_SAFE) {
+			$this->safeEnhanceImage($settings, $asset, $localPath);
+			return;
+		}
+
+		if ($settings->imageEnhancementMode === Settings::ENHANCEMENT_CREATIVE) {
+			$this->creativeEnhanceImage($client, $settings, $asset, $localPath, $apiKey);
+		}
+	}
+
+	private function safeEnhanceImage(Settings $settings, Asset $asset, string $localPath): void
+	{
+		if (!class_exists(Imagick::class)) {
+			Craft::warning('ImageQualityChecker: Imagick is required for safe image enhancement.', __METHOD__);
+			return;
+		}
+
+		try {
+			$image = new Imagick($localPath);
+			$image->autoOrient();
+			$image->enhanceImage();
+			$image->unsharpMaskImage(0.7, 0.6, 1.0, 0.05);
+
+			$maxWidth = max(1, $settings->safeEnhancementMaxWidth);
+			if ($image->getImageWidth() < $maxWidth) {
+				$image->resizeImage($maxWidth, 0, Imagick::FILTER_LANCZOS, 1);
+			}
+
+			if (in_array($asset->mimeType, ['image/jpeg', 'image/jpg'], true)) {
+				$image->setImageCompression(Imagick::COMPRESSION_JPEG);
+				$image->setImageCompressionQuality(min(100, max(1, $settings->safeEnhancementJpegQuality)));
+				$image->setImageFormat('jpeg');
+			} elseif ($asset->mimeType === 'image/png') {
+				$image->setImageFormat('png');
+			}
+
+			$image->stripImage();
+			$tempPath = $this->getTempReplacementPath($asset);
+			$image->writeImage($tempPath);
+			$image->clear();
+			$image->destroy();
+
+			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
+			@unlink($tempPath);
+		} catch (\Throwable $e) {
+			Craft::error('ImageQualityChecker: Safe image enhancement failed: ' . $e->getMessage(), __METHOD__);
+		}
+	}
+
+	private function creativeEnhanceImage(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): void
+	{
+		$handle = fopen($localPath, 'rb');
+
+		if ($handle === false) {
+			Craft::warning('ImageQualityChecker: Could not open image for AI enhancement.', __METHOD__);
+			return;
+		}
+
+		try {
+			$response = $client->post('https://api.openai.com/v1/images/edits', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $apiKey,
+				],
+				'multipart' => [
+					[
+						'name' => 'model',
+						'contents' => 'gpt-image-1',
+					],
+					[
+						'name' => 'image',
+						'contents' => $handle,
+						'filename' => $asset->filename,
+					],
+					[
+						'name' => 'prompt',
+						'contents' => $settings->creativeEnhancementPrompt,
+					],
+					[
+						'name' => 'size',
+						'contents' => 'auto',
+					],
+					[
+						'name' => 'quality',
+						'contents' => 'auto',
+					],
+					[
+						'name' => 'output_format',
+						'contents' => $asset->mimeType === 'image/png' ? 'png' : 'jpeg',
+					],
+				],
+			]);
+			$data = json_decode((string) $response->getBody(), true);
+			$imageData = $data['data'][0]['b64_json'] ?? null;
+
+			if (!$imageData) {
+				Craft::warning('ImageQualityChecker: AI image enhancement returned no image data.', __METHOD__);
+				return;
+			}
+
+			$tempPath = $this->getTempReplacementPath($asset);
+			file_put_contents($tempPath, base64_decode($imageData));
+			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
+			@unlink($tempPath);
+		} catch (\Throwable $e) {
+			Craft::error('ImageQualityChecker: AI image enhancement failed: ' . $e->getMessage(), __METHOD__);
+		} finally {
+			fclose($handle);
+		}
+	}
+
+	private function getTempReplacementPath(Asset $asset): string
+	{
+		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
+		$tempPath = tempnam(sys_get_temp_dir(), 'image-quality-checker-');
+
+		if (!$extension) {
+			return $tempPath;
+		}
+
+		@unlink($tempPath);
+
+		return $tempPath . '.' . $extension;
 	}
 
 	/**

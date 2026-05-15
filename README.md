@@ -29,6 +29,16 @@ When **Latest available model** is selected, the plugin fetches the available Op
 
 Only the OpenAI API key is required to run the analysis. Slack and email can be configured independently.
 
+### Enhancement
+
+Enhancement runs only when an image score is below the notification threshold.
+
+- **Disabled**: Analyze and notify only.
+- **Safe optimization**: Replaces the original file with a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
+- **AI enhancement / replacement**: Replaces the original file with an OpenAI-generated edit that follows the configured AI enhancement prompt. This can produce stronger visual improvements, but may make more noticeable changes than safe optimization.
+
+Safe optimization requires the PHP Imagick extension. AI enhancement requires an OpenAI API key with access to image editing.
+
 ### Asset Volumes
 
 Select the asset volumes that should be analyzed. Images uploaded to other volumes are skipped.
@@ -38,13 +48,15 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 1. Enter an OpenAI API key.
 2. Choose a model or keep **Latest available model** selected.
 3. Select the asset volumes that should be checked.
-4. Configure Slack and/or email notifications if needed.
-5. Upload a JPEG or PNG image asset to a selected volume.
+4. Choose whether low-scoring images should be enhanced and replaced.
+5. Configure Slack and/or email notifications if needed.
+6. Upload a JPEG or PNG image asset to a selected volume.
 
-The plugin queues an analysis job shortly after upload. If the returned score is below the configured threshold, enabled notifications are sent.
+The plugin queues an analysis job shortly after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
 
 ## Current Limitations
 
 - Only newly uploaded image assets are analyzed.
 - The current file lookup supports local JPEG and PNG files.
 - Remote filesystems may need additional handling before their assets can be analyzed.
+- AI enhancement can alter image details more than local safe optimization, depending on the configured prompt and model output.

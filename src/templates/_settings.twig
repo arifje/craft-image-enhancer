@@ -119,6 +119,48 @@
 
 </div>
 
+<div id="tab-enhancement" class="hidden">
+
+	<h1>Enhancement</h1>
+
+	{{ forms.selectField({
+		label: 'Enhancement mode',
+		name: 'imageEnhancementMode',
+		id: 'imageEnhancementMode',
+		instructions: 'When an image score is below the notification threshold, optionally replace the original file with an enhanced version.',
+		value: settings.imageEnhancementMode,
+		options: imageEnhancementModeOptions,
+	}) }}
+
+	{{ forms.textField({
+		label: 'Safe optimization max width',
+		name: 'safeEnhancementMaxWidth',
+		id: 'safeEnhancementMaxWidth',
+		instructions: 'Safe optimization can upscale smaller images up to this width while preserving the original aspect ratio.',
+		value: settings.safeEnhancementMaxWidth,
+		placeholder: '2400',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Safe JPEG quality',
+		name: 'safeEnhancementJpegQuality',
+		id: 'safeEnhancementJpegQuality',
+		instructions: 'JPEG compression quality used when safe optimization rewrites a JPEG file.',
+		value: settings.safeEnhancementJpegQuality,
+		placeholder: '90',
+	}) }}
+
+	{{ forms.textareaField({
+		label: 'AI enhancement prompt',
+		name: 'creativeEnhancementPrompt',
+		id: 'creativeEnhancementPrompt',
+		rows: 4,
+		instructions: 'Used for AI enhancement / replacement mode. Keep this strict if context must be preserved.',
+		value: settings.creativeEnhancementPrompt,
+	}) }}
+
+</div>
+
 <div id="tab-volumes"  class="hidden">
 	
 	<h1>Asset Volumes</h1>

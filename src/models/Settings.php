@@ -11,6 +11,9 @@ use craft\base\Model;
 class Settings extends Model
 {
 	public const MODEL_LATEST = 'latest';
+	public const ENHANCEMENT_DISABLED = 'disabled';
+	public const ENHANCEMENT_SAFE = 'safe';
+	public const ENHANCEMENT_CREATIVE = 'creative';
 
 	// ChatGPT
 	public string $chatGptApiKey = '';
@@ -33,10 +36,17 @@ class Settings extends Model
 	// Enabled volume handles
 	public array $allowedAssetFieldHandles = [];
 
+	// Image enhancement
+	public string $imageEnhancementMode = self::ENHANCEMENT_DISABLED;
+	public int $safeEnhancementMaxWidth = 2400;
+	public int $safeEnhancementJpegQuality = 90;
+	public string $creativeEnhancementPrompt = 'Improve the technical quality of this image. Increase perceived sharpness, reduce noise, improve clarity, and preserve the same subject, composition, context, people, objects, text, and scene.';
+
 	public function rules(): array
 	{
 		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel'], 'string'],
+			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'creativeEnhancementPrompt'], 'string'],
+			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['allowedAssetFieldHandles'], 'safe'],
 		];
 	}
@@ -70,6 +80,15 @@ class Settings extends Model
 		}
 
 		return true;
+	}
+
+	public static function imageEnhancementModeOptions(): array
+	{
+		return [
+			['label' => 'Disabled', 'value' => self::ENHANCEMENT_DISABLED],
+			['label' => 'Safe optimization', 'value' => self::ENHANCEMENT_SAFE],
+			['label' => 'AI enhancement / replacement', 'value' => self::ENHANCEMENT_CREATIVE],
+		];
 	}
 	
 }
