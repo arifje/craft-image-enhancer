@@ -35,10 +35,10 @@ When enhancement is enabled, notifications include whether the original image wa
 Enhancement runs only when an image score is below the notification threshold.
 
 - **Disabled**: Analyze and notify only.
-- **Safe optimization**: Replaces the original file with a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
-- **AI enhancement / replacement**: Replaces the original file with an OpenAI-generated edit that follows the configured AI enhancement prompt. This can produce stronger visual improvements, but may make more noticeable changes than safe optimization.
+- **Imagick safe optimization**: Replaces the original file with a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
+- **OpenAI / ChatGPT AI enhancement**: Replaces the original file with an OpenAI-generated edit that follows the configured AI enhancement prompt. This can produce stronger visual improvements, but may make more noticeable changes than Imagick safe optimization.
 
-Safe optimization requires the PHP Imagick extension. AI enhancement requires an OpenAI API key with access to image editing.
+Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing.
 
 ### Asset Volumes
 
@@ -60,4 +60,4 @@ The plugin queues an analysis job shortly after upload. If the returned score is
 - Only newly uploaded image assets are analyzed.
 - The current file lookup supports local JPEG and PNG files.
 - Remote filesystems may need additional handling before their assets can be analyzed.
-- AI enhancement can alter image details more than local safe optimization, depending on the configured prompt and model output.
+- OpenAI / ChatGPT AI enhancement can alter image details more than Imagick safe optimization, depending on the configured prompt and model output.

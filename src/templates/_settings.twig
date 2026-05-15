@@ -127,35 +127,35 @@
 		label: 'Enhancement mode',
 		name: 'imageEnhancementMode',
 		id: 'imageEnhancementMode',
-		instructions: 'When an image score is below the notification threshold, optionally replace the original file with an enhanced version.',
+		instructions: 'When an image score is below the notification threshold, choose whether replacement is handled by Imagick or OpenAI/ChatGPT AI.',
 		value: settings.imageEnhancementMode,
 		options: imageEnhancementModeOptions,
 	}) }}
 
 	{{ forms.textField({
-		label: 'Safe optimization max width',
+		label: 'Imagick safe optimization max width',
 		name: 'safeEnhancementMaxWidth',
 		id: 'safeEnhancementMaxWidth',
-		instructions: 'Safe optimization can upscale smaller images up to this width while preserving the original aspect ratio.',
+		instructions: 'Imagick safe optimization can upscale smaller images up to this width while preserving the original aspect ratio.',
 		value: settings.safeEnhancementMaxWidth,
 		placeholder: '2400',
 	}) }}
 
 	{{ forms.textField({
-		label: 'Safe JPEG quality',
+		label: 'Imagick JPEG quality',
 		name: 'safeEnhancementJpegQuality',
 		id: 'safeEnhancementJpegQuality',
-		instructions: 'JPEG compression quality used when safe optimization rewrites a JPEG file.',
+		instructions: 'JPEG compression quality used when Imagick rewrites a JPEG file.',
 		value: settings.safeEnhancementJpegQuality,
 		placeholder: '90',
 	}) }}
 
 	{{ forms.textareaField({
-		label: 'AI enhancement prompt',
+		label: 'OpenAI / ChatGPT AI enhancement prompt',
 		name: 'creativeEnhancementPrompt',
 		id: 'creativeEnhancementPrompt',
 		rows: 4,
-		instructions: 'Used for AI enhancement / replacement mode. Keep this strict if context must be preserved.',
+		instructions: 'Used for OpenAI/ChatGPT AI enhancement mode. Keep this strict if context must be preserved.',
 		value: settings.creativeEnhancementPrompt,
 	}) }}
 

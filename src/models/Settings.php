@@ -86,8 +86,8 @@ class Settings extends Model
 	{
 		return [
 			['label' => 'Disabled', 'value' => self::ENHANCEMENT_DISABLED],
-			['label' => 'Safe optimization', 'value' => self::ENHANCEMENT_SAFE],
-			['label' => 'AI enhancement / replacement', 'value' => self::ENHANCEMENT_CREATIVE],
+			['label' => 'Imagick safe optimization', 'value' => self::ENHANCEMENT_SAFE],
+			['label' => 'OpenAI / ChatGPT AI enhancement', 'value' => self::ENHANCEMENT_CREATIVE],
 		];
 	}
 	
