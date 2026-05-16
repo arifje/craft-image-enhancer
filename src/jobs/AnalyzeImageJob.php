@@ -28,6 +28,7 @@ class AnalyzeImageJob extends BaseJob
 	public function execute($queue): void
 	{
 		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$this->updateProgress($queue, 0.05, 'Loading asset');
 		$this->debugLog($settings, 'Job started', [
 			'assetId' => $this->assetId,
 			'process' => $this->getProcessOwnershipContext(),
@@ -46,6 +47,7 @@ class AnalyzeImageJob extends BaseJob
 				'assetId' => $this->assetId,
 			]);
 			Craft::info("ImageQualityChecker/AnalyzeImageJob: Asset not found or not an image.", __METHOD__);
+			$this->updateProgress($queue, 1, 'Skipped: asset not found');
 			return;
 		}
 		$this->debugLog($settings, 'Loaded asset', [
@@ -64,6 +66,7 @@ class AnalyzeImageJob extends BaseJob
 				'volumeHandle' => $volumeHandle,
 			]);
 			Craft::info("ImageQualityChecker/AnalyzeImageJob: No asset fields selected in settings — skipping.", __METHOD__);
+			$this->updateProgress($queue, 1, 'Skipped: no volumes selected');
 			return;
 		} 
 		
@@ -73,6 +76,7 @@ class AnalyzeImageJob extends BaseJob
 				'allowedHandles' => $allowedHandles,
 			]);
 			Craft::info("ImageQualityChecker/AnalyzeImageJob: Asset uploaded via non-selected volume '{$volumeHandle}' — skipping.", __METHOD__);
+			$this->updateProgress($queue, 1, 'Skipped: volume not selected');
 			return;
 		} 
 		
@@ -84,6 +88,7 @@ class AnalyzeImageJob extends BaseJob
 				'localPath' => $localPath,
 			]);
 			Craft::warning("ImageQualityChecker/AnalyzeImageJob: File not found for asset ID {$asset->id}", __METHOD__);
+			$this->updateProgress($queue, 1, 'Skipped: file not found');
 			return;
 		}
 		$this->debugLog($settings, 'Resolved local asset file', [
@@ -99,6 +104,7 @@ class AnalyzeImageJob extends BaseJob
 		if (!$apiKey) {
 			$this->debugLog($settings, 'Skipping analysis because OpenAI API key is missing');
 			Craft::warning("AnalyzeImageJob: API key missing in settings.", __METHOD__);
+			$this->updateProgress($queue, 1, 'Skipped: missing OpenAI API key');
 			return;
 		}
 
@@ -114,7 +120,9 @@ class AnalyzeImageJob extends BaseJob
 			$settings->imageEnhancementMode !== Settings::ENHANCEMENT_DISABLED &&
 			$settings->imageEnhancementTrigger === Settings::ENHANCEMENT_TRIGGER_ALWAYS
 		) {
+			$this->updateProgress($queue, 0.15, 'Skipping quality check');
 			$this->debugLog($settings, 'Always-enhance trigger enabled; skipping quality analysis');
+			$this->updateProgress($queue, 0.45, 'Starting enhancement');
 			$data = [
 				'scoreNum' => 'Niet gecontroleerd',
 				'scoreEmoji' => '✨',
@@ -126,14 +134,18 @@ class AnalyzeImageJob extends BaseJob
 				'reason' => 'Quality check skipped because always enhance is enabled.',
 				'enhancement' => $this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey),
 			];
+			$this->updateProgress($queue, 0.80, 'Replacement complete');
 			$this->debugLog($settings, 'Enhancement result', $data['enhancement']);
+			$this->updateProgress($queue, 0.90, 'Sending notifications');
 			$this->sendSlackNotification($data);
 			$this->sendEmailNotification($data);
+			$this->updateProgress($queue, 1, 'Done');
 			return;
 		}
 
 		$model = $this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey);
 		$mime = $asset->mimeType;
+		$this->updateProgress($queue, 0.15, 'Sending quality check');
 		$this->debugLog($settings, 'Sending image to OpenAI for analysis', [
 			'configuredModel' => $settings->chatGptModel,
 			'resolvedModel' => $model,
@@ -164,6 +176,7 @@ class AnalyzeImageJob extends BaseJob
 				'resolvedModel' => $model,
 			]);
 			Craft::error('ImageQualityChecker: OpenAI analysis request failed: ' . $e->getMessage(), __METHOD__);
+			$this->updateProgress($queue, 1, 'Failed: quality check request failed');
 			return;
 		}
 
@@ -175,6 +188,7 @@ class AnalyzeImageJob extends BaseJob
 				'responseKeys' => is_array($json) ? array_keys($json) : [],
 			]);
 			Craft::error("AnalyzeImageJob: No response from ChatGPT.", __METHOD__);
+			$this->updateProgress($queue, 1, 'Failed: no quality check response');
 			return;
 		}
 
@@ -191,6 +205,7 @@ class AnalyzeImageJob extends BaseJob
 			'willNotify' => (int) $score > 0 && (int) $score <= $settings->notificationThreshold,
 			'reasonPreview' => substr((string) $reason, 0, 160),
 		]);
+		$this->updateProgress($queue, 0.35, 'Quality check complete');
 
 		$scoreEmoji = '❓';
 		$scoreLabel = 'Onbekend';
@@ -227,15 +242,20 @@ class AnalyzeImageJob extends BaseJob
 				'scoreNum' => $scoreNum,
 				'threshold' => $settings->notificationThreshold,
 			]);
+			$this->updateProgress($queue, 0.45, 'Starting enhancement');
 			$data['enhancement'] = $this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey);
+			$this->updateProgress($queue, 0.80, 'Replacement complete');
 			$this->debugLog($settings, 'Enhancement result', $data['enhancement']);
+			$this->updateProgress($queue, 0.90, 'Sending notifications');
 			$this->sendSlackNotification($data);
 			$this->sendEmailNotification($data);
+			$this->updateProgress($queue, 1, 'Done');
 		} else {
 			$this->debugLog($settings, 'Score did not reach threshold; no enhancement or notification sent', [
 				'scoreNum' => $scoreNum,
 				'threshold' => $settings->notificationThreshold,
 			]);
+			$this->updateProgress($queue, 1, 'Done: score above threshold');
 		} 
 	}
 
@@ -591,6 +611,11 @@ class AnalyzeImageJob extends BaseJob
 		}
 
 		Craft::info($line, __METHOD__);
+	}
+
+	private function updateProgress($queue, float $progress, string $label): void
+	{
+		$this->setProgress($queue, $progress, $label);
 	}
 
 	/**

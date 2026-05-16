@@ -58,6 +58,7 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 6. Upload a JPEG or PNG image asset to a selected volume.
 
 The plugin queues an analysis job shortly after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
+The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications.
 
 To troubleshoot a queue run, enable debug logging and watch Craft's web log:
 
