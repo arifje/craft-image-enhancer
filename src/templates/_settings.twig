@@ -73,7 +73,7 @@
 		label: 'Slack Bot Token',
 		name: 'slackBotToken',
 		id: 'slackBotToken',
-		instructions: 'Enter your bot Token (see https://api.slack.com/apps, Oauth & permissions).',
+		instructions: 'Enter your bot Token (see https://api.slack.com/apps, Oauth & permissions). Used when no webhook URL is configured.',
 		value: settings.slackBotToken,
 		placeholder: 'xoxb-xxx',
 	}) }}
@@ -82,7 +82,7 @@
 		label: 'Slack Webhook URL',
 		name: 'slackWebhookUrl',
 		id: 'slackWebhookUrl',
-		instructions: 'A Slack Webhook URL to receive notifications about image quality.',
+		instructions: 'A Slack Webhook URL to receive notifications about image quality. If set, this is used before the bot token method.',
 		value: settings.slackWebhookUrl,
 		placeholder: 'https://hooks.slack.com/services/...',
 	}) }}
@@ -115,6 +115,18 @@
 		instructions: 'Add the email address of the recipient besides the author that uploaded the image.',
 		value: settings.emailNotificationRecipient,
 		placeholder: 'user@email.com'
+	}) }}
+
+	<hr />
+
+	<h1>Debug</h1>
+
+	{{ forms.lightswitchField({
+		label: "Enable debug logging"|t,
+		id: 'debugLogging',
+		name: 'debugLogging',
+		on: settings.debugLogging,
+		instructions: "Writes ImageQualityChecker DEBUG lines to Craft's web.log for troubleshooting queue jobs.",
 	}) }}
 
 </div>

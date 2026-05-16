@@ -28,23 +28,48 @@ class AnalyzeImageJob extends BaseJob
 	public function execute($queue): void
 	{
 		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$this->debugLog($settings, 'Job started', [
+			'assetId' => $this->assetId,
+			'enhancementMode' => $settings->imageEnhancementMode,
+			'slackNotification' => $settings->slackNotification,
+			'hasSlackWebhook' => (bool) $settings->slackWebhookUrl,
+			'hasSlackBotToken' => (bool) $settings->slackBotToken,
+			'slackChannel' => $settings->slackChannel,
+			'threshold' => $settings->notificationThreshold,
+		]);
 		
 		$asset = Craft::$app->assets->getAssetById($this->assetId);
 		if (!$asset || $asset->kind !== 'image') {
+			$this->debugLog($settings, 'Skipping asset because it was not found or is not an image', [
+				'assetId' => $this->assetId,
+			]);
 			Craft::info("ImageQualityChecker/AnalyzeImageJob: Asset not found or not an image.", __METHOD__);
 			return;
 		}
+		$this->debugLog($settings, 'Loaded asset', [
+			'assetId' => $asset->id,
+			'filename' => $asset->filename,
+			'kind' => $asset->kind,
+			'mimeType' => $asset->mimeType,
+		]);
 				
 		$volume = $asset->getVolume();
 		$volumeHandle = $volume->handle ?? null;		
 		$allowedHandles = $settings->allowedAssetFieldHandles;
 		
 		if (empty($allowedHandles)) {
+			$this->debugLog($settings, 'Skipping asset because no volumes are selected', [
+				'volumeHandle' => $volumeHandle,
+			]);
 			Craft::info("ImageQualityChecker/AnalyzeImageJob: No asset fields selected in settings — skipping.", __METHOD__);
 			return;
 		} 
 		
 		if (!in_array($volumeHandle, $allowedHandles, true)) {
+			$this->debugLog($settings, 'Skipping asset because volume is not selected', [
+				'volumeHandle' => $volumeHandle,
+				'allowedHandles' => $allowedHandles,
+			]);
 			Craft::info("ImageQualityChecker/AnalyzeImageJob: Asset uploaded via non-selected volume '{$volumeHandle}' — skipping.", __METHOD__);
 			return;
 		} 
@@ -52,15 +77,24 @@ class AnalyzeImageJob extends BaseJob
 		$localPath = $this->getFullAssetPathById($asset->id);
 		
 		if (!$localPath || !file_exists($localPath)) {
+			$this->debugLog($settings, 'Skipping asset because local path was not found', [
+				'assetId' => $asset->id,
+				'localPath' => $localPath,
+			]);
 			Craft::warning("ImageQualityChecker/AnalyzeImageJob: File not found for asset ID {$asset->id}", __METHOD__);
 			return;
 		}
+		$this->debugLog($settings, 'Resolved local asset file', [
+			'localPath' => $localPath,
+			'fileSize' => filesize($localPath),
+		]);
 		
 		$imageBase64 = base64_encode(file_get_contents($localPath));
 		
 		$apiKey = $settings->chatGptApiKey;
 
 		if (!$apiKey) {
+			$this->debugLog($settings, 'Skipping analysis because OpenAI API key is missing');
 			Craft::warning("AnalyzeImageJob: API key missing in settings.", __METHOD__);
 			return;
 		}
@@ -68,6 +102,11 @@ class AnalyzeImageJob extends BaseJob
 		$client = Craft::createGuzzleClient();
 		$model = $this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey);
 		$mime = $asset->mimeType;
+		$this->debugLog($settings, 'Sending image to OpenAI for analysis', [
+			'configuredModel' => $settings->chatGptModel,
+			'resolvedModel' => $model,
+			'mimeType' => $mime,
+		]);
 		$requestJson = [
 			'model' => $model,
 			'messages' => [[
@@ -79,18 +118,30 @@ class AnalyzeImageJob extends BaseJob
 			]],
 			'max_completion_tokens' => 500,
 		];
-		$response = $client->post('https://api.openai.com/v1/chat/completions', [
-			'headers' => [
-				'Authorization' => 'Bearer ' . $apiKey,
-				'Content-Type'  => 'application/json',
-			],
-			'json' => $requestJson,
-		]);
+		try {
+			$response = $client->post('https://api.openai.com/v1/chat/completions', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $apiKey,
+					'Content-Type'  => 'application/json',
+				],
+				'json' => $requestJson,
+			]);
+		} catch (\Throwable $e) {
+			$this->debugLog($settings, 'OpenAI analysis request failed', [
+				'error' => $e->getMessage(),
+				'resolvedModel' => $model,
+			]);
+			Craft::error('ImageQualityChecker: OpenAI analysis request failed: ' . $e->getMessage(), __METHOD__);
+			return;
+		}
 
 		$json = json_decode((string) $response->getBody(), true);
 		$content = $json['choices'][0]['message']['content'] ?? null;
 
 		if (!$content) {
+			$this->debugLog($settings, 'OpenAI analysis returned no message content', [
+				'responseKeys' => is_array($json) ? array_keys($json) : [],
+			]);
 			Craft::error("AnalyzeImageJob: No response from ChatGPT.", __METHOD__);
 			return;
 		}
@@ -101,6 +152,13 @@ class AnalyzeImageJob extends BaseJob
 
 		$score = $data['score'] ?? 'Onbekend';
 		$reason = $data['reason'] ?? $content;
+		$this->debugLog($settings, 'Parsed OpenAI analysis result', [
+			'score' => $score,
+			'scoreNum' => (int) $score,
+			'threshold' => $settings->notificationThreshold,
+			'willNotify' => (int) $score > 0 && (int) $score <= $settings->notificationThreshold,
+			'reasonPreview' => substr((string) $reason, 0, 160),
+		]);
 
 		$imageUrl = $asset->getUrl();
 		$relatedEntry = $this->getParentEntryForAsset($asset->id);
@@ -142,15 +200,26 @@ class AnalyzeImageJob extends BaseJob
 		
 		// Send notification if score is below threshold
 		if($scoreNum > 0 && $scoreNum <= $settings->notificationThreshold) {
+			$this->debugLog($settings, 'Score reached threshold; running enhancement and notifications', [
+				'scoreNum' => $scoreNum,
+				'threshold' => $settings->notificationThreshold,
+			]);
 			$data['enhancement'] = $this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey);
+			$this->debugLog($settings, 'Enhancement result', $data['enhancement']);
 			$this->sendSlackNotification($data);
 			$this->sendEmailNotification($data);
+		} else {
+			$this->debugLog($settings, 'Score did not reach threshold; no enhancement or notification sent', [
+				'scoreNum' => $scoreNum,
+				'threshold' => $settings->notificationThreshold,
+			]);
 		} 
 	}
 
 	private function enhanceImageIfEnabled(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): array
 	{
 		if ($settings->imageEnhancementMode === Settings::ENHANCEMENT_DISABLED) {
+			$this->debugLog($settings, 'Enhancement disabled');
 			return [
 				'label' => 'Niet vervangen',
 				'status' => 'Enhancement staat uit.',
@@ -174,6 +243,7 @@ class AnalyzeImageJob extends BaseJob
 	private function safeEnhanceImage(Settings $settings, Asset $asset, string $localPath): array
 	{
 		if (!class_exists(Imagick::class)) {
+			$this->debugLog($settings, 'Imagick enhancement skipped because Imagick is not available');
 			Craft::warning('ImageQualityChecker: Imagick is required for safe image enhancement.', __METHOD__);
 			return [
 				'label' => 'Niet vervangen',
@@ -182,7 +252,14 @@ class AnalyzeImageJob extends BaseJob
 		}
 
 		try {
+			$this->debugLog($settings, 'Starting Imagick enhancement', [
+				'assetId' => $asset->id,
+				'localPath' => $localPath,
+				'originalFileSize' => file_exists($localPath) ? filesize($localPath) : null,
+			]);
 			$image = new Imagick($localPath);
+			$originalWidth = $image->getImageWidth();
+			$originalHeight = $image->getImageHeight();
 			$image->autoOrient();
 			$image->enhanceImage();
 			$image->unsharpMaskImage(0.7, 0.6, 1.0, 0.05);
@@ -203,17 +280,33 @@ class AnalyzeImageJob extends BaseJob
 			$image->stripImage();
 			$tempPath = $this->getTempReplacementPath($asset);
 			$image->writeImage($tempPath);
+			$this->debugLog($settings, 'Imagick wrote replacement temp file', [
+				'tempPath' => $tempPath,
+				'tempFileExists' => file_exists($tempPath),
+				'tempFileSize' => file_exists($tempPath) ? filesize($tempPath) : null,
+				'originalWidth' => $originalWidth,
+				'originalHeight' => $originalHeight,
+				'newWidth' => $image->getImageWidth(),
+				'newHeight' => $image->getImageHeight(),
+			]);
 			$image->clear();
 			$image->destroy();
 
 			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			@unlink($tempPath);
+			$this->debugLog($settings, 'Imagick replacement completed', [
+				'assetId' => $asset->id,
+				'filename' => $asset->filename,
+			]);
 
 			return [
 				'label' => 'Vervangen met safe optimization',
 				'status' => 'Origineel bestand is vervangen door een lokaal geoptimaliseerde versie.',
 			];
 		} catch (\Throwable $e) {
+			$this->debugLog($settings, 'Imagick enhancement failed', [
+				'error' => $e->getMessage(),
+			]);
 			Craft::error('ImageQualityChecker: Safe image enhancement failed: ' . $e->getMessage(), __METHOD__);
 
 			return [
@@ -236,6 +329,12 @@ class AnalyzeImageJob extends BaseJob
 		}
 
 		try {
+			$this->debugLog($settings, 'Starting OpenAI image enhancement', [
+				'assetId' => $asset->id,
+				'filename' => $asset->filename,
+				'localPath' => $localPath,
+				'fileSize' => file_exists($localPath) ? filesize($localPath) : null,
+			]);
 			$response = $client->post('https://api.openai.com/v1/images/edits', [
 				'headers' => [
 					'Authorization' => 'Bearer ' . $apiKey,
@@ -272,6 +371,9 @@ class AnalyzeImageJob extends BaseJob
 			$imageData = $data['data'][0]['b64_json'] ?? null;
 
 			if (!$imageData) {
+				$this->debugLog($settings, 'OpenAI image enhancement returned no image data', [
+					'responseKeys' => is_array($data) ? array_keys($data) : [],
+				]);
 				Craft::warning('ImageQualityChecker: AI image enhancement returned no image data.', __METHOD__);
 				return [
 					'label' => 'Niet vervangen',
@@ -281,14 +383,26 @@ class AnalyzeImageJob extends BaseJob
 
 			$tempPath = $this->getTempReplacementPath($asset);
 			file_put_contents($tempPath, base64_decode($imageData));
+			$this->debugLog($settings, 'OpenAI image enhancement wrote replacement temp file', [
+				'tempPath' => $tempPath,
+				'tempFileExists' => file_exists($tempPath),
+				'tempFileSize' => file_exists($tempPath) ? filesize($tempPath) : null,
+			]);
 			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			@unlink($tempPath);
+			$this->debugLog($settings, 'OpenAI image replacement completed', [
+				'assetId' => $asset->id,
+				'filename' => $asset->filename,
+			]);
 
 			return [
 				'label' => 'Vervangen met AI enhancement',
 				'status' => 'Origineel bestand is vervangen door een OpenAI-geoptimaliseerde versie.',
 			];
 		} catch (\Throwable $e) {
+			$this->debugLog($settings, 'OpenAI image enhancement failed', [
+				'error' => $e->getMessage(),
+			]);
 			Craft::error('ImageQualityChecker: AI image enhancement failed: ' . $e->getMessage(), __METHOD__);
 
 			return [
@@ -314,6 +428,21 @@ class AnalyzeImageJob extends BaseJob
 		return $tempPath . '.' . $extension;
 	}
 
+	private function debugLog(Settings $settings, string $message, array $context = []): void
+	{
+		if (!$settings->debugLogging) {
+			return;
+		}
+
+		$line = 'ImageQualityChecker DEBUG: ' . $message;
+
+		if (!empty($context)) {
+			$line .= ' ' . json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+		}
+
+		Craft::info($line, __METHOD__);
+	}
+
 	/**
 	 * Sends a Slack message with the image quality analysis results.
 	 *
@@ -323,7 +452,8 @@ class AnalyzeImageJob extends BaseJob
 	{
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 	
-		if (!$settings->slackNotification || !$settings->slackBotToken || !$settings->slackChannel) {
+		if (!$settings->slackNotification) {
+			$this->debugLog($settings, 'Slack notification skipped because Slack notifications are disabled');
 			return;
 		}
 	
@@ -377,20 +507,63 @@ class AnalyzeImageJob extends BaseJob
 			]*/
 		];
 		$blocks = array_values(array_filter($blocks));
-	
-		Craft::createGuzzleClient()->post('https://slack.com/api/chat.postMessage', [
-			'headers' => [
-				'Authorization' => 'Bearer ' . $settings->slackBotToken,
-				'Content-Type' => 'application/json',
-			],
-			'json' => [
-				'channel' => $settings->slackChannel,
-				'text' => 'Beeldkwaliteit analyse',
-				'blocks' => $blocks,
-				'unfurl_links' => false,
-				'unfurl_media' => true,
-			],
-		]);
+
+		try {
+			$client = Craft::createGuzzleClient();
+
+			if ($settings->slackWebhookUrl) {
+				$this->debugLog($settings, 'Sending Slack notification via webhook');
+				$client->post($settings->slackWebhookUrl, [
+					'json' => [
+						'text' => 'Beeldkwaliteit analyse',
+						'blocks' => $blocks,
+						'unfurl_links' => false,
+						'unfurl_media' => true,
+					],
+				]);
+				$this->debugLog($settings, 'Slack webhook notification sent');
+				return;
+			}
+
+			if (!$settings->slackBotToken || !$settings->slackChannel) {
+				$this->debugLog($settings, 'Slack notification skipped because bot token or channel is missing', [
+					'hasSlackBotToken' => (bool) $settings->slackBotToken,
+					'slackChannel' => $settings->slackChannel,
+				]);
+				return;
+			}
+
+			$this->debugLog($settings, 'Sending Slack notification via bot token', [
+				'slackChannel' => $settings->slackChannel,
+			]);
+			$response = $client->post('https://slack.com/api/chat.postMessage', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $settings->slackBotToken,
+					'Content-Type' => 'application/json',
+				],
+				'json' => [
+					'channel' => $settings->slackChannel,
+					'text' => 'Beeldkwaliteit analyse',
+					'blocks' => $blocks,
+					'unfurl_links' => false,
+					'unfurl_media' => true,
+				],
+			]);
+			$responseData = json_decode((string) $response->getBody(), true);
+			if (($responseData['ok'] ?? true) === false) {
+				$this->debugLog($settings, 'Slack bot API returned an error', [
+					'error' => $responseData['error'] ?? null,
+				]);
+				Craft::warning('ImageQualityChecker: Slack API error: ' . ($responseData['error'] ?? 'unknown'), __METHOD__);
+				return;
+			}
+			$this->debugLog($settings, 'Slack bot notification sent');
+		} catch (\Throwable $e) {
+			$this->debugLog($settings, 'Slack notification failed', [
+				'error' => $e->getMessage(),
+			]);
+			Craft::error('ImageQualityChecker: Slack notification failed: ' . $e->getMessage(), __METHOD__);
+		}
 	}
 
 	/**
@@ -404,6 +577,7 @@ class AnalyzeImageJob extends BaseJob
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 	
 		if (!$settings->emailNotification) {
+			$this->debugLog($settings, 'Email notification skipped because email notifications are disabled');
 			return;
 		}
 	
@@ -412,6 +586,9 @@ class AnalyzeImageJob extends BaseJob
 		$authorEmail = $authorUser?->email ?? null;
 	
 		if (!$authorEmail) {
+			$this->debugLog($settings, 'Email notification skipped because no author email could be resolved', [
+				'author' => $author,
+			]);
 			Craft::warning("ImageQualityChecker: Auteur heeft geen geldig e-mailadres, e-mail wordt niet verzonden.", __METHOD__);
 			return;
 		}
@@ -438,7 +615,12 @@ class AnalyzeImageJob extends BaseJob
 			$mail->setCc($settings->emailNotificationRecipient);
 		}
 	
-		$mail->send();
+		$sent = $mail->send();
+		$this->debugLog($settings, 'Email notification send attempted', [
+			'authorEmail' => $authorEmail,
+			'cc' => $settings->emailNotificationRecipient,
+			'sent' => $sent,
+		]);
 	}
 
 	private function resolveChatGptModel(ClientInterface $client, string $configuredModel, string $apiKey): string

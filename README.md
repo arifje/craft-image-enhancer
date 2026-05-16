@@ -26,9 +26,11 @@ When **Latest available model** is selected, the plugin fetches the available Op
 - **Threshold**: Notifications are sent when the returned score is below this value.
 - **Slack**: Enable Slack notifications and configure a Slack bot token and channel.
 - **Email**: Enable email notifications to send the result to the author, with an optional CC recipient.
+- **Debug logging**: Writes `ImageQualityChecker DEBUG` lines to Craft's `web.log` while queue jobs run.
 
 Only the OpenAI API key is required to run the analysis. Slack and email can be configured independently.
 When enhancement is enabled, notifications include whether the original image was replaced and which enhancement mode was used.
+Slack notifications can be sent through a webhook URL or through a bot token and channel. If a webhook URL is configured, it is used first.
 
 ### Enhancement
 
@@ -54,6 +56,12 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 6. Upload a JPEG or PNG image asset to a selected volume.
 
 The plugin queues an analysis job shortly after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
+
+To troubleshoot a queue run, enable debug logging and watch Craft's web log:
+
+```bash
+tail -f storage/logs/web.log | grep 'ImageQualityChecker DEBUG'
+```
 
 ## Current Limitations
 

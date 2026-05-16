@@ -30,6 +30,9 @@ class Settings extends Model
 	// Email notification
 	public bool $emailNotification = false;
 	public string $emailNotificationRecipient = '';
+
+	// Debugging
+	public bool $debugLogging = false;
 	 
 	public int $notificationThreshold = 50;
 	
@@ -46,6 +49,7 @@ class Settings extends Model
 	{
 		return [
 			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'creativeEnhancementPrompt'], 'string'],
+			[['debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['allowedAssetFieldHandles'], 'safe'],
 		];
