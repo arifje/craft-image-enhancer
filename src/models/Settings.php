@@ -14,6 +14,8 @@ class Settings extends Model
 	public const ENHANCEMENT_DISABLED = 'disabled';
 	public const ENHANCEMENT_SAFE = 'safe';
 	public const ENHANCEMENT_CREATIVE = 'creative';
+	public const ENHANCEMENT_TRIGGER_THRESHOLD = 'threshold';
+	public const ENHANCEMENT_TRIGGER_ALWAYS = 'always';
 
 	// ChatGPT
 	public string $chatGptApiKey = '';
@@ -41,6 +43,7 @@ class Settings extends Model
 
 	// Image enhancement
 	public string $imageEnhancementMode = self::ENHANCEMENT_DISABLED;
+	public string $imageEnhancementTrigger = self::ENHANCEMENT_TRIGGER_THRESHOLD;
 	public int $safeEnhancementMaxWidth = 2400;
 	public int $safeEnhancementJpegQuality = 90;
 	public string $creativeEnhancementPrompt = 'Improve the technical quality of this image. Increase perceived sharpness, reduce noise, improve clarity, and preserve the same subject, composition, context, people, objects, text, and scene.';
@@ -48,7 +51,7 @@ class Settings extends Model
 	public function rules(): array
 	{
 		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'creativeEnhancementPrompt'], 'string'],
+			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'creativeEnhancementPrompt'], 'string'],
 			[['debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['allowedAssetFieldHandles'], 'safe'],
@@ -92,6 +95,14 @@ class Settings extends Model
 			['label' => 'Disabled', 'value' => self::ENHANCEMENT_DISABLED],
 			['label' => 'Imagick safe optimization', 'value' => self::ENHANCEMENT_SAFE],
 			['label' => 'OpenAI / ChatGPT AI enhancement', 'value' => self::ENHANCEMENT_CREATIVE],
+		];
+	}
+
+	public static function imageEnhancementTriggerOptions(): array
+	{
+		return [
+			['label' => 'Only when score is below threshold', 'value' => self::ENHANCEMENT_TRIGGER_THRESHOLD],
+			['label' => 'Always enhance and skip quality check', 'value' => self::ENHANCEMENT_TRIGGER_ALWAYS],
 		];
 	}
 	

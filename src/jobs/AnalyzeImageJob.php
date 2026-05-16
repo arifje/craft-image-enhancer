@@ -32,6 +32,7 @@ class AnalyzeImageJob extends BaseJob
 			'assetId' => $this->assetId,
 			'process' => $this->getProcessOwnershipContext(),
 			'enhancementMode' => $settings->imageEnhancementMode,
+			'enhancementTrigger' => $settings->imageEnhancementTrigger,
 			'slackNotification' => $settings->slackNotification,
 			'hasSlackWebhook' => (bool) $settings->slackWebhookUrl,
 			'hasSlackBotToken' => (bool) $settings->slackBotToken,
@@ -102,6 +103,35 @@ class AnalyzeImageJob extends BaseJob
 		}
 
 		$client = Craft::createGuzzleClient();
+		$imageUrl = $asset->getUrl();
+		$relatedEntry = $this->getParentEntryForAsset($asset->id);
+		$entryTitle = $relatedEntry?->title ?? null;
+		$entryLink = $relatedEntry?->getCpEditUrl() ?? null;
+		$author = $relatedEntry?->getAuthor()?->username
+		?? ($asset->uploaderId ? Craft::$app->users->getUserById($asset->uploaderId)?->username : 'Onbekend');
+
+		if (
+			$settings->imageEnhancementMode !== Settings::ENHANCEMENT_DISABLED &&
+			$settings->imageEnhancementTrigger === Settings::ENHANCEMENT_TRIGGER_ALWAYS
+		) {
+			$this->debugLog($settings, 'Always-enhance trigger enabled; skipping quality analysis');
+			$data = [
+				'scoreNum' => 'Niet gecontroleerd',
+				'scoreEmoji' => '✨',
+				'scoreLabel' => 'Altijd verbeteren',
+				'author' => $author,
+				'imageUrl' => $imageUrl,
+				'entryLink' => $entryLink,
+				'entryTitle' => $entryTitle,
+				'reason' => 'Quality check skipped because always enhance is enabled.',
+				'enhancement' => $this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey),
+			];
+			$this->debugLog($settings, 'Enhancement result', $data['enhancement']);
+			$this->sendSlackNotification($data);
+			$this->sendEmailNotification($data);
+			return;
+		}
+
 		$model = $this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey);
 		$mime = $asset->mimeType;
 		$this->debugLog($settings, 'Sending image to OpenAI for analysis', [
@@ -162,15 +192,6 @@ class AnalyzeImageJob extends BaseJob
 			'reasonPreview' => substr((string) $reason, 0, 160),
 		]);
 
-		$imageUrl = $asset->getUrl();
-		$relatedEntry = $this->getParentEntryForAsset($asset->id);
-
-		$entryTitle = $relatedEntry?->title ?? null;
-		$entryLink = $relatedEntry?->getCpEditUrl() ?? null;
-		
-		$author = $relatedEntry?->getAuthor()?->username
-		?? ($asset->uploaderId ? Craft::$app->users->getUserById($asset->uploaderId)?->username : 'Onbekend');
-			   
 		$scoreEmoji = '❓';
 		$scoreLabel = 'Onbekend';
 		$scoreNum = (int) $score;

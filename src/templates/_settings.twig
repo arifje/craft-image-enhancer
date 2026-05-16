@@ -144,6 +144,15 @@
 		options: imageEnhancementModeOptions,
 	}) }}
 
+	{{ forms.selectField({
+		label: 'Enhancement trigger',
+		name: 'imageEnhancementTrigger',
+		id: 'imageEnhancementTrigger',
+		instructions: 'Choose whether enhancement only runs after the quality score reaches the threshold, or always runs immediately without the quality check.',
+		value: settings.imageEnhancementTrigger,
+		options: imageEnhancementTriggerOptions,
+	}) }}
+
 	{{ forms.textField({
 		label: 'Imagick safe optimization max width',
 		name: 'safeEnhancementMaxWidth',

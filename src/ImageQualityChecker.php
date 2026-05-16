@@ -75,6 +75,7 @@ class ImageQualityChecker extends Plugin
 			'settings' => $this->getSettings(),
 			'chatGptModelOptions' => $this->getChatGptModelOptions(),
 			'imageEnhancementModeOptions' => Settings::imageEnhancementModeOptions(),
+			'imageEnhancementTriggerOptions' => Settings::imageEnhancementTriggerOptions(),
 		]);
 	}
 

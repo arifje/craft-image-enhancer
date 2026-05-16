@@ -39,6 +39,7 @@ Enhancement runs only when an image score is below the notification threshold.
 - **Disabled**: Analyze and notify only.
 - **Imagick safe optimization**: Replaces the original file with a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
 - **OpenAI / ChatGPT AI enhancement**: Replaces the original file with an OpenAI-generated edit that follows the configured AI enhancement prompt. This can produce stronger visual improvements, but may make more noticeable changes than Imagick safe optimization.
+- **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 
 Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing.
 
@@ -51,7 +52,7 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 1. Enter an OpenAI API key.
 2. Choose a model or keep **Latest available model** selected.
 3. Select the asset volumes that should be checked.
-4. Choose whether low-scoring images should be enhanced and replaced.
+4. Choose whether low-scoring images should be enhanced and replaced, or whether every uploaded image should always be enhanced.
 5. Configure Slack and/or email notifications if needed.
 6. Upload a JPEG or PNG image asset to a selected volume.
 
