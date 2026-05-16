@@ -63,6 +63,8 @@ To troubleshoot a queue run, enable debug logging and watch Craft's web log:
 tail -f storage/logs/web.log | grep 'ImageQualityChecker DEBUG'
 ```
 
+Debug output includes the PHP process user, original asset ownership, temporary replacement ownership, and final replaced file ownership so server permission issues can be traced.
+
 ## Current Limitations
 
 - Only newly uploaded image assets are analyzed.

@@ -30,6 +30,7 @@ class AnalyzeImageJob extends BaseJob
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 		$this->debugLog($settings, 'Job started', [
 			'assetId' => $this->assetId,
+			'process' => $this->getProcessOwnershipContext(),
 			'enhancementMode' => $settings->imageEnhancementMode,
 			'slackNotification' => $settings->slackNotification,
 			'hasSlackWebhook' => (bool) $settings->slackWebhookUrl,
@@ -87,6 +88,7 @@ class AnalyzeImageJob extends BaseJob
 		$this->debugLog($settings, 'Resolved local asset file', [
 			'localPath' => $localPath,
 			'fileSize' => filesize($localPath),
+			'ownership' => $this->getFileOwnershipContext($localPath),
 		]);
 		
 		$imageBase64 = base64_encode(file_get_contents($localPath));
@@ -256,6 +258,7 @@ class AnalyzeImageJob extends BaseJob
 				'assetId' => $asset->id,
 				'localPath' => $localPath,
 				'originalFileSize' => file_exists($localPath) ? filesize($localPath) : null,
+				'originalOwnership' => $this->getFileOwnershipContext($localPath),
 			]);
 			$image = new Imagick($localPath);
 			$originalWidth = $image->getImageWidth();
@@ -288,6 +291,7 @@ class AnalyzeImageJob extends BaseJob
 				'originalHeight' => $originalHeight,
 				'newWidth' => $image->getImageWidth(),
 				'newHeight' => $image->getImageHeight(),
+				'tempOwnership' => $this->getFileOwnershipContext($tempPath),
 			]);
 			$image->clear();
 			$image->destroy();
@@ -297,6 +301,8 @@ class AnalyzeImageJob extends BaseJob
 			$this->debugLog($settings, 'Imagick replacement completed', [
 				'assetId' => $asset->id,
 				'filename' => $asset->filename,
+				'replacedFileExists' => file_exists($localPath),
+				'replacedOwnership' => $this->getFileOwnershipContext($localPath),
 			]);
 
 			return [
@@ -334,6 +340,7 @@ class AnalyzeImageJob extends BaseJob
 				'filename' => $asset->filename,
 				'localPath' => $localPath,
 				'fileSize' => file_exists($localPath) ? filesize($localPath) : null,
+				'originalOwnership' => $this->getFileOwnershipContext($localPath),
 			]);
 			$response = $client->post('https://api.openai.com/v1/images/edits', [
 				'headers' => [
@@ -387,12 +394,15 @@ class AnalyzeImageJob extends BaseJob
 				'tempPath' => $tempPath,
 				'tempFileExists' => file_exists($tempPath),
 				'tempFileSize' => file_exists($tempPath) ? filesize($tempPath) : null,
+				'tempOwnership' => $this->getFileOwnershipContext($tempPath),
 			]);
 			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			@unlink($tempPath);
 			$this->debugLog($settings, 'OpenAI image replacement completed', [
 				'assetId' => $asset->id,
 				'filename' => $asset->filename,
+				'replacedFileExists' => file_exists($localPath),
+				'replacedOwnership' => $this->getFileOwnershipContext($localPath),
 			]);
 
 			return [
@@ -426,6 +436,68 @@ class AnalyzeImageJob extends BaseJob
 		@unlink($tempPath);
 
 		return $tempPath . '.' . $extension;
+	}
+
+	private function getProcessOwnershipContext(): array
+	{
+		$uid = function_exists('posix_geteuid') ? posix_geteuid() : getmyuid();
+		$gid = function_exists('posix_getegid') ? posix_getegid() : null;
+
+		return [
+			'currentUser' => get_current_user(),
+			'uid' => $uid,
+			'user' => $this->getUserName($uid),
+			'gid' => $gid,
+			'group' => $gid !== null ? $this->getGroupName($gid) : null,
+			'tmpDir' => sys_get_temp_dir(),
+		];
+	}
+
+	private function getFileOwnershipContext(?string $path): array
+	{
+		if (!$path || !file_exists($path)) {
+			return [
+				'path' => $path,
+				'exists' => false,
+			];
+		}
+
+		$ownerId = @fileowner($path);
+		$groupId = @filegroup($path);
+		$perms = @fileperms($path);
+
+		return [
+			'path' => $path,
+			'exists' => true,
+			'ownerId' => $ownerId,
+			'owner' => is_int($ownerId) ? $this->getUserName($ownerId) : null,
+			'groupId' => $groupId,
+			'group' => is_int($groupId) ? $this->getGroupName($groupId) : null,
+			'permissions' => is_int($perms) ? substr(sprintf('%o', $perms), -4) : null,
+			'isWritable' => is_writable($path),
+		];
+	}
+
+	private function getUserName(?int $uid): ?string
+	{
+		if ($uid === null || !function_exists('posix_getpwuid')) {
+			return null;
+		}
+
+		$user = posix_getpwuid($uid);
+
+		return $user['name'] ?? null;
+	}
+
+	private function getGroupName(?int $gid): ?string
+	{
+		if ($gid === null || !function_exists('posix_getgrgid')) {
+			return null;
+		}
+
+		$group = posix_getgrgid($gid);
+
+		return $group['name'] ?? null;
 	}
 
 	private function debugLog(Settings $settings, string $message, array $context = []): void
