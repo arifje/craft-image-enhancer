@@ -281,6 +281,9 @@ class AnalyzeImageJob extends BaseJob
 		return [
 			'label' => 'Niet vervangen',
 			'status' => 'Onbekende enhancement mode.',
+			'action' => 'failed',
+			'imageUrl' => $asset->getUrl(),
+			'slackAction' => 'Optimalisatie is mislukt: onbekende enhancement mode',
 		];
 	}
 
@@ -292,6 +295,9 @@ class AnalyzeImageJob extends BaseJob
 			return [
 				'label' => 'Niet vervangen',
 				'status' => 'Safe optimization mislukt: Imagick ontbreekt.',
+				'action' => 'failed',
+				'imageUrl' => $asset->getUrl(),
+				'slackAction' => 'Optimalisatie is mislukt: Imagick ontbreekt',
 			];
 		}
 
@@ -348,6 +354,9 @@ class AnalyzeImageJob extends BaseJob
 			return [
 				'label' => 'Niet vervangen',
 				'status' => 'Safe optimization mislukt.',
+				'action' => 'failed',
+				'imageUrl' => $asset->getUrl(),
+				'slackAction' => 'Optimalisatie is mislukt',
 			];
 		}
 	}
@@ -361,6 +370,9 @@ class AnalyzeImageJob extends BaseJob
 			return [
 				'label' => 'Niet vervangen',
 				'status' => 'AI enhancement mislukt: bestand kon niet worden geopend.',
+				'action' => 'failed',
+				'imageUrl' => $asset->getUrl(),
+				'slackAction' => 'Optimalisatie met AI is mislukt: bestand kon niet worden geopend',
 			];
 		}
 
@@ -418,6 +430,9 @@ class AnalyzeImageJob extends BaseJob
 				return [
 					'label' => 'Niet vervangen',
 					'status' => 'AI enhancement gaf geen vervangende afbeelding terug.',
+					'action' => 'failed',
+					'imageUrl' => $asset->getUrl(),
+					'slackAction' => 'Optimalisatie met AI is mislukt: geen vervangende afbeelding ontvangen',
 				];
 			}
 
@@ -445,6 +460,9 @@ class AnalyzeImageJob extends BaseJob
 			return [
 				'label' => 'Niet vervangen',
 				'status' => 'AI enhancement mislukt.',
+				'action' => 'failed',
+				'imageUrl' => $asset->getUrl(),
+				'slackAction' => 'Optimalisatie met AI is mislukt',
 			];
 		} finally {
 			if (is_resource($handle)) {
@@ -469,12 +487,7 @@ class AnalyzeImageJob extends BaseJob
 					'tempPath' => $tempPath,
 				]);
 
-				ImageQualityChecker::$skipAssetQueue = true;
-				try {
-					$enhancedAsset = Craft::$app->assets->insertFileByLocalPath($tempPath, $filename, $asset->folderId, 'keepBoth');
-				} finally {
-					ImageQualityChecker::$skipAssetQueue = false;
-				}
+				$enhancedAsset = $this->createEnhancedAsset($settings, $asset, $tempPath, $filename);
 
 				@unlink($tempPath);
 
@@ -482,6 +495,9 @@ class AnalyzeImageJob extends BaseJob
 					return [
 						'label' => 'Niet toegevoegd',
 						'status' => ucfirst($typeLabel) . ' is gemaakt, maar kon niet als asset worden toegevoegd.',
+						'action' => 'failed',
+						'imageUrl' => $asset->getUrl(),
+						'slackAction' => 'Optimalisatie met ' . $slackSource . ' is gelukt, maar toevoegen als extra asset is mislukt',
 					];
 				}
 
@@ -515,6 +531,9 @@ class AnalyzeImageJob extends BaseJob
 				return [
 					'label' => 'Niet toegevoegd',
 					'status' => ucfirst($typeLabel) . ' kon niet als extra asset worden toegevoegd.',
+					'action' => 'failed',
+					'imageUrl' => $asset->getUrl(),
+					'slackAction' => 'Optimalisatie met ' . $slackSource . ' is mislukt; afbeelding is niet toegevoegd',
 				];
 			}
 		}
@@ -593,6 +612,37 @@ class AnalyzeImageJob extends BaseJob
 		]);
 
 		return $saved;
+	}
+
+	private function createEnhancedAsset(Settings $settings, Asset $originalAsset, string $tempPath, string $filename): ?Asset
+	{
+		$enhancedAsset = new Asset();
+		$enhancedAsset->tempFilePath = $tempPath;
+		$enhancedAsset->filename = $filename;
+		$enhancedAsset->newFolderId = $originalAsset->folderId;
+		$enhancedAsset->volumeId = $originalAsset->volumeId;
+		$enhancedAsset->uploaderId = $originalAsset->uploaderId;
+		$enhancedAsset->avoidFilenameConflicts = true;
+		$enhancedAsset->setScenario(Asset::SCENARIO_CREATE);
+
+		ImageQualityChecker::$skipAssetQueue = true;
+		try {
+			$saved = Craft::$app->elements->saveElement($enhancedAsset);
+		} finally {
+			ImageQualityChecker::$skipAssetQueue = false;
+		}
+
+		if (!$saved) {
+			$this->debugLog($settings, 'Could not save enhanced asset element', [
+				'errors' => $enhancedAsset->getErrors(),
+				'filename' => $filename,
+				'folderId' => $originalAsset->folderId,
+				'volumeId' => $originalAsset->volumeId,
+			]);
+			return null;
+		}
+
+		return $enhancedAsset;
 	}
 
 	private function normalizeReplacementImageDimensions(Settings $settings, Asset $asset, string $path, int $targetWidth, int $targetHeight): void
