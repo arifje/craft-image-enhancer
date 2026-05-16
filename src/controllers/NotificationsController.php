@@ -15,7 +15,7 @@ class NotificationsController extends Controller
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 
 		if (!$settings->slackNotification) {
-			return $this->asFailure('Slack notifications are disabled.');
+			return $this->asTestFailure('Slack notifications are disabled.');
 		}
 
 		$blocks = [
@@ -48,11 +48,11 @@ class NotificationsController extends Controller
 					],
 				]);
 
-				return $this->asSuccess('Slack test notification sent via webhook.');
+				return $this->asTestSuccess('Slack test notification sent via webhook.');
 			}
 
 			if (!$settings->slackBotToken || !$settings->slackChannel) {
-				return $this->asFailure('Slack bot token or channel is missing.');
+				return $this->asTestFailure('Slack bot token or channel is missing.');
 			}
 
 			$response = $client->post('https://slack.com/api/chat.postMessage', [
@@ -71,13 +71,13 @@ class NotificationsController extends Controller
 			$responseData = json_decode((string) $response->getBody(), true);
 
 			if (($responseData['ok'] ?? true) === false) {
-				return $this->asFailure('Slack API error: ' . ($responseData['error'] ?? 'unknown'));
+				return $this->asTestFailure('Slack API error: ' . ($responseData['error'] ?? 'unknown'));
 			}
 
-			return $this->asSuccess('Slack test notification sent via bot token.');
+			return $this->asTestSuccess('Slack test notification sent via bot token.');
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Slack test notification failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asFailure('Slack test notification failed: ' . $e->getMessage());
+			return $this->asTestFailure('Slack test notification failed: ' . $e->getMessage());
 		}
 	}
 
@@ -89,7 +89,7 @@ class NotificationsController extends Controller
 		$recipient = $settings->emailNotificationRecipient ?: $currentUser?->email;
 
 		if (!$recipient) {
-			return $this->asFailure('No email recipient configured and current user has no email address.');
+			return $this->asTestFailure('No email recipient configured and current user has no email address.');
 		}
 
 		try {
@@ -100,17 +100,17 @@ class NotificationsController extends Controller
 				->send();
 
 			if (!$sent) {
-				return $this->asFailure('Email test notification could not be sent.');
+				return $this->asTestFailure('Email test notification could not be sent.');
 			}
 
-			return $this->asSuccess('Email test notification sent to ' . $recipient . '.');
+			return $this->asTestSuccess('Email test notification sent to ' . $recipient . '.');
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Email test notification failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asFailure('Email test notification failed: ' . $e->getMessage());
+			return $this->asTestFailure('Email test notification failed: ' . $e->getMessage());
 		}
 	}
 
-	private function asSuccess(string $message): Response
+	private function asTestSuccess(string $message): Response
 	{
 		return $this->asJson([
 			'success' => true,
@@ -118,7 +118,7 @@ class NotificationsController extends Controller
 		]);
 	}
 
-	private function asFailure(string $message): Response
+	private function asTestFailure(string $message): Response
 	{
 		return $this->asJson([
 			'success' => false,
