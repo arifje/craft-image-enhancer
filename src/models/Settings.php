@@ -16,6 +16,8 @@ class Settings extends Model
 	public const ENHANCEMENT_CREATIVE = 'creative';
 	public const ENHANCEMENT_TRIGGER_THRESHOLD = 'threshold';
 	public const ENHANCEMENT_TRIGGER_ALWAYS = 'always';
+	public const ENHANCEMENT_ACTION_REPLACE = 'replace';
+	public const ENHANCEMENT_ACTION_ADD = 'add';
 
 	// ChatGPT
 	public string $chatGptApiKey = '';
@@ -44,6 +46,7 @@ class Settings extends Model
 	// Image enhancement
 	public string $imageEnhancementMode = self::ENHANCEMENT_DISABLED;
 	public string $imageEnhancementTrigger = self::ENHANCEMENT_TRIGGER_THRESHOLD;
+	public string $imageEnhancementAction = self::ENHANCEMENT_ACTION_REPLACE;
 	public int $safeEnhancementMaxWidth = 2400;
 	public int $safeEnhancementJpegQuality = 90;
 	public string $creativeEnhancementPrompt = 'Enhance this exact image as a conservative photo restoration/edit. Preserve the same subject, crop, composition, perspective, background, scene, people, objects, clothing, text, and all visual context. Do not add, remove, replace, extend, uncrop, zoom, reframe, or invent anything. Only improve technical quality such as sharpness, clarity, mild noise reduction, compression artifacts, and natural color/contrast.';
@@ -51,7 +54,7 @@ class Settings extends Model
 	public function rules(): array
 	{
 		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'creativeEnhancementPrompt'], 'string'],
+			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'creativeEnhancementPrompt'], 'string'],
 			[['debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['allowedAssetFieldHandles'], 'safe'],
@@ -103,6 +106,14 @@ class Settings extends Model
 		return [
 			['label' => 'Only when score is below threshold', 'value' => self::ENHANCEMENT_TRIGGER_THRESHOLD],
 			['label' => 'Always enhance and skip quality check', 'value' => self::ENHANCEMENT_TRIGGER_ALWAYS],
+		];
+	}
+
+	public static function imageEnhancementActionOptions(): array
+	{
+		return [
+			['label' => 'Replace original image', 'value' => self::ENHANCEMENT_ACTION_REPLACE],
+			['label' => 'Add enhanced image next to original', 'value' => self::ENHANCEMENT_ACTION_ADD],
 		];
 	}
 	

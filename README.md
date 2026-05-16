@@ -30,7 +30,7 @@ When **Latest available model** is selected, the plugin fetches the available Op
 - **Test notifications**: Send a Slack or email test notification directly from the settings page.
 
 Only the OpenAI API key is required to run the analysis. Slack and email can be configured independently.
-When enhancement is enabled, notifications include whether the original image was replaced and which enhancement mode was used.
+When enhancement is enabled, Slack notifications include a compact article, author, action, and image link summary.
 Slack notifications can be sent through a webhook URL or through a bot token and channel. If a webhook URL is configured, it is used first.
 
 ### Enhancement
@@ -38,9 +38,10 @@ Slack notifications can be sent through a webhook URL or through a bot token and
 Enhancement runs only when an image score is below the notification threshold.
 
 - **Disabled**: Analyze and notify only.
-- **Imagick safe optimization**: Replaces the original file with a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
-- **OpenAI / ChatGPT AI enhancement**: Replaces the original file with an OpenAI-generated edit that follows the configured AI enhancement prompt. This can produce stronger visual improvements, but may make more noticeable changes than Imagick safe optimization.
+- **Imagick safe optimization**: Creates a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
+- **OpenAI / ChatGPT AI enhancement**: Creates an OpenAI-generated edit that follows the configured AI enhancement prompt. This can produce stronger visual improvements, but may make more noticeable changes than Imagick safe optimization.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
+- **Enhanced image handling**: Choose whether the enhanced file replaces the original asset, or is added next to the original asset for manual review.
 
 Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing.
 AI-enhanced replacements are cropped back to the original asset dimensions so the original field ratio is retained without white padding.
@@ -58,7 +59,7 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 5. Configure Slack and/or email notifications if needed.
 6. Upload a JPEG or PNG image asset to a selected volume.
 
-The plugin queues an analysis job shortly after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
+The plugin queues an analysis job immediately after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
 The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications.
 
 To troubleshoot a queue run, enable debug logging and watch Craft's web log:

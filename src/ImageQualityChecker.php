@@ -32,6 +32,7 @@ class ImageQualityChecker extends Plugin
 {
 	public string $schemaVersion = '1.0.0';
 	public bool $hasCpSettings = true;
+	public static bool $skipAssetQueue = false;
 
 	public static function config(): array
 	{
@@ -76,6 +77,7 @@ class ImageQualityChecker extends Plugin
 			'chatGptModelOptions' => $this->getChatGptModelOptions(),
 			'imageEnhancementModeOptions' => Settings::imageEnhancementModeOptions(),
 			'imageEnhancementTriggerOptions' => Settings::imageEnhancementTriggerOptions(),
+			'imageEnhancementActionOptions' => Settings::imageEnhancementActionOptions(),
 		]);
 	}
 
@@ -140,6 +142,10 @@ class ImageQualityChecker extends Plugin
 			if (!$element instanceof Asset || $element->kind !== 'image' || !$event->isNew) {
 				return;
 			}
+
+			if (self::$skipAssetQueue) {
+				return;
+			}
 			
 			/*$user = Craft::$app->getUser()->getIdentity();		
 			Craft::info("ImageQualityChecker event, user id: " . $user->id);
@@ -148,7 +154,7 @@ class ImageQualityChecker extends Plugin
 			}*/
 			
 			// Push to a job
-			Craft::$app->queue->delay(10)->push(new AnalyzeImageJob([
+			Craft::$app->queue->push(new AnalyzeImageJob([
 				'assetId' => $element->id,
 			]));
 		});

@@ -34,6 +34,7 @@ class AnalyzeImageJob extends BaseJob
 			'process' => $this->getProcessOwnershipContext(),
 			'enhancementMode' => $settings->imageEnhancementMode,
 			'enhancementTrigger' => $settings->imageEnhancementTrigger,
+			'enhancementAction' => $settings->imageEnhancementAction,
 			'slackNotification' => $settings->slackNotification,
 			'hasSlackWebhook' => (bool) $settings->slackWebhookUrl,
 			'hasSlackBotToken' => (bool) $settings->slackBotToken,
@@ -134,7 +135,7 @@ class AnalyzeImageJob extends BaseJob
 				'reason' => 'Quality check skipped because always enhance is enabled.',
 				'enhancement' => $this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey),
 			];
-			$this->updateProgress($queue, 0.80, 'Replacement complete');
+			$this->updateProgress($queue, 0.80, 'Enhancement complete');
 			$this->debugLog($settings, 'Enhancement result', $data['enhancement']);
 			$this->updateProgress($queue, 0.90, 'Sending notifications');
 			$this->sendSlackNotification($data);
@@ -244,7 +245,7 @@ class AnalyzeImageJob extends BaseJob
 			]);
 			$this->updateProgress($queue, 0.45, 'Starting enhancement');
 			$data['enhancement'] = $this->enhanceImageIfEnabled($client, $settings, $asset, $localPath, $apiKey);
-			$this->updateProgress($queue, 0.80, 'Replacement complete');
+			$this->updateProgress($queue, 0.80, 'Enhancement complete');
 			$this->debugLog($settings, 'Enhancement result', $data['enhancement']);
 			$this->updateProgress($queue, 0.90, 'Sending notifications');
 			$this->sendSlackNotification($data);
@@ -337,19 +338,7 @@ class AnalyzeImageJob extends BaseJob
 			$image->clear();
 			$image->destroy();
 
-			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
-			@unlink($tempPath);
-			$this->debugLog($settings, 'Imagick replacement completed', [
-				'assetId' => $asset->id,
-				'filename' => $asset->filename,
-				'replacedFileExists' => file_exists($localPath),
-				'replacedOwnership' => $this->getFileOwnershipContext($localPath),
-			]);
-
-			return [
-				'label' => 'Vervangen met safe optimization',
-				'status' => 'Origineel bestand is vervangen door een lokaal geoptimaliseerde versie.',
-			];
+			return $this->storeEnhancedImage($settings, $asset, $tempPath, $localPath, 'safe');
 		} catch (\Throwable $e) {
 			$this->debugLog($settings, 'Imagick enhancement failed', [
 				'error' => $e->getMessage(),
@@ -446,19 +435,7 @@ class AnalyzeImageJob extends BaseJob
 				'normalizedHeight' => $normalizedSize[1] ?? null,
 				'tempOwnership' => $this->getFileOwnershipContext($tempPath),
 			]);
-			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
-			@unlink($tempPath);
-			$this->debugLog($settings, 'OpenAI image replacement completed', [
-				'assetId' => $asset->id,
-				'filename' => $asset->filename,
-				'replacedFileExists' => file_exists($localPath),
-				'replacedOwnership' => $this->getFileOwnershipContext($localPath),
-			]);
-
-			return [
-				'label' => 'Vervangen met AI enhancement',
-				'status' => 'Origineel bestand is vervangen door een OpenAI-geoptimaliseerde versie.',
-			];
+			return $this->storeEnhancedImage($settings, $asset, $tempPath, $localPath, 'ai');
 		} catch (\Throwable $e) {
 			$this->debugLog($settings, 'OpenAI image enhancement failed', [
 				'error' => $e->getMessage(),
@@ -474,6 +451,148 @@ class AnalyzeImageJob extends BaseJob
 				fclose($handle);
 			}
 		}
+	}
+
+	private function storeEnhancedImage(Settings $settings, Asset $asset, string $tempPath, string $localPath, string $enhancementType): array
+	{
+		$isAi = $enhancementType === 'ai';
+		$typeLabel = $isAi ? 'AI enhancement' : 'safe optimization';
+		$slackSource = $isAi ? 'met AI' : 'veilig';
+
+		if ($settings->imageEnhancementAction === Settings::ENHANCEMENT_ACTION_ADD) {
+			try {
+				$filename = $this->getEnhancedFilename($asset);
+				$this->debugLog($settings, 'Adding enhanced image as a new asset', [
+					'originalAssetId' => $asset->id,
+					'folderId' => $asset->folderId,
+					'filename' => $filename,
+					'tempPath' => $tempPath,
+				]);
+
+				ImageQualityChecker::$skipAssetQueue = true;
+				try {
+					$enhancedAsset = Craft::$app->assets->insertFileByLocalPath($tempPath, $filename, $asset->folderId, 'keepBoth');
+				} finally {
+					ImageQualityChecker::$skipAssetQueue = false;
+				}
+
+				@unlink($tempPath);
+
+				if (!$enhancedAsset instanceof Asset) {
+					return [
+						'label' => 'Niet toegevoegd',
+						'status' => ucfirst($typeLabel) . ' is gemaakt, maar kon niet als asset worden toegevoegd.',
+					];
+				}
+
+				$attachedToField = $this->attachEnhancedAssetToOriginalField($settings, $asset, $enhancedAsset);
+				$status = $attachedToField
+					? 'Geoptimaliseerde afbeelding is toegevoegd naast het origineel.'
+					: 'Geoptimaliseerde afbeelding is toegevoegd aan de asset folder, maar kon niet automatisch aan hetzelfde veld worden gekoppeld.';
+
+				$this->debugLog($settings, 'Enhanced image added as new asset', [
+					'originalAssetId' => $asset->id,
+					'enhancedAssetId' => $enhancedAsset->id,
+					'enhancedFilename' => $enhancedAsset->filename,
+					'attachedToField' => $attachedToField,
+					'enhancedOwnership' => $this->getFileOwnershipContext($this->getFullAssetPathById($enhancedAsset->id)),
+				]);
+
+				return [
+					'label' => 'Toegevoegd met ' . $typeLabel,
+					'status' => $status,
+					'action' => 'add',
+					'imageUrl' => $enhancedAsset->getUrl(),
+					'slackAction' => 'Afbeelding geoptimaliseerd ' . $slackSource . ' en toegevoegd',
+				];
+			} catch (\Throwable $e) {
+				@unlink($tempPath);
+				$this->debugLog($settings, 'Adding enhanced image failed', [
+					'error' => $e->getMessage(),
+				]);
+				Craft::error('ImageQualityChecker: Adding enhanced image failed: ' . $e->getMessage(), __METHOD__);
+
+				return [
+					'label' => 'Niet toegevoegd',
+					'status' => ucfirst($typeLabel) . ' kon niet als extra asset worden toegevoegd.',
+				];
+			}
+		}
+
+		Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
+		@unlink($tempPath);
+		$this->debugLog($settings, 'Enhanced image replacement completed', [
+			'assetId' => $asset->id,
+			'filename' => $asset->filename,
+			'replacedFileExists' => file_exists($localPath),
+			'replacedOwnership' => $this->getFileOwnershipContext($localPath),
+		]);
+
+		return [
+			'label' => 'Vervangen met ' . $typeLabel,
+			'status' => 'Origineel bestand is vervangen door een geoptimaliseerde versie.',
+			'action' => 'replace',
+			'imageUrl' => $asset->getUrl(),
+			'slackAction' => 'Afbeelding geoptimaliseerd ' . $slackSource . ' en vervangen',
+		];
+	}
+
+	private function attachEnhancedAssetToOriginalField(Settings $settings, Asset $originalAsset, Asset $enhancedAsset): bool
+	{
+		$relation = (new Query())
+			->select(['sourceId', 'fieldId'])
+			->from(Table::RELATIONS)
+			->where(['targetId' => $originalAsset->id])
+			->andWhere(['not', ['fieldId' => null]])
+			->orderBy(['sortOrder' => SORT_ASC])
+			->one();
+
+		if (!$relation) {
+			$this->debugLog($settings, 'Could not attach enhanced asset because no original asset field relation was found', [
+				'originalAssetId' => $originalAsset->id,
+				'enhancedAssetId' => $enhancedAsset->id,
+			]);
+			return false;
+		}
+
+		$source = Craft::$app->elements->getElementById((int) $relation['sourceId'], null, '*');
+		$field = Craft::$app->fields->getFieldById((int) $relation['fieldId']);
+
+		if (!$source || !$field) {
+			$this->debugLog($settings, 'Could not attach enhanced asset because source element or field was missing', [
+				'sourceId' => $relation['sourceId'],
+				'fieldId' => $relation['fieldId'],
+			]);
+			return false;
+		}
+
+		$assetIds = (new Query())
+			->select(['targetId'])
+			->from(Table::RELATIONS)
+			->where([
+				'sourceId' => $relation['sourceId'],
+				'fieldId' => $relation['fieldId'],
+			])
+			->orderBy(['sortOrder' => SORT_ASC])
+			->column();
+
+		$assetIds = array_values(array_map('intval', $assetIds));
+
+		if (!in_array($enhancedAsset->id, $assetIds, true)) {
+			$assetIds[] = $enhancedAsset->id;
+		}
+
+		$source->setFieldValue($field->handle, $assetIds);
+		$saved = Craft::$app->elements->saveElement($source, false);
+
+		$this->debugLog($settings, 'Attached enhanced asset to original field', [
+			'saved' => $saved,
+			'sourceId' => $source->id,
+			'fieldHandle' => $field->handle,
+			'assetIds' => $assetIds,
+		]);
+
+		return $saved;
 	}
 
 	private function normalizeReplacementImageDimensions(Settings $settings, Asset $asset, string $path, int $targetWidth, int $targetHeight): void
@@ -534,6 +653,15 @@ class AnalyzeImageJob extends BaseJob
 		@unlink($tempPath);
 
 		return $tempPath . '.' . $extension;
+	}
+
+	private function getEnhancedFilename(Asset $asset): string
+	{
+		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
+		$baseName = pathinfo($asset->filename, PATHINFO_FILENAME);
+		$baseName = preg_replace('/[^A-Za-z0-9._-]+/', '-', $baseName) ?: 'image';
+
+		return $baseName . '-enhanced' . ($extension ? '.' . $extension : '');
 	}
 
 	private function getProcessOwnershipContext(): array
@@ -640,13 +768,6 @@ class AnalyzeImageJob extends BaseJob
 					'text' => $this->getSlackSummaryText($data),
 				],
 			],
-			isset($data['enhancement']) ? [
-				'type' => 'context',
-				'elements' => [[
-					'type' => 'mrkdwn',
-					'text' => "*Enhancement:* {$data['enhancement']['status']}"
-				]]
-			] : null,
 			/*[
 				'type' => 'context',
 				'elements' => [[
@@ -774,22 +895,13 @@ class AnalyzeImageJob extends BaseJob
 
 	private function getSlackSummaryText(array $data): string
 	{
-		$parts = [
-			"*Beeldkwaliteit:* {$data['scoreEmoji']} {$data['scoreNum']}/100 ({$data['scoreLabel']})",
-			"*Auteur:* {$data['author']}",
-		];
+		$title = $data['entryTitle'] ?: 'onbekend artikel';
+		$article = $data['entryLink'] ? "<{$data['entryLink']}|{$title}>" : $title;
+		$imageUrl = $data['enhancement']['imageUrl'] ?? $data['imageUrl'];
+		$actionText = $data['enhancement']['slackAction'] ?? 'Afbeelding controleren';
+		$imageLink = $imageUrl ? "<{$imageUrl}|link>" : 'link niet beschikbaar';
 
-		if (isset($data['enhancement'])) {
-			$parts[] = "*Vervanging:* {$data['enhancement']['label']}";
-		}
-
-		if ($data['entryLink']) {
-			$parts[] = "*Artikel:* <{$data['entryLink']}|{$data['entryTitle']}>";
-		}
-
-		$parts[] = "*Afbeelding:* <{$data['imageUrl']}|bekijken>";
-
-		return implode("\n", $parts);
+		return "📸 Slechte afbeelding gedetecteerd in artikel: {$article} ({$data['author']})\n👉 {$actionText} ({$imageLink})";
 	}
 
 	private function resolveChatGptModel(ClientInterface $client, string $configuredModel, string $apiKey): string

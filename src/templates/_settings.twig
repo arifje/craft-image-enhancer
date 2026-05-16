@@ -190,6 +190,15 @@
 		options: imageEnhancementTriggerOptions,
 	}) }}
 
+	{{ forms.selectField({
+		label: 'Enhanced image handling',
+		name: 'imageEnhancementAction',
+		id: 'imageEnhancementAction',
+		instructions: 'Choose whether the enhanced file replaces the original asset or is added next to the original asset for manual review.',
+		value: settings.imageEnhancementAction,
+		options: imageEnhancementActionOptions,
+	}) }}
+
 	{{ forms.textField({
 		label: 'Imagick safe optimization max width',
 		name: 'safeEnhancementMaxWidth',
