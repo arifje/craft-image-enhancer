@@ -46,7 +46,7 @@ class Settings extends Model
 	public string $imageEnhancementTrigger = self::ENHANCEMENT_TRIGGER_THRESHOLD;
 	public int $safeEnhancementMaxWidth = 2400;
 	public int $safeEnhancementJpegQuality = 90;
-	public string $creativeEnhancementPrompt = 'Improve the technical quality of this image. Increase perceived sharpness, reduce noise, improve clarity, and preserve the same subject, composition, context, people, objects, text, and scene.';
+	public string $creativeEnhancementPrompt = 'Enhance this exact image as a conservative photo restoration/edit. Preserve the same subject, crop, composition, perspective, background, scene, people, objects, clothing, text, and all visual context. Do not add, remove, replace, extend, uncrop, zoom, reframe, or invent anything. Only improve technical quality such as sharpness, clarity, mild noise reduction, compression artifacts, and natural color/contrast.';
 
 	public function rules(): array
 	{

@@ -42,7 +42,7 @@ Enhancement runs only when an image score is below the notification threshold.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 
 Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing.
-AI-enhanced replacements are normalized back to the original asset dimensions so the original aspect ratio is retained.
+AI-enhanced replacements are cropped back to the original asset dimensions so the original field ratio is retained without white padding.
 
 ### Asset Volumes
 

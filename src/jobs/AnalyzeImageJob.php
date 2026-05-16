@@ -471,16 +471,8 @@ class AnalyzeImageJob extends BaseJob
 			$sourceWidth = $image->getImageWidth();
 			$sourceHeight = $image->getImageHeight();
 
-			$image->resizeImage($targetWidth, $targetHeight, Imagick::FILTER_LANCZOS, 1, true);
-
-			if ($asset->mimeType === 'image/png') {
-				$image->setImageBackgroundColor('transparent');
-			} else {
-				$image->setImageBackgroundColor('white');
-			}
-
 			$image->setImageGravity(Imagick::GRAVITY_CENTER);
-			$image->extentImage($targetWidth, $targetHeight, 0, 0);
+			$image->cropThumbnailImage($targetWidth, $targetHeight);
 
 			if (in_array($asset->mimeType, ['image/jpeg', 'image/jpg'], true)) {
 				$image->setImageCompression(Imagick::COMPRESSION_JPEG);
@@ -494,7 +486,7 @@ class AnalyzeImageJob extends BaseJob
 			$image->clear();
 			$image->destroy();
 
-			$this->debugLog($settings, 'Normalized AI replacement dimensions to original asset ratio', [
+			$this->debugLog($settings, 'Cropped AI replacement to original asset dimensions', [
 				'sourceWidth' => $sourceWidth,
 				'sourceHeight' => $sourceHeight,
 				'targetWidth' => $targetWidth,
