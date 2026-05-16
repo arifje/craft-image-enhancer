@@ -634,37 +634,11 @@ class AnalyzeImageJob extends BaseJob
 	
 		$blocks = [
 			[
-				'type' => 'header',
-				'text' => [
-					'type' => 'plain_text',
-					'text' => '📸 Beeldkwaliteit geanalyseerd',
-					'emoji' => false
-				]
-			],
-			[
 				'type' => 'section',
-				'fields' => array_filter([
-					[
-						'type' => 'mrkdwn',
-						'text' => "*Score:*\n{$data['scoreEmoji']} *{$data['scoreNum']}/100* ({$data['scoreLabel']})"
-					],
-					[
-						'type' => 'mrkdwn',
-						'text' => "*Auteur:*\n{$data['author']}"
-					],
-					[
-						'type' => 'mrkdwn',
-						'text' => "*Afbeelding:*\n<{$data['imageUrl']}|Bekijken>"
-					],
-					isset($data['enhancement']) ? [
-						'type' => 'mrkdwn',
-						'text' => "*Vervanging:*\n{$data['enhancement']['label']}"
-					] : null,
-					$data['entryLink'] ? [
-						'type' => 'mrkdwn',
-						'text' => "*Artikel:*\n<{$data['entryLink']}|{$data['entryTitle']}>"
-					] : null,
-				])
+				'text' => [
+					'type' => 'mrkdwn',
+					'text' => $this->getSlackSummaryText($data),
+				],
 			],
 			isset($data['enhancement']) ? [
 				'type' => 'context',
@@ -796,6 +770,26 @@ class AnalyzeImageJob extends BaseJob
 			'cc' => $settings->emailNotificationRecipient,
 			'sent' => $sent,
 		]);
+	}
+
+	private function getSlackSummaryText(array $data): string
+	{
+		$parts = [
+			"*Beeldkwaliteit:* {$data['scoreEmoji']} {$data['scoreNum']}/100 ({$data['scoreLabel']})",
+			"*Auteur:* {$data['author']}",
+		];
+
+		if (isset($data['enhancement'])) {
+			$parts[] = "*Vervanging:* {$data['enhancement']['label']}";
+		}
+
+		if ($data['entryLink']) {
+			$parts[] = "*Artikel:* <{$data['entryLink']}|{$data['entryTitle']}>";
+		}
+
+		$parts[] = "*Afbeelding:* <{$data['imageUrl']}|bekijken>";
+
+		return implode("\n", $parts);
 	}
 
 	private function resolveChatGptModel(ClientInterface $client, string $configuredModel, string $apiKey): string

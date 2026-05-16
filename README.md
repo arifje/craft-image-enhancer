@@ -27,6 +27,7 @@ When **Latest available model** is selected, the plugin fetches the available Op
 - **Slack**: Enable Slack notifications and configure a Slack bot token and channel.
 - **Email**: Enable email notifications to send the result to the author, with an optional CC recipient.
 - **Debug logging**: Writes `ImageQualityChecker DEBUG` lines to Craft's `web.log` while queue jobs run.
+- **Test notifications**: Send a Slack or email test notification directly from the settings page.
 
 Only the OpenAI API key is required to run the analysis. Slack and email can be configured independently.
 When enhancement is enabled, notifications include whether the original image was replaced and which enhancement mode was used.
