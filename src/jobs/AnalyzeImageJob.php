@@ -356,11 +356,14 @@ class AnalyzeImageJob extends BaseJob
 		}
 
 		try {
+			[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
 			$this->debugLog($settings, 'Starting OpenAI image enhancement', [
 				'assetId' => $asset->id,
 				'filename' => $asset->filename,
 				'localPath' => $localPath,
 				'fileSize' => file_exists($localPath) ? filesize($localPath) : null,
+				'originalWidth' => $originalWidth,
+				'originalHeight' => $originalHeight,
 				'originalOwnership' => $this->getFileOwnershipContext($localPath),
 			]);
 			$response = $client->post('https://api.openai.com/v1/images/edits', [
@@ -411,10 +414,16 @@ class AnalyzeImageJob extends BaseJob
 
 			$tempPath = $this->getTempReplacementPath($asset);
 			file_put_contents($tempPath, base64_decode($imageData));
+			if ($originalWidth && $originalHeight) {
+				$this->normalizeReplacementImageDimensions($settings, $asset, $tempPath, $originalWidth, $originalHeight);
+			}
+			$normalizedSize = file_exists($tempPath) ? @getimagesize($tempPath) : null;
 			$this->debugLog($settings, 'OpenAI image enhancement wrote replacement temp file', [
 				'tempPath' => $tempPath,
 				'tempFileExists' => file_exists($tempPath),
 				'tempFileSize' => file_exists($tempPath) ? filesize($tempPath) : null,
+				'normalizedWidth' => $normalizedSize[0] ?? null,
+				'normalizedHeight' => $normalizedSize[1] ?? null,
 				'tempOwnership' => $this->getFileOwnershipContext($tempPath),
 			]);
 			Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
@@ -441,7 +450,63 @@ class AnalyzeImageJob extends BaseJob
 				'status' => 'AI enhancement mislukt.',
 			];
 		} finally {
-			fclose($handle);
+			if (is_resource($handle)) {
+				fclose($handle);
+			}
+		}
+	}
+
+	private function normalizeReplacementImageDimensions(Settings $settings, Asset $asset, string $path, int $targetWidth, int $targetHeight): void
+	{
+		if (!class_exists(Imagick::class)) {
+			$this->debugLog($settings, 'Skipping AI replacement dimension normalization because Imagick is not available', [
+				'targetWidth' => $targetWidth,
+				'targetHeight' => $targetHeight,
+			]);
+			return;
+		}
+
+		try {
+			$image = new Imagick($path);
+			$sourceWidth = $image->getImageWidth();
+			$sourceHeight = $image->getImageHeight();
+
+			$image->resizeImage($targetWidth, $targetHeight, Imagick::FILTER_LANCZOS, 1, true);
+
+			if ($asset->mimeType === 'image/png') {
+				$image->setImageBackgroundColor('transparent');
+			} else {
+				$image->setImageBackgroundColor('white');
+			}
+
+			$image->setImageGravity(Imagick::GRAVITY_CENTER);
+			$image->extentImage($targetWidth, $targetHeight, 0, 0);
+
+			if (in_array($asset->mimeType, ['image/jpeg', 'image/jpg'], true)) {
+				$image->setImageCompression(Imagick::COMPRESSION_JPEG);
+				$image->setImageCompressionQuality(90);
+				$image->setImageFormat('jpeg');
+			} elseif ($asset->mimeType === 'image/png') {
+				$image->setImageFormat('png');
+			}
+
+			$image->writeImage($path);
+			$image->clear();
+			$image->destroy();
+
+			$this->debugLog($settings, 'Normalized AI replacement dimensions to original asset ratio', [
+				'sourceWidth' => $sourceWidth,
+				'sourceHeight' => $sourceHeight,
+				'targetWidth' => $targetWidth,
+				'targetHeight' => $targetHeight,
+			]);
+		} catch (\Throwable $e) {
+			$this->debugLog($settings, 'AI replacement dimension normalization failed', [
+				'error' => $e->getMessage(),
+				'targetWidth' => $targetWidth,
+				'targetHeight' => $targetHeight,
+			]);
+			Craft::warning('ImageQualityChecker: AI replacement dimension normalization failed: ' . $e->getMessage(), __METHOD__);
 		}
 	}
 
