@@ -121,14 +121,15 @@ class ImageQualityChecker extends Plugin
 			TemplateEvent $e
 		) {
 			if (
-				$e->template == "settings/plugins/_settings.twig"
+				$e->template == "settings/plugins/_settings.twig" &&
+				($e->variables['plugin']->handle ?? null) === $this->handle
 			) {
 				// Add the tabs
 				$e->variables["tabs"] = [
-					["label" => "ChatGPT", "url" => "#settings-tab-chatgpt"],
-					["label" => "Notifications", "url" => "#settings-tab-notifications"],									
-					["label" => "Enhancement", "url" => "#settings-tab-enhancement"],
-					["label" => "Volumes", "url" => "#settings-tab-volumes"],
+					["label" => "ChatGPT", "url" => "#tab-chatgpt"],
+					["label" => "Notifications", "url" => "#tab-notifications"],									
+					["label" => "Enhancement", "url" => "#tab-enhancement"],
+					["label" => "Volumes", "url" => "#tab-volumes"],
 				];
 			}
 		});
