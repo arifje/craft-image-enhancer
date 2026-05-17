@@ -126,10 +126,10 @@ class ImageQualityChecker extends Plugin
 			) {
 				// Add the tabs
 				$e->variables["tabs"] = [
-					["label" => "ChatGPT", "url" => "#tab-chatgpt"],
-					["label" => "Notifications", "url" => "#tab-notifications"],									
-					["label" => "Enhancement", "url" => "#tab-enhancement"],
-					["label" => "Volumes", "url" => "#tab-volumes"],
+					["label" => "ChatGPT", "url" => "#settings-tab-chatgpt"],
+					["label" => "Notifications", "url" => "#settings-tab-notifications"],									
+					["label" => "Enhancement", "url" => "#settings-tab-enhancement"],
+					["label" => "Volumes", "url" => "#settings-tab-volumes"],
 				];
 			}
 		});
