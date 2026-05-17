@@ -138,9 +138,14 @@ class ImageQualityChecker extends Plugin
 	private function attachEventHandlers(): void
 	{
 		Event::on(Elements::class, Elements::EVENT_AFTER_SAVE_ELEMENT, function(ElementEvent $event) {
+			$settings = $this->getSettings();
 			$element = $event->element;
 		
 			if (!$element instanceof Asset || $element->kind !== 'image' || !$event->isNew) {
+				return;
+			}
+
+			if (!$settings->enabled) {
 				return;
 			}
 

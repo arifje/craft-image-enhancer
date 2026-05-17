@@ -29,6 +29,15 @@ class AnalyzeImageJob extends BaseJob
 	{
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 		$this->updateProgress($queue, 0.05, 'Loading asset');
+
+		if (!$settings->enabled) {
+			$this->debugLog($settings, 'Skipping analysis because the plugin is disabled', [
+				'assetId' => $this->assetId,
+			]);
+			$this->updateProgress($queue, 1, 'Skipped: plugin disabled');
+			return;
+		}
+
 		$this->debugLog($settings, 'Job started', [
 			'assetId' => $this->assetId,
 			'process' => $this->getProcessOwnershipContext(),

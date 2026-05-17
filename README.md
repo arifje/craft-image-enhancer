@@ -12,6 +12,10 @@ You also need an OpenAI API key to analyze images.
 
 Configure the plugin from the Craft control panel plugin settings.
 
+### General
+
+- **Enable Image Quality Checker**: Turn the upload analysis on or off from the control panel. When disabled, new image uploads are ignored and queued analysis jobs stop before running.
+
 ### ChatGPT
 
 - **ChatGPT API Key**: Your OpenAI API key.
@@ -53,11 +57,12 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 ## Usage
 
 1. Enter an OpenAI API key.
-2. Choose a model or keep **Latest available model** selected.
-3. Select the asset volumes that should be checked.
-4. Choose whether low-scoring images should be enhanced and replaced, or whether every uploaded image should always be enhanced.
-5. Configure Slack and/or email notifications if needed.
-6. Upload a JPEG or PNG image asset to a selected volume.
+2. Make sure **Enable Image Quality Checker** is turned on.
+3. Choose a model or keep **Latest available model** selected.
+4. Select the asset volumes that should be checked.
+5. Choose whether low-scoring images should be enhanced and replaced, or whether every uploaded image should always be enhanced.
+6. Configure Slack and/or email notifications if needed.
+7. Upload a JPEG or PNG image asset to a selected volume.
 
 The plugin queues an analysis job immediately after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
 The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications.

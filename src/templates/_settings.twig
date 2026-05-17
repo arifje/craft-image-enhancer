@@ -5,6 +5,16 @@
 
 <div id="tab-chatgpt">
 		
+	<h1>General</h1>
+
+	{{ forms.lightswitchField({
+		label: "Enable Image Quality Checker"|t,
+		id: 'enabled',
+		name: 'enabled',
+		on: settings.enabled,
+		instructions: "When disabled, new image uploads are ignored and queued analysis jobs stop before running.",
+	}) }}
+
 	<h1>ChatGPT</h1>
 	
 	{{ forms.textField({
