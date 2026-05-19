@@ -17,6 +17,7 @@ use Imagick;
 class AnalyzeImageJob extends BaseJob
 {
 	public int $assetId;
+	public ?int $entryId = null;
 
 	/**
 	 * Executes the image quality analysis job using ChatGPT.
@@ -40,6 +41,7 @@ class AnalyzeImageJob extends BaseJob
 
 		$this->debugLog($settings, 'Job started', [
 			'assetId' => $this->assetId,
+			'entryId' => $this->entryId,
 			'process' => $this->getProcessOwnershipContext(),
 			'enhancementMode' => $settings->imageEnhancementMode,
 			'enhancementTrigger' => $settings->imageEnhancementTrigger,
@@ -120,7 +122,7 @@ class AnalyzeImageJob extends BaseJob
 
 		$client = Craft::createGuzzleClient();
 		$imageUrl = $asset->getUrl();
-		$relatedEntry = $this->getParentEntryForAsset($asset->id);
+		$relatedEntry = $this->getRelatedEntryForAsset($asset->id);
 		$entryTitle = $relatedEntry?->title ?? null;
 		$entryLink = $relatedEntry?->getCpEditUrl() ?? null;
 		$author = $relatedEntry?->getAuthor()?->username
@@ -955,12 +957,47 @@ class AnalyzeImageJob extends BaseJob
 	private function getSlackSummaryText(array $data): string
 	{
 		$title = $data['entryTitle'] ?: 'onbekend artikel';
-		$article = $data['entryLink'] ? "<{$data['entryLink']}|{$title}>" : $title;
-		$imageUrl = $data['enhancement']['imageUrl'] ?? $data['imageUrl'];
+		$article = $data['entryLink'] ? $this->formatSlackLink($data['entryLink'], $title) : $this->escapeSlackText($title);
 		$actionText = $data['enhancement']['slackAction'] ?? 'Afbeelding controleren';
-		$imageLink = $imageUrl ? "<{$imageUrl}|link>" : 'link niet beschikbaar';
+		$imageLinks = $this->getSlackImageLinks($data);
 
-		return "📸 Slechte afbeelding gedetecteerd in artikel: {$article} ({$data['author']})\n👉 {$actionText} ({$imageLink})";
+		return "📸 Slechte afbeelding gedetecteerd in artikel: {$article} ({$data['author']})\n👉 {$actionText} ({$imageLinks})";
+	}
+
+	private function getSlackImageLinks(array $data): string
+	{
+		$originalUrl = $data['imageUrl'] ?? null;
+		$enhancement = $data['enhancement'] ?? [];
+		$enhancementAction = $enhancement['action'] ?? null;
+		$enhancedUrl = in_array($enhancementAction, ['add', 'replace'], true) ? ($enhancement['imageUrl'] ?? null) : null;
+
+		if ($enhancementAction === 'add' && $originalUrl && $enhancedUrl) {
+			return 'Origineel: ' . $this->formatSlackLink($originalUrl, 'link') . ' - Geoptimaliseerd: ' . $this->formatSlackLink($enhancedUrl, 'link');
+		}
+
+		if ($enhancedUrl) {
+			return 'Geoptimaliseerd: ' . $this->formatSlackLink($enhancedUrl, 'link');
+		}
+
+		if ($originalUrl) {
+			return 'Origineel: ' . $this->formatSlackLink($originalUrl, 'link');
+		}
+
+		return 'links niet beschikbaar';
+	}
+
+	private function formatSlackLink(string $url, string $label): string
+	{
+		return '<' . str_replace('>', '%3E', $url) . '|' . $this->escapeSlackText($label) . '>';
+	}
+
+	private function escapeSlackText(string $text): string
+	{
+		return str_replace(
+			['&', '<', '>', '|'],
+			['&amp;', '&lt;', '&gt;', '/'],
+			$text
+		);
 	}
 
 	private function resolveChatGptModel(ClientInterface $client, string $configuredModel, string $apiKey): string
@@ -1021,6 +1058,22 @@ class AnalyzeImageJob extends BaseJob
 	 * @param int $assetId The asset ID to search a parent entry for.
 	 * @return Entry|null The related entry if found.
 	 */
+	private function getRelatedEntryForAsset(int $assetId): ?Entry
+	{
+		if ($this->entryId) {
+			$entry = Entry::find()
+				->id($this->entryId)
+				->status(null)
+				->one();
+
+			if ($entry instanceof Entry) {
+				return $this->normalizeEntryForNotification($entry);
+			}
+		}
+
+		return $this->getParentEntryForAsset($assetId);
+	}
+
 	private function getParentEntryForAsset(int $assetId): ?Entry
 	{
 		$sourceId = (new Query())
@@ -1040,17 +1093,57 @@ class AnalyzeImageJob extends BaseJob
 		}
 	
 		if ($element instanceof Entry) {
-			return $element;
+			return $this->normalizeEntryForNotification($element);
 		}
 	
-		if (property_exists($element, 'ownerId') && $element->ownerId) {
-			return Entry::find()
-				->id($element->ownerId)
+		$ownerId = $element->ownerId ?? null;
+
+		if ($ownerId) {
+			$owner = Entry::find()
+				->id($ownerId)
 				->status(null)
 				->one();
+
+			return $owner instanceof Entry ? $this->normalizeEntryForNotification($owner) : null;
 		}
 	
 		return null;
+	}
+
+	private function normalizeEntryForNotification(Entry $entry, array $seenEntryIds = []): Entry
+	{
+		if (in_array((int) $entry->id, $seenEntryIds, true)) {
+			return $entry;
+		}
+
+		$seenEntryIds[] = (int) $entry->id;
+		$ownerId = $entry->ownerId ?? null;
+
+		if ($ownerId) {
+			$owner = Entry::find()
+				->id($ownerId)
+				->status(null)
+				->one();
+
+			if ($owner instanceof Entry) {
+				return $this->normalizeEntryForNotification($owner, $seenEntryIds);
+			}
+		}
+
+		$canonicalId = $entry->canonicalId ?? null;
+
+		if ($canonicalId && (int) $canonicalId !== (int) $entry->id) {
+			$canonical = Entry::find()
+				->id($canonicalId)
+				->status(null)
+				->one();
+
+			if ($canonical instanceof Entry) {
+				return $this->normalizeEntryForNotification($canonical, $seenEntryIds);
+			}
+		}
+
+		return $entry;
 	}
 
 	/**

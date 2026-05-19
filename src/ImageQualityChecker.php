@@ -15,7 +15,10 @@ use yii\base\Event;
 
 use craft\base\Model;
 use craft\base\Plugin;
+use craft\db\Query;
+use craft\db\Table;
 use craft\elements\Asset;
+use craft\elements\Entry;
 use craft\events\RegisterComponentTypesEvent;
 use craft\services\Elements;
 use craft\services\Utilities;
@@ -180,8 +183,73 @@ class ImageQualityChecker extends Plugin
 			// Push to a job
 			Craft::$app->queue->push(new AnalyzeImageJob([
 				'assetId' => $element->id,
+				'entryId' => $this->getRequestEntryId() ?? $this->getRelatedEntryIdForAsset($element->id),
 			]));
 		});
+	}
+
+	private function getRequestEntryId(): ?int
+	{
+		$request = Craft::$app->getRequest();
+
+		if (!method_exists($request, 'getBodyParam')) {
+			return null;
+		}
+
+		$elementId = $request->getBodyParam('elementId');
+
+		if (!$elementId) {
+			return null;
+		}
+
+		$siteId = $request->getBodyParam('siteId') ?: null;
+		$element = Craft::$app->elements->getElementById((int) $elementId, null, $siteId);
+
+		if (!$element instanceof Entry) {
+			return null;
+		}
+
+		return $this->getNotificationEntryId($element);
+	}
+
+	private function getRelatedEntryIdForAsset(int $assetId): ?int
+	{
+		$sourceId = (new Query())
+			->select(['sourceId'])
+			->from(Table::RELATIONS)
+			->where(['targetId' => $assetId])
+			->scalar();
+
+		if (!$sourceId) {
+			return null;
+		}
+
+		$element = Craft::$app->elements->getElementById((int) $sourceId, null, '*');
+
+		if ($element instanceof Entry) {
+			return $this->getNotificationEntryId($element);
+		}
+
+		$ownerId = $element->ownerId ?? null;
+
+		return $ownerId ? (int) $ownerId : null;
+	}
+
+	private function getNotificationEntryId(Entry $entry): int
+	{
+		$ownerId = $entry->ownerId ?? null;
+
+		if ($ownerId) {
+			return (int) $ownerId;
+		}
+
+		$canonicalId = $entry->canonicalId ?? null;
+
+		if ($canonicalId && (int) $canonicalId !== (int) $entry->id) {
+			return (int) $canonicalId;
+		}
+
+		return (int) $entry->id;
 	}
 	
 }
