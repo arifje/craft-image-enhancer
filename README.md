@@ -14,7 +14,7 @@ Configure the plugin from the Craft control panel plugin settings.
 
 ### General
 
-- **Enable Image Quality Checker**: Turn the upload analysis on or off from the control panel. When disabled, new image uploads are ignored and queued analysis jobs stop before running.
+- **Run quality check on upload**: Admins can turn upload analysis on or off from **Utilities → Image Quality Checker**. This runtime toggle is stored in the database instead of project config, so it can be changed directly on production without a code deploy.
 
 ### ChatGPT
 
@@ -57,7 +57,7 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 ## Usage
 
 1. Enter an OpenAI API key.
-2. Make sure **Enable Image Quality Checker** is turned on.
+2. Make sure **Run quality check on upload** is turned on under **Utilities → Image Quality Checker**.
 3. Choose a model or keep **Latest available model** selected.
 4. Select the asset volumes that should be checked.
 5. Choose whether low-scoring images should be enhanced and replaced, or whether every uploaded image should always be enhanced.

@@ -6,7 +6,9 @@ use Craft;
 
 use arjanbrinkman\craftimagequalitychecker\models\Settings;
 use arjanbrinkman\craftimagequalitychecker\services\ImageQualityService;
+use arjanbrinkman\craftimagequalitychecker\services\RuntimeSettingsService;
 use arjanbrinkman\craftimagequalitychecker\jobs\AnalyzeImageJob;
+use arjanbrinkman\craftimagequalitychecker\utilities\QualityCheckUtility;
 use arjanbrinkman\craftimagequalitychecker\web\assets\imagequalitychecker\ImageQualityCheckerAsset;
 
 use yii\base\Event;
@@ -14,23 +16,23 @@ use yii\base\Event;
 use craft\base\Model;
 use craft\base\Plugin;
 use craft\elements\Asset;
-use craft\events\ModelEvent;
+use craft\events\RegisterComponentTypesEvent;
 use craft\services\Elements;
+use craft\services\Utilities;
 use craft\events\ElementEvent;
 use craft\web\View;
 use craft\events\TemplateEvent;
-use craft\helpers\App;
-use craft\helpers\ElementHelper;
 
 /**
  * Image Quality Checker plugin
  *
  * @method static ImageQualityChecker getInstance()
  * @method Settings getSettings()
+ * @property RuntimeSettingsService $runtimeSettings
  */
 class ImageQualityChecker extends Plugin
 {
-	public string $schemaVersion = '1.0.0';
+	public string $schemaVersion = '1.1.0';
 	public bool $hasCpSettings = true;
 	public static bool $skipAssetQueue = false;
 
@@ -39,6 +41,7 @@ class ImageQualityChecker extends Plugin
 		return [
 			'components' => [
 				'imageQualityService' => ImageQualityService::class,
+				'runtimeSettings' => RuntimeSettingsService::class,
 			],
 		];
 	}
@@ -55,6 +58,7 @@ class ImageQualityChecker extends Plugin
 		}
 
 		$this->attachEventHandlers();
+		$this->registerUtilities();
 
 		// Tabs (settings page)
 		$this->_registerSettings();
@@ -134,18 +138,32 @@ class ImageQualityChecker extends Plugin
 			}
 		});
 	}
+
+	private function registerUtilities(): void
+	{
+		$eventName = defined(Utilities::class . '::EVENT_REGISTER_UTILITIES')
+			? Utilities::EVENT_REGISTER_UTILITIES
+			: Utilities::EVENT_REGISTER_UTILITY_TYPES;
+
+		Event::on(
+			Utilities::class,
+			$eventName,
+			static function(RegisterComponentTypesEvent $event) {
+				$event->types[] = QualityCheckUtility::class;
+			}
+		);
+	}
 	
 	private function attachEventHandlers(): void
 	{
 		Event::on(Elements::class, Elements::EVENT_AFTER_SAVE_ELEMENT, function(ElementEvent $event) {
-			$settings = $this->getSettings();
 			$element = $event->element;
 		
 			if (!$element instanceof Asset || $element->kind !== 'image' || !$event->isNew) {
 				return;
 			}
 
-			if (!$settings->enabled) {
+			if (!$this->runtimeSettings->isQualityCheckEnabled()) {
 				return;
 			}
 

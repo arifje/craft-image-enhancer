@@ -19,9 +19,6 @@ class Settings extends Model
 	public const ENHANCEMENT_ACTION_REPLACE = 'replace';
 	public const ENHANCEMENT_ACTION_ADD = 'add';
 
-	// General
-	public bool $enabled = true;
-
 	// ChatGPT
 	public string $chatGptApiKey = '';
 	public string $chatGptPrompt = 'You are an expert in image quality. Evaluate this image from 1 (very bad) to 100 (excellent), considering sharpness, blur, noise, and motion blur.';
@@ -58,7 +55,7 @@ class Settings extends Model
 	{
 		return [
 			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'creativeEnhancementPrompt'], 'string'],
-			[['enabled', 'debugLogging'], 'boolean'],
+			[['debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['allowedAssetFieldHandles'], 'safe'],
 		];

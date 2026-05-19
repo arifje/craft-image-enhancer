@@ -1,0 +1,17 @@
+{% import '_includes/forms' as forms %}
+
+<form method="post" accept-charset="UTF-8">
+	{{ actionInput('_image-quality-checker/runtime-settings/save') }}
+	{{ redirectInput('utilities/image-quality-checker') }}
+	{{ csrfInput() }}
+
+	{{ forms.lightswitchField({
+		label: 'Run quality check on upload',
+		id: 'enabled',
+		name: 'enabled',
+		on: enabled,
+		instructions: 'When disabled, new image uploads are ignored and queued analysis jobs stop before running.',
+	}) }}
+
+	<input type="submit" class="btn submit" value="Save">
+</form>
