@@ -86,6 +86,7 @@ class ImageQualityChecker extends Plugin
 			'imageEnhancementTriggerOptions' => Settings::imageEnhancementTriggerOptions(),
 			'imageEnhancementActionOptions' => Settings::imageEnhancementActionOptions(),
 			'imageEnhancementModelOptions' => Settings::imageEnhancementModelOptions(),
+			'imageEnhancementFaceHandlingOptions' => Settings::imageEnhancementFaceHandlingOptions(),
 		]);
 	}
 

@@ -208,6 +208,15 @@
 		options: imageEnhancementModelOptions,
 	}) }}
 
+	{{ forms.selectField({
+		label: 'AI face handling',
+		name: 'imageEnhancementFaceHandling',
+		id: 'imageEnhancementFaceHandling',
+		instructions: 'Choose whether AI enhancement can run when visible human faces are detected.',
+		value: settings.imageEnhancementFaceHandling,
+		options: imageEnhancementFaceHandlingOptions,
+	}) }}
+
 	{{ forms.textField({
 		label: 'Imagick safe optimization max width',
 		name: 'safeEnhancementMaxWidth',
@@ -230,9 +239,9 @@
 		label: 'OpenAI / ChatGPT AI enhancement prompt',
 		name: 'creativeEnhancementPrompt',
 		id: 'creativeEnhancementPrompt',
-		rows: 8,
+		rows: 16,
 		instructions: 'Used for OpenAI/ChatGPT AI enhancement mode. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details.',
-		value: settings.creativeEnhancementPrompt,
+		value: settings.effectiveCreativeEnhancementPrompt,
 	}) }}
 
 </div>

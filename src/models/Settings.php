@@ -20,7 +20,88 @@ class Settings extends Model
 	public const ENHANCEMENT_ACTION_ADD = 'add';
 	public const IMAGE_MODEL_GPT_IMAGE_2 = 'gpt-image-2';
 	public const IMAGE_MODEL_GPT_IMAGE_1 = 'gpt-image-1';
-	public const DEFAULT_CREATIVE_ENHANCEMENT_PROMPT = 'This is a real-world image and may be a photograph, video still, screenshot, frame capture, or otherwise blurry/low-quality source. Apply only conservative, non-destructive technical cleanup. Preserve the exact identity and likeness of every visible person. If a human face is visible, identity preservation overrides sharpness: do not reconstruct, redraw, beautify, age, de-age, stylize, smooth, or change the face. Do not change facial geometry, face shape, eyes, eyebrows, nose, mouth, teeth, smile, expression, skin texture, hairline, hairstyle, facial hair, ears, makeup, or distinctive marks. Do not use outside knowledge, celebrity recognition, or assumptions to make a blurry face look like a known person. If facial details are blurry, uncertain, occluded, motion-blurred, compressed, or low resolution, keep those details soft and uncertain instead of inventing them. Preserve the same crop, zoom level, framing, canvas size, composition, perspective, people, objects, background, text, clothing, hands, and textures. Do not add, remove, replace, reposition, uncrop, extend, or invent anything. Only reduce noise and compression artifacts, apply very mild sharpening/deblurring to already visible edges, and make subtle color/exposure correction if needed. If an improvement would require guessing new details, do not do it. The result should be indistinguishable from the original except for mild technical quality improvements.';
+	public const FACE_HANDLING_ALLOW_AI = 'allow_ai';
+	public const FACE_HANDLING_SAFE_FALLBACK = 'safe_fallback';
+	public const LEGACY_CREATIVE_ENHANCEMENT_PROMPT = 'This is a real-world image and may be a photograph, video still, screenshot, frame capture, or otherwise blurry/low-quality source. Apply only conservative, non-destructive technical cleanup. Preserve the exact identity and likeness of every visible person. If a human face is visible, identity preservation overrides sharpness: do not reconstruct, redraw, beautify, age, de-age, stylize, smooth, or change the face. Do not change facial geometry, face shape, eyes, eyebrows, nose, mouth, teeth, smile, expression, skin texture, hairline, hairstyle, facial hair, ears, makeup, or distinctive marks. Do not use outside knowledge, celebrity recognition, or assumptions to make a blurry face look like a known person. If facial details are blurry, uncertain, occluded, motion-blurred, compressed, or low resolution, keep those details soft and uncertain instead of inventing them. Preserve the same crop, zoom level, framing, canvas size, composition, perspective, people, objects, background, text, clothing, hands, and textures. Do not add, remove, replace, reposition, uncrop, extend, or invent anything. Only reduce noise and compression artifacts, apply very mild sharpening/deblurring to already visible edges, and make subtle color/exposure correction if needed. If an improvement would require guessing new details, do not do it. The result should be indistinguishable from the original except for mild technical quality improvements.';
+	public const JSON_CREATIVE_ENHANCEMENT_PROMPT = <<<'PROMPT'
+{
+  "task_type": "conservative_real_world_image_cleanup",
+  "source_context": {
+    "possible_sources": [
+      "photograph",
+      "video_still",
+      "screenshot",
+      "frame_capture",
+      "blurry_or_low_quality_source"
+    ],
+    "known_limitations": [
+      "motion_blur",
+      "low_resolution",
+      "compression_artifacts",
+      "noise",
+      "uncertain_details"
+    ]
+  },
+  "primary_rule": "Preserve the original image. Do not add, remove, replace, reconstruct, reposition, uncrop, extend, or invent any visual detail.",
+  "allowed_adjustments": [
+    "reduce_noise",
+    "reduce_compression_artifacts",
+    "very_mild_sharpening_of_already_visible_edges",
+    "subtle_color_balance_correction",
+    "subtle_exposure_or_contrast_correction"
+  ],
+  "forbidden_adjustments": [
+    "creative_enhancement",
+    "context_aware_infilling",
+    "generating_missing_detail",
+    "beautification",
+    "stylization",
+    "upscaling_by_inventing_texture",
+    "changing_crop_zoom_framing_canvas_or_composition",
+    "changing_people_objects_background_text_clothing_hands_or_textures"
+  ],
+  "human_faces": {
+    "priority": "identity_preservation_over_sharpness",
+    "instructions": [
+      "Preserve the exact identity and likeness of every visible person.",
+      "Do not reconstruct, redraw, beautify, age, de-age, stylize, smooth, or change any face.",
+      "Do not use outside knowledge, celebrity recognition, or assumptions to make a blurry face look like a known person.",
+      "If facial details are blurry, uncertain, occluded, motion-blurred, compressed, or low resolution, keep those details soft and uncertain instead of inventing them."
+    ],
+    "forbidden_changes": [
+      "face_shape",
+      "facial_geometry",
+      "eyes",
+      "eyebrows",
+      "nose",
+      "mouth",
+      "teeth",
+      "smile",
+      "expression",
+      "skin_texture",
+      "hairline",
+      "hairstyle",
+      "facial_hair",
+      "ears",
+      "makeup",
+      "distinctive_marks"
+    ]
+  },
+  "uncertainty_policy": "If an improvement requires guessing, do not do it. Leave uncertain areas visibly uncertain.",
+  "output_goal": "The output must keep the same dimensions, crop, framing, composition, perspective, and visual content. It should be indistinguishable from the original except for mild technical cleanup."
+}
+PROMPT;
+	public const DEFAULT_CREATIVE_ENHANCEMENT_PROMPT = <<<'PROMPT'
+Enhance this real-world image, which may be a photograph, video still, screenshot, frame capture, or otherwise blurry or low-quality source. Create an ultra-clear, realistic result with maximum useful clarity while fully preserving the original content. Remove blur, noise, grain, color fading, and compression artifacts where this can be done without guessing, fabricating, or changing the scene.
+
+Restore sharp focus and realistic detail only from details that are already visible in the original image. Refine natural micro-details in skin texture, hair strands, fabric textures, objects, and background surfaces, but do not invent missing detail, reconstruct uncertain areas, or add new texture that was not visibly supported by the source.
+
+Preserve the exact identity, proportions, and natural appearance of every visible person. Hard rule: do not alter facial structure, facial features, expression, hairstyle, hairline, facial hair, skin texture, body shape, pose, clothing, age, or identity in any way. The face must remain the same person as in the original image, only clearer where the original detail supports it. If a face is blurry, occluded, motion-blurred, compressed, or low resolution, keep uncertain facial features uncertain instead of creating a new face. Do not use outside knowledge, celebrity recognition, or assumptions to make a blurry face look like a known person.
+
+Correct color balance to restore natural skin tones and accurate colors while maintaining the original atmosphere. Improve lighting, dynamic range, and contrast subtly to add depth and realism without changing the direction of the light, time of day, mood, or scene context.
+
+Preserve the original crop, dimensions, framing, composition, camera angle, perspective, pose, facial expression, background elements, text, objects, clothing, hands, and overall mood. Do not add, remove, replace, reposition, uncrop, extend, stylize, beautify, smooth into a plastic look, or create artificial sharpening halos. The output should look like the same image, technically cleaned up and clearer, not a creative reinterpretation.
+PROMPT;
 
 	// ChatGPT
 	public string $chatGptApiKey = '';
@@ -51,6 +132,7 @@ class Settings extends Model
 	public string $imageEnhancementTrigger = self::ENHANCEMENT_TRIGGER_THRESHOLD;
 	public string $imageEnhancementAction = self::ENHANCEMENT_ACTION_REPLACE;
 	public string $imageEnhancementModel = self::IMAGE_MODEL_GPT_IMAGE_2;
+	public string $imageEnhancementFaceHandling = self::FACE_HANDLING_ALLOW_AI;
 	public int $safeEnhancementMaxWidth = 2400;
 	public int $safeEnhancementJpegQuality = 90;
 	public string $creativeEnhancementPrompt = self::DEFAULT_CREATIVE_ENHANCEMENT_PROMPT;
@@ -58,7 +140,7 @@ class Settings extends Model
 	public function rules(): array
 	{
 		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'creativeEnhancementPrompt'], 'string'],
+			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
 			[['debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['allowedAssetFieldHandles'], 'safe'],
@@ -127,6 +209,28 @@ class Settings extends Model
 			['label' => 'GPT Image 2', 'value' => self::IMAGE_MODEL_GPT_IMAGE_2],
 			['label' => 'GPT Image 1', 'value' => self::IMAGE_MODEL_GPT_IMAGE_1],
 		];
+	}
+
+	public static function imageEnhancementFaceHandlingOptions(): array
+	{
+		return [
+			['label' => 'Allow AI enhancement for images with faces', 'value' => self::FACE_HANDLING_ALLOW_AI],
+			['label' => 'Use Imagick safe optimization when faces are detected', 'value' => self::FACE_HANDLING_SAFE_FALLBACK],
+		];
+	}
+
+	public function getEffectiveCreativeEnhancementPrompt(): string
+	{
+		$prompt = trim($this->creativeEnhancementPrompt);
+		if (
+			$prompt === '' ||
+			$prompt === trim(self::LEGACY_CREATIVE_ENHANCEMENT_PROMPT) ||
+			$prompt === trim(self::JSON_CREATIVE_ENHANCEMENT_PROMPT)
+		) {
+			return self::DEFAULT_CREATIVE_ENHANCEMENT_PROMPT;
+		}
+
+		return $this->creativeEnhancementPrompt;
 	}
 	
 }

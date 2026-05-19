@@ -374,7 +374,10 @@ class AnalyzeImageJob extends BaseJob
 
 	private function creativeEnhanceImage(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): array
 	{
-		if ($this->shouldUseSafeEnhancementForFaces($client, $settings, $asset, $localPath, $apiKey)) {
+		if (
+			$settings->imageEnhancementFaceHandling === Settings::FACE_HANDLING_SAFE_FALLBACK &&
+			$this->shouldUseSafeEnhancementForFaces($client, $settings, $asset, $localPath, $apiKey)
+		) {
 			$this->debugLog($settings, 'Using safe enhancement instead of AI enhancement because a visible human face was detected or face detection failed', [
 				'assetId' => $asset->id,
 			]);
@@ -422,7 +425,7 @@ class AnalyzeImageJob extends BaseJob
 					],
 					[
 						'name' => 'prompt',
-						'contents' => $settings->creativeEnhancementPrompt,
+						'contents' => $settings->getEffectiveCreativeEnhancementPrompt(),
 					],
 					[
 						'name' => 'size',

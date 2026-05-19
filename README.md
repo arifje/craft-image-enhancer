@@ -43,11 +43,11 @@ Enhancement runs only when an image score is below the notification threshold.
 
 - **Disabled**: Analyze and notify only.
 - **Imagick safe optimization**: Creates a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
-- **OpenAI / ChatGPT AI enhancement**: Creates an OpenAI-generated edit with the selected image model, defaulting to `gpt-image-2`, when no visible human faces are detected. If a visible face is detected, the plugin falls back to Imagick safe optimization to avoid reconstructing or changing a person’s identity.
+- **OpenAI / ChatGPT AI enhancement**: Creates an OpenAI-generated edit with the selected image model, defaulting to `gpt-image-2`. The AI face handling setting controls whether AI enhancement is allowed for images with visible faces, or whether those images fall back to Imagick safe optimization.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 - **Enhanced image handling**: Choose whether the enhanced file replaces the original asset, or is added next to the original asset for manual review.
 
-Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing. Face detection for the AI mode uses the configured ChatGPT model before deciding whether generative image editing is safe to run.
+Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing. Face detection for the optional safe fallback uses the configured ChatGPT model before deciding whether generative image editing is safe to run. The default AI prompt is tuned for clearer `gpt-image-2` results while forbidding identity changes, facial reconstruction, and invented detail; saved settings that are empty or still use a previous default are upgraded to this prompt automatically.
 AI-enhanced replacements are cropped back to the original asset dimensions so the original field ratio is retained without white padding.
 
 ### Asset Volumes
