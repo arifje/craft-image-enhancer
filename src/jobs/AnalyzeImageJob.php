@@ -425,7 +425,7 @@ class AnalyzeImageJob extends BaseJob
 					],
 					[
 						'name' => 'prompt',
-						'contents' => $settings->getEffectiveCreativeEnhancementPrompt(),
+						'contents' => $settings->getCreativeEnhancementPromptForRequest(),
 					],
 					[
 						'name' => 'size',

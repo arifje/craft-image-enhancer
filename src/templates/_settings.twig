@@ -217,6 +217,66 @@
 		options: imageEnhancementFaceHandlingOptions,
 	}) }}
 
+	<hr>
+
+	<h2>AI tuning levels</h2>
+
+	{{ forms.textField({
+		label: 'Clarity / detail',
+		name: 'creativeEnhancementClarityLevel',
+		id: 'creativeEnhancementClarityLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is very subtle, 5 is balanced, 10 is strong but still natural. Controls sharpness, deblurring, edge definition, and visible texture detail.',
+		value: settings.creativeEnhancementClarityLevel,
+		placeholder: '5',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Contrast / depth',
+		name: 'creativeEnhancementContrastLevel',
+		id: 'creativeEnhancementContrastLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is very subtle, 5 is balanced, 10 is strong but still natural. Controls contrast, dynamic range, and perceived depth.',
+		value: settings.creativeEnhancementContrastLevel,
+		placeholder: '5',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Color intensity',
+		name: 'creativeEnhancementColorLevel',
+		id: 'creativeEnhancementColorLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is muted, 5 is balanced, 10 is vivid but still natural. Controls saturation, vibrance, and color richness.',
+		value: settings.creativeEnhancementColorLevel,
+		placeholder: '5',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Noise / artifact cleanup',
+		name: 'creativeEnhancementNoiseReductionLevel',
+		id: 'creativeEnhancementNoiseReductionLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is very light cleanup, 5 is balanced, 10 is aggressive but should still preserve real skin texture and natural grain.',
+		value: settings.creativeEnhancementNoiseReductionLevel,
+		placeholder: '5',
+	}) }}
+
 	{{ forms.textField({
 		label: 'Imagick safe optimization max width',
 		name: 'safeEnhancementMaxWidth',

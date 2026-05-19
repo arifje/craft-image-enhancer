@@ -22,6 +22,8 @@ class Settings extends Model
 	public const IMAGE_MODEL_GPT_IMAGE_1 = 'gpt-image-1';
 	public const FACE_HANDLING_ALLOW_AI = 'allow_ai';
 	public const FACE_HANDLING_SAFE_FALLBACK = 'safe_fallback';
+	public const ENHANCEMENT_LEVEL_MIN = 1;
+	public const ENHANCEMENT_LEVEL_MAX = 10;
 	public const LEGACY_CREATIVE_ENHANCEMENT_PROMPT = 'This is a real-world image and may be a photograph, video still, screenshot, frame capture, or otherwise blurry/low-quality source. Apply only conservative, non-destructive technical cleanup. Preserve the exact identity and likeness of every visible person. If a human face is visible, identity preservation overrides sharpness: do not reconstruct, redraw, beautify, age, de-age, stylize, smooth, or change the face. Do not change facial geometry, face shape, eyes, eyebrows, nose, mouth, teeth, smile, expression, skin texture, hairline, hairstyle, facial hair, ears, makeup, or distinctive marks. Do not use outside knowledge, celebrity recognition, or assumptions to make a blurry face look like a known person. If facial details are blurry, uncertain, occluded, motion-blurred, compressed, or low resolution, keep those details soft and uncertain instead of inventing them. Preserve the same crop, zoom level, framing, canvas size, composition, perspective, people, objects, background, text, clothing, hands, and textures. Do not add, remove, replace, reposition, uncrop, extend, or invent anything. Only reduce noise and compression artifacts, apply very mild sharpening/deblurring to already visible edges, and make subtle color/exposure correction if needed. If an improvement would require guessing new details, do not do it. The result should be indistinguishable from the original except for mild technical quality improvements.';
 	public const JSON_CREATIVE_ENHANCEMENT_PROMPT = <<<'PROMPT'
 {
@@ -133,6 +135,10 @@ PROMPT;
 	public string $imageEnhancementAction = self::ENHANCEMENT_ACTION_REPLACE;
 	public string $imageEnhancementModel = self::IMAGE_MODEL_GPT_IMAGE_2;
 	public string $imageEnhancementFaceHandling = self::FACE_HANDLING_ALLOW_AI;
+	public int $creativeEnhancementClarityLevel = 5;
+	public int $creativeEnhancementContrastLevel = 5;
+	public int $creativeEnhancementColorLevel = 5;
+	public int $creativeEnhancementNoiseReductionLevel = 5;
 	public int $safeEnhancementMaxWidth = 2400;
 	public int $safeEnhancementJpegQuality = 90;
 	public string $creativeEnhancementPrompt = self::DEFAULT_CREATIVE_ENHANCEMENT_PROMPT;
@@ -143,6 +149,7 @@ PROMPT;
 			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
 			[['debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
+			[['creativeEnhancementClarityLevel', 'creativeEnhancementContrastLevel', 'creativeEnhancementColorLevel', 'creativeEnhancementNoiseReductionLevel'], 'integer', 'min' => self::ENHANCEMENT_LEVEL_MIN, 'max' => self::ENHANCEMENT_LEVEL_MAX],
 			[['allowedAssetFieldHandles'], 'safe'],
 		];
 	}
@@ -231,6 +238,56 @@ PROMPT;
 		}
 
 		return $this->creativeEnhancementPrompt;
+	}
+
+	public function getCreativeEnhancementPromptForRequest(): string
+	{
+		return trim($this->getEffectiveCreativeEnhancementPrompt()) . "\n\n" . $this->getCreativeEnhancementTuningPrompt();
+	}
+
+	private function getCreativeEnhancementTuningPrompt(): string
+	{
+		$clarityLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementClarityLevel);
+		$contrastLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementContrastLevel);
+		$colorLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementColorLevel);
+		$noiseReductionLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementNoiseReductionLevel);
+
+		return sprintf(
+			"Enhancement tuning levels, from %d to %d, where 5 is balanced/medium. Respect these levels while preserving identity, composition, natural skin texture, and the original atmosphere:\n- Clarity/detail: %d/10 (%s). Controls sharpness, deblurring, edge definition, and visible texture detail. Higher values may look clearer, but must not create artificial sharpening halos or invented facial detail.\n- Contrast/depth: %d/10 (%s). Controls contrast, dynamic range, and perceived depth. Higher values may add punch, but must not crush shadows, blow highlights, or change the original lighting direction.\n- Color intensity: %d/10 (%s). Controls saturation, vibrance, and color richness. Higher values may make colors livelier, but must keep skin tones natural and avoid oversaturated or artificial color.\n- Noise/artifact cleanup: %d/10 (%s). Controls noise, grain, blur residue, and compression artifact reduction. Higher values may clean more aggressively, but must not smooth faces into a plastic look or remove real texture.",
+			self::ENHANCEMENT_LEVEL_MIN,
+			self::ENHANCEMENT_LEVEL_MAX,
+			$clarityLevel,
+			$this->describeEnhancementLevel($clarityLevel),
+			$contrastLevel,
+			$this->describeEnhancementLevel($contrastLevel),
+			$colorLevel,
+			$this->describeEnhancementLevel($colorLevel),
+			$noiseReductionLevel,
+			$this->describeEnhancementLevel($noiseReductionLevel)
+		);
+	}
+
+	private function normalizeEnhancementLevel(int $level): int
+	{
+		return max(self::ENHANCEMENT_LEVEL_MIN, min(self::ENHANCEMENT_LEVEL_MAX, $level));
+	}
+
+	private function describeEnhancementLevel(int $level): string
+	{
+		if ($level <= 2) {
+			return 'very subtle';
+		}
+		if ($level <= 4) {
+			return 'restrained';
+		}
+		if ($level === 5) {
+			return 'balanced';
+		}
+		if ($level <= 7) {
+			return 'moderately strong';
+		}
+
+		return 'strong but still natural';
 	}
 	
 }
