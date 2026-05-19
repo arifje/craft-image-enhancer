@@ -43,11 +43,11 @@ Enhancement runs only when an image score is below the notification threshold.
 
 - **Disabled**: Analyze and notify only.
 - **Imagick safe optimization**: Creates a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
-- **OpenAI / ChatGPT AI enhancement**: Creates an OpenAI-generated edit that follows the configured AI enhancement prompt. This can produce stronger visual improvements, but may make more noticeable changes than Imagick safe optimization.
+- **OpenAI / ChatGPT AI enhancement**: Creates an OpenAI-generated edit with the selected image model, defaulting to `gpt-image-2`, when no visible human faces are detected. If a visible face is detected, the plugin falls back to Imagick safe optimization to avoid reconstructing or changing a person’s identity.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 - **Enhanced image handling**: Choose whether the enhanced file replaces the original asset, or is added next to the original asset for manual review.
 
-Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing.
+Imagick safe optimization requires the PHP Imagick extension. OpenAI / ChatGPT AI enhancement requires an OpenAI API key with access to image editing. Face detection for the AI mode uses the configured ChatGPT model before deciding whether generative image editing is safe to run.
 AI-enhanced replacements are cropped back to the original asset dimensions so the original field ratio is retained without white padding.
 
 ### Asset Volumes

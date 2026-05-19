@@ -374,6 +374,14 @@ class AnalyzeImageJob extends BaseJob
 
 	private function creativeEnhanceImage(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): array
 	{
+		if ($this->shouldUseSafeEnhancementForFaces($client, $settings, $asset, $localPath, $apiKey)) {
+			$this->debugLog($settings, 'Using safe enhancement instead of AI enhancement because a visible human face was detected or face detection failed', [
+				'assetId' => $asset->id,
+			]);
+
+			return $this->safeEnhanceImage($settings, $asset, $localPath);
+		}
+
 		$handle = fopen($localPath, 'rb');
 
 		if ($handle === false) {
@@ -405,7 +413,7 @@ class AnalyzeImageJob extends BaseJob
 				'multipart' => [
 					[
 						'name' => 'model',
-						'contents' => 'gpt-image-1',
+						'contents' => $settings->imageEnhancementModel,
 					],
 					[
 						'name' => 'image',
@@ -480,6 +488,73 @@ class AnalyzeImageJob extends BaseJob
 				fclose($handle);
 			}
 		}
+	}
+
+	private function shouldUseSafeEnhancementForFaces(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): bool
+	{
+		if (!file_exists($localPath)) {
+			return true;
+		}
+
+		$mime = $asset->mimeType ?: 'image/jpeg';
+		$imageBase64 = base64_encode(file_get_contents($localPath));
+		$model = $this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey);
+
+		try {
+			$response = $client->post('https://api.openai.com/v1/chat/completions', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $apiKey,
+					'Content-Type' => 'application/json',
+				],
+				'json' => [
+					'model' => $model,
+					'messages' => [[
+						'role' => 'user',
+						'content' => [
+							[
+								'type' => 'text',
+								'text' => 'Check whether this image contains any visible human face. Count blurry, motion-blurred, partially occluded, low-resolution, background, profile, or side-view faces as visible. Do not identify anyone. Return only JSON: {"visibleHumanFaces": true|false, "confidence": "high|medium|low"}.',
+							],
+							[
+								'type' => 'image_url',
+								'image_url' => ['url' => 'data:' . $mime . ';base64,' . $imageBase64],
+							],
+						],
+					]],
+					'max_completion_tokens' => 120,
+				],
+			]);
+		} catch (\Throwable $e) {
+			$this->debugLog($settings, 'Face detection failed; falling back to safe enhancement', [
+				'error' => $e->getMessage(),
+				'model' => $model,
+			]);
+
+			return true;
+		}
+
+		$json = json_decode((string) $response->getBody(), true);
+		$content = $json['choices'][0]['message']['content'] ?? '';
+		$matches = [];
+		preg_match('/\\{.*\\}/s', $content, $matches);
+		$data = isset($matches[0]) ? json_decode($matches[0], true) : null;
+
+		if (!is_array($data) || !array_key_exists('visibleHumanFaces', $data)) {
+			$this->debugLog($settings, 'Face detection returned an invalid response; falling back to safe enhancement', [
+				'responsePreview' => substr((string) $content, 0, 160),
+			]);
+
+			return true;
+		}
+
+		$visibleHumanFaces = (bool) $data['visibleHumanFaces'];
+		$this->debugLog($settings, 'Face detection result before AI enhancement', [
+			'visibleHumanFaces' => $visibleHumanFaces,
+			'confidence' => $data['confidence'] ?? null,
+			'model' => $model,
+		]);
+
+		return $visibleHumanFaces;
 	}
 
 	private function storeEnhancedImage(Settings $settings, Asset $asset, string $tempPath, string $localPath, string $enhancementType): array

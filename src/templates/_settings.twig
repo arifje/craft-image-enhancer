@@ -199,6 +199,15 @@
 		options: imageEnhancementActionOptions,
 	}) }}
 
+	{{ forms.selectField({
+		label: 'OpenAI image enhancement model',
+		name: 'imageEnhancementModel',
+		id: 'imageEnhancementModel',
+		instructions: 'Choose which OpenAI image model is used when AI enhancement is allowed to run.',
+		value: settings.imageEnhancementModel,
+		options: imageEnhancementModelOptions,
+	}) }}
+
 	{{ forms.textField({
 		label: 'Imagick safe optimization max width',
 		name: 'safeEnhancementMaxWidth',
@@ -221,8 +230,8 @@
 		label: 'OpenAI / ChatGPT AI enhancement prompt',
 		name: 'creativeEnhancementPrompt',
 		id: 'creativeEnhancementPrompt',
-		rows: 4,
-		instructions: 'Used for OpenAI/ChatGPT AI enhancement mode. Keep this strict if context must be preserved.',
+		rows: 8,
+		instructions: 'Used for OpenAI/ChatGPT AI enhancement mode. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details.',
 		value: settings.creativeEnhancementPrompt,
 	}) }}
 
