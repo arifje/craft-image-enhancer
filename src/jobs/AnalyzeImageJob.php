@@ -958,10 +958,24 @@ class AnalyzeImageJob extends BaseJob
 	{
 		$title = $data['entryTitle'] ?: 'onbekend artikel';
 		$article = $data['entryLink'] ? $this->formatSlackLink($data['entryLink'], $title) : $this->escapeSlackText($title);
+		$scoreText = $this->getSlackScoreText($data);
 		$actionText = $data['enhancement']['slackAction'] ?? 'Afbeelding controleren';
 		$imageLinks = $this->getSlackImageLinks($data);
 
-		return "📸 Slechte afbeelding gedetecteerd in artikel: {$article} ({$data['author']})\n👉 {$actionText} ({$imageLinks})";
+		return "📸 Slechte afbeelding gedetecteerd in artikel: {$article} ({$data['author']})\n{$scoreText}\n👉 {$actionText} ({$imageLinks})";
+	}
+
+	private function getSlackScoreText(array $data): string
+	{
+		$score = $data['scoreNum'] ?? null;
+		$emoji = $data['scoreEmoji'] ?? '❓';
+		$label = $data['scoreLabel'] ?? 'Onbekend';
+
+		if (is_numeric($score)) {
+			return "{$emoji} {$score}/100 ({$label})";
+		}
+
+		return "{$emoji} {$label}";
 	}
 
 	private function getSlackImageLinks(array $data): string
