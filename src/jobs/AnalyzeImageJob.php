@@ -498,63 +498,78 @@ class AnalyzeImageJob extends BaseJob
 
 		$mime = $asset->mimeType ?: 'image/jpeg';
 		$imageBase64 = base64_encode(file_get_contents($localPath));
-		$model = $this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey);
+		$models = array_values(array_unique([
+			$this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey),
+			'gpt-4o-mini',
+			'gpt-4o',
+		]));
 
-		try {
-			$response = $client->post('https://api.openai.com/v1/chat/completions', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $apiKey,
-					'Content-Type' => 'application/json',
-				],
-				'json' => [
+		foreach ($models as $model) {
+			try {
+				$response = $client->post('https://api.openai.com/v1/chat/completions', [
+					'headers' => [
+						'Authorization' => 'Bearer ' . $apiKey,
+						'Content-Type' => 'application/json',
+					],
+					'json' => [
+						'model' => $model,
+						'response_format' => ['type' => 'json_object'],
+						'messages' => [[
+							'role' => 'user',
+							'content' => [
+								[
+									'type' => 'text',
+									'text' => 'Check whether this image contains any visible human face. Count blurry, motion-blurred, partially occluded, low-resolution, background, profile, or side-view faces as visible. Do not identify anyone. Return only valid JSON with this exact shape: {"visibleHumanFaces": true, "confidence": "high"}.',
+								],
+								[
+									'type' => 'image_url',
+									'image_url' => ['url' => 'data:' . $mime . ';base64,' . $imageBase64],
+								],
+							],
+						]],
+						'max_completion_tokens' => 500,
+					],
+				]);
+			} catch (\Throwable $e) {
+				$this->debugLog($settings, 'Face detection attempt failed', [
+					'error' => $e->getMessage(),
 					'model' => $model,
-					'messages' => [[
-						'role' => 'user',
-						'content' => [
-							[
-								'type' => 'text',
-								'text' => 'Check whether this image contains any visible human face. Count blurry, motion-blurred, partially occluded, low-resolution, background, profile, or side-view faces as visible. Do not identify anyone. Return only JSON: {"visibleHumanFaces": true|false, "confidence": "high|medium|low"}.',
-							],
-							[
-								'type' => 'image_url',
-								'image_url' => ['url' => 'data:' . $mime . ';base64,' . $imageBase64],
-							],
-						],
-					]],
-					'max_completion_tokens' => 120,
-				],
-			]);
-		} catch (\Throwable $e) {
-			$this->debugLog($settings, 'Face detection failed; falling back to safe enhancement', [
-				'error' => $e->getMessage(),
+				]);
+
+				continue;
+			}
+
+			$json = json_decode((string) $response->getBody(), true);
+			$choice = $json['choices'][0] ?? [];
+			$content = $choice['message']['content'] ?? '';
+			$matches = [];
+			preg_match('/\\{.*\\}/s', $content, $matches);
+			$data = isset($matches[0]) ? json_decode($matches[0], true) : null;
+
+			if (!is_array($data) || !array_key_exists('visibleHumanFaces', $data)) {
+				$this->debugLog($settings, 'Face detection returned an invalid response; retrying if possible', [
+					'model' => $model,
+					'finishReason' => $choice['finish_reason'] ?? null,
+					'messageKeys' => isset($choice['message']) && is_array($choice['message']) ? array_keys($choice['message']) : [],
+					'responsePreview' => substr((string) $content, 0, 160),
+				]);
+
+				continue;
+			}
+
+			$visibleHumanFaces = (bool) $data['visibleHumanFaces'];
+			$this->debugLog($settings, 'Face detection result before AI enhancement', [
+				'visibleHumanFaces' => $visibleHumanFaces,
+				'confidence' => $data['confidence'] ?? null,
 				'model' => $model,
 			]);
 
-			return true;
+			return $visibleHumanFaces;
 		}
 
-		$json = json_decode((string) $response->getBody(), true);
-		$content = $json['choices'][0]['message']['content'] ?? '';
-		$matches = [];
-		preg_match('/\\{.*\\}/s', $content, $matches);
-		$data = isset($matches[0]) ? json_decode($matches[0], true) : null;
+		$this->debugLog($settings, 'Face detection failed for all models; falling back to safe enhancement');
 
-		if (!is_array($data) || !array_key_exists('visibleHumanFaces', $data)) {
-			$this->debugLog($settings, 'Face detection returned an invalid response; falling back to safe enhancement', [
-				'responsePreview' => substr((string) $content, 0, 160),
-			]);
-
-			return true;
-		}
-
-		$visibleHumanFaces = (bool) $data['visibleHumanFaces'];
-		$this->debugLog($settings, 'Face detection result before AI enhancement', [
-			'visibleHumanFaces' => $visibleHumanFaces,
-			'confidence' => $data['confidence'] ?? null,
-			'model' => $model,
-		]);
-
-		return $visibleHumanFaces;
+		return true;
 	}
 
 	private function storeEnhancedImage(Settings $settings, Asset $asset, string $tempPath, string $localPath, string $enhancementType): array
