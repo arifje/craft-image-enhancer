@@ -21,22 +21,22 @@ class ArticleImageController extends Controller
 
 		$asset = $this->getPostedAsset();
 		if (!$asset instanceof Asset) {
-			return $this->asFailure('Asset not found or unsupported.');
+			return $this->asJsonFailure('Asset not found or unsupported.');
 		}
 		if (!$this->canSaveAsset($asset)) {
-			return $this->asFailure('You do not have permission to enhance this asset.');
+			return $this->asJsonFailure('You do not have permission to enhance this asset.');
 		}
 
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 		$apiKey = $settings->chatGptApiKey;
 
 		if (!$apiKey) {
-			return $this->asFailure('OpenAI API key is missing.');
+			return $this->asJsonFailure('OpenAI API key is missing.');
 		}
 
 		$localPath = $this->getFullAssetPath($asset);
 		if (!$localPath || !file_exists($localPath)) {
-			return $this->asFailure('Could not find the original asset file.');
+			return $this->asJsonFailure('Could not find the original asset file.');
 		}
 
 		try {
@@ -45,7 +45,7 @@ class ArticleImageController extends Controller
 
 			if (!$previewAsset instanceof Asset) {
 				@unlink($tempPath);
-				return $this->asFailure('Could not save the enhanced preview asset.');
+				return $this->asJsonFailure('Could not save the enhanced preview asset.');
 			}
 
 			return $this->asJson([
@@ -56,7 +56,7 @@ class ArticleImageController extends Controller
 			]);
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Article image enhancement failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asFailure('Enhancement failed: ' . $e->getMessage());
+			return $this->asJsonFailure('Enhancement failed: ' . $e->getMessage());
 		}
 	}
 
@@ -70,23 +70,23 @@ class ArticleImageController extends Controller
 		$previewAsset = $this->getPostedPreviewAsset();
 
 		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset)) {
-			return $this->asFailure('Enhanced preview asset not found or invalid.');
+			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
 		if (!$this->canSaveAsset($asset) || !$this->canDeleteAsset($previewAsset)) {
-			return $this->asFailure('You do not have permission to keep this enhanced image.');
+			return $this->asJsonFailure('You do not have permission to keep this enhanced image.');
 		}
 
 		$previewPath = $this->getFullAssetPath($previewAsset);
 
 		if (!$previewPath || !file_exists($previewPath)) {
-			return $this->asFailure('Could not find the enhanced preview file.');
+			return $this->asJsonFailure('Could not find the enhanced preview file.');
 		}
 
 		$tempPath = $this->getTempReplacementPath($asset);
 
 		try {
 			if (!copy($previewPath, $tempPath)) {
-				return $this->asFailure('Could not prepare the enhanced file for replacement.');
+				return $this->asJsonFailure('Could not prepare the enhanced file for replacement.');
 			}
 
 			$asset->tempFilePath = $tempPath;
@@ -100,7 +100,7 @@ class ArticleImageController extends Controller
 			}
 
 			if (!$saved) {
-				return $this->asFailure('Could not replace the original asset: ' . implode(', ', $asset->getFirstErrors()));
+				return $this->asJsonFailure('Could not replace the original asset: ' . implode(', ', $asset->getFirstErrors()));
 			}
 
 			$this->deleteElement($previewAsset);
@@ -112,7 +112,7 @@ class ArticleImageController extends Controller
 			]);
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Keeping enhanced article image failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asFailure('Could not keep enhanced image: ' . $e->getMessage());
+			return $this->asJsonFailure('Could not keep enhanced image: ' . $e->getMessage());
 		} finally {
 			if (isset($tempPath) && file_exists($tempPath)) {
 				@unlink($tempPath);
@@ -130,10 +130,10 @@ class ArticleImageController extends Controller
 		$previewAsset = $this->getPostedPreviewAsset();
 
 		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset)) {
-			return $this->asFailure('Enhanced preview asset not found or invalid.');
+			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
 		if (!$this->canDeleteAsset($previewAsset)) {
-			return $this->asFailure('You do not have permission to discard this enhanced image.');
+			return $this->asJsonFailure('You do not have permission to discard this enhanced image.');
 		}
 
 		try {
@@ -145,7 +145,7 @@ class ArticleImageController extends Controller
 			]);
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Discarding enhanced article image failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asFailure('Could not discard enhanced image: ' . $e->getMessage());
+			return $this->asJsonFailure('Could not discard enhanced image: ' . $e->getMessage());
 		}
 	}
 
@@ -373,7 +373,7 @@ class ArticleImageController extends Controller
 		return $url . (str_contains($url, '?') ? '&' : '?') . 'v=' . time();
 	}
 
-	private function asFailure(string $message): Response
+	private function asJsonFailure(string $message): Response
 	{
 		return $this->asJson([
 			'success' => false,
