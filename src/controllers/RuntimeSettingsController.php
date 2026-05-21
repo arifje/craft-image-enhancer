@@ -5,14 +5,19 @@ namespace arjanbrinkman\craftimagequalitychecker\controllers;
 use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
 use Craft;
 use craft\web\Controller;
+use yii\web\ForbiddenHttpException;
 use yii\web\Response;
 
 class RuntimeSettingsController extends Controller
 {
 	public function actionSave(): Response
 	{
-		$this->requireAdmin();
 		$this->requirePostRequest();
+
+		$user = Craft::$app->getUser()->getIdentity();
+		if (!$user || !$user->admin) {
+			throw new ForbiddenHttpException('Only admins can change Image Quality Checker runtime settings.');
+		}
 
 		$enabled = (bool) Craft::$app->getRequest()->getBodyParam('enabled');
 
