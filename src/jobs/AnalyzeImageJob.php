@@ -400,9 +400,16 @@ class AnalyzeImageJob extends BaseJob
 
 		try {
 			[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
+			$creativeEnhancementPrompt = $settings->getCreativeEnhancementPromptForRequest();
 			$this->debugLog($settings, 'Starting OpenAI image enhancement', [
 				'assetId' => $asset->id,
 				'filename' => $asset->filename,
+				'imageEnhancementModel' => $settings->imageEnhancementModel,
+				'imageEnhancementFaceHandling' => $settings->imageEnhancementFaceHandling,
+				'creativeEnhancementTuningLevels' => $settings->getCreativeEnhancementTuningLevels(),
+				'creativeEnhancementPromptLength' => strlen($creativeEnhancementPrompt),
+				'creativeEnhancementPromptHash' => hash('sha256', $creativeEnhancementPrompt),
+				'creativeEnhancementTuningPrompt' => $settings->getCreativeEnhancementTuningPrompt(),
 				'localPath' => $localPath,
 				'fileSize' => file_exists($localPath) ? filesize($localPath) : null,
 				'originalWidth' => $originalWidth,
@@ -425,7 +432,7 @@ class AnalyzeImageJob extends BaseJob
 					],
 					[
 						'name' => 'prompt',
-						'contents' => $settings->getCreativeEnhancementPromptForRequest(),
+						'contents' => $creativeEnhancementPrompt,
 					],
 					[
 						'name' => 'size',

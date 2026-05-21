@@ -245,26 +245,33 @@ PROMPT;
 		return trim($this->getEffectiveCreativeEnhancementPrompt()) . "\n\n" . $this->getCreativeEnhancementTuningPrompt();
 	}
 
-	private function getCreativeEnhancementTuningPrompt(): string
+	public function getCreativeEnhancementTuningPrompt(): string
 	{
-		$clarityLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementClarityLevel);
-		$contrastLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementContrastLevel);
-		$colorLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementColorLevel);
-		$noiseReductionLevel = $this->normalizeEnhancementLevel($this->creativeEnhancementNoiseReductionLevel);
+		$levels = $this->getCreativeEnhancementTuningLevels();
 
 		return sprintf(
-			"Enhancement tuning levels, from %d to %d, where 5 is balanced/medium. Respect these levels while preserving identity, composition, natural skin texture, and the original atmosphere:\n- Clarity/detail: %d/10 (%s). Controls sharpness, deblurring, edge definition, and visible texture detail. Higher values may look clearer, but must not create artificial sharpening halos or invented facial detail.\n- Contrast/depth: %d/10 (%s). Controls contrast, dynamic range, and perceived depth. Higher values may add punch, but must not crush shadows, blow highlights, or change the original lighting direction.\n- Color intensity: %d/10 (%s). Controls saturation, vibrance, and color richness. Higher values may make colors livelier, but must keep skin tones natural and avoid oversaturated or artificial color.\n- Noise/artifact cleanup: %d/10 (%s). Controls noise, grain, blur residue, and compression artifact reduction. Higher values may clean more aggressively, but must not smooth faces into a plastic look or remove real texture.",
+			"Enhancement tuning levels are mandatory controls, from %d to %d, where 5 is balanced/medium. These levels override generic enhancement wording. Make the visual difference between low, medium, and high settings noticeable while still preserving identity, composition, natural skin texture, and the original scene.\n- Clarity/detail: %d/10. %s\n- Contrast/depth: %d/10. %s\n- Color intensity: %d/10. %s\n- Noise/artifact cleanup: %d/10. %s",
 			self::ENHANCEMENT_LEVEL_MIN,
 			self::ENHANCEMENT_LEVEL_MAX,
-			$clarityLevel,
-			$this->describeEnhancementLevel($clarityLevel),
-			$contrastLevel,
-			$this->describeEnhancementLevel($contrastLevel),
-			$colorLevel,
-			$this->describeEnhancementLevel($colorLevel),
-			$noiseReductionLevel,
-			$this->describeEnhancementLevel($noiseReductionLevel)
+			$levels['clarity'],
+			$this->describeClarityLevel($levels['clarity']),
+			$levels['contrast'],
+			$this->describeContrastLevel($levels['contrast']),
+			$levels['color'],
+			$this->describeColorLevel($levels['color']),
+			$levels['noiseReduction'],
+			$this->describeNoiseReductionLevel($levels['noiseReduction'])
 		);
+	}
+
+	public function getCreativeEnhancementTuningLevels(): array
+	{
+		return [
+			'clarity' => $this->normalizeEnhancementLevel($this->creativeEnhancementClarityLevel),
+			'contrast' => $this->normalizeEnhancementLevel($this->creativeEnhancementContrastLevel),
+			'color' => $this->normalizeEnhancementLevel($this->creativeEnhancementColorLevel),
+			'noiseReduction' => $this->normalizeEnhancementLevel($this->creativeEnhancementNoiseReductionLevel),
+		];
 	}
 
 	private function normalizeEnhancementLevel(int $level): int
@@ -272,22 +279,76 @@ PROMPT;
 		return max(self::ENHANCEMENT_LEVEL_MIN, min(self::ENHANCEMENT_LEVEL_MAX, $level));
 	}
 
-	private function describeEnhancementLevel(int $level): string
+	private function describeClarityLevel(int $level): string
 	{
 		if ($level <= 2) {
-			return 'very subtle';
+			return 'Keep sharpening and deblurring minimal; preserve a softer original look and do not chase crispness.';
 		}
 		if ($level <= 4) {
-			return 'restrained';
+			return 'Apply restrained sharpening and deblurring, with only a modest clarity lift.';
 		}
 		if ($level === 5) {
-			return 'balanced';
+			return 'Apply balanced sharpening and deblurring for a natural clear result.';
 		}
 		if ($level <= 7) {
-			return 'moderately strong';
+			return 'Make the image noticeably clearer with stronger edge definition and visible texture detail.';
 		}
 
-		return 'strong but still natural';
+		return 'Strongly improve sharpness, deblurring, edge definition, and visible texture detail, without halos or invented facial detail.';
+	}
+
+	private function describeContrastLevel(int $level): string
+	{
+		if ($level <= 2) {
+			return 'Keep contrast nearly unchanged; preserve a softer, flatter, less punchy look.';
+		}
+		if ($level <= 4) {
+			return 'Use restrained contrast with gentle depth and no dramatic punch.';
+		}
+		if ($level === 5) {
+			return 'Use balanced contrast and dynamic range for a natural result.';
+		}
+		if ($level <= 7) {
+			return 'Add noticeably more depth, contrast, and dimensionality while preserving highlight and shadow detail.';
+		}
+
+		return 'Create a visibly punchier, richer, higher-contrast result while avoiding crushed shadows, blown highlights, or changed lighting direction.';
+	}
+
+	private function describeColorLevel(int $level): string
+	{
+		if ($level <= 2) {
+			return 'Keep saturation and vibrance very restrained; preserve muted colors and avoid making the image colorful.';
+		}
+		if ($level <= 4) {
+			return 'Use subtle color enrichment with a calm, natural palette.';
+		}
+		if ($level === 5) {
+			return 'Use balanced saturation, vibrance, and color richness.';
+		}
+		if ($level <= 7) {
+			return 'Make colors noticeably richer and more vivid while keeping skin tones believable.';
+		}
+
+		return 'Create a clearly vibrant, colorful result with strong saturation and vibrance, while keeping skin tones natural and avoiding artificial color casts.';
+	}
+
+	private function describeNoiseReductionLevel(int $level): string
+	{
+		if ($level <= 2) {
+			return 'Use minimal cleanup; retain natural grain, real texture, and some original compression softness.';
+		}
+		if ($level <= 4) {
+			return 'Use light cleanup of noise and artifacts while keeping visible texture intact.';
+		}
+		if ($level === 5) {
+			return 'Use balanced noise, grain, blur residue, and compression artifact cleanup.';
+		}
+		if ($level <= 7) {
+			return 'Clean noise, grain, blur residue, and compression artifacts noticeably while preserving real skin and material texture.';
+		}
+
+		return 'Clean noise, grain, blur residue, and compression artifacts aggressively, but do not smooth faces into a plastic look or remove real texture.';
 	}
 	
 }
