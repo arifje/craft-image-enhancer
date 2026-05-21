@@ -21,7 +21,8 @@
 				:disabled="isBusy"
 				@click.prevent="enhanceImage"
 			>
-				{{ isEnhancing ? enhancingLabel : enhanceLabel }}
+				<span v-if="isEnhancing" class="article-image-spinner" aria-hidden="true"></span>
+				<span>{{ isEnhancing ? enhancingLabel : enhanceLabel }}</span>
 			</button>
 
 			<template v-else>
@@ -31,7 +32,8 @@
 					:disabled="isBusy"
 					@click.prevent="keepEnhancedImage"
 				>
-					{{ isKeeping ? keepingLabel : keepLabel }}
+					<span v-if="isKeeping" class="article-image-spinner" aria-hidden="true"></span>
+					<span>{{ isKeeping ? keepingLabel : keepLabel }}</span>
 				</button>
 				<button
 					type="button"
@@ -39,13 +41,15 @@
 					:disabled="isBusy"
 					@click.prevent="discardEnhancedImage"
 				>
-					{{ isDiscarding ? discardingLabel : discardLabel }}
+					<span v-if="isDiscarding" class="article-image-spinner" aria-hidden="true"></span>
+					<span>{{ isDiscarding ? discardingLabel : discardLabel }}</span>
 				</button>
 			</template>
 		</div>
 
 		<div v-if="isBusy" class="article-image-status uk-label">
-			{{ statusLabel }}
+			<span class="article-image-spinner" aria-hidden="true"></span>
+			<span>{{ statusLabel }}</span>
 		</div>
 
 		<div v-if="errorMessage" class="article-image-error uk-alert-danger" role="alert">
@@ -499,6 +503,10 @@ function log(message) {
 }
 
 .article-image-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
 	min-height: 32px;
 	border-radius: 4px;
 	font-weight: 700;
@@ -529,6 +537,9 @@ function log(message) {
 	position: absolute;
 	left: 12px;
 	top: 12px;
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
 	max-width: calc(100% - 24px);
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -538,6 +549,28 @@ function log(message) {
 	color: #fff;
 	font-weight: 700;
 	z-index: 3;
+}
+
+.article-image-spinner {
+	display: inline-block;
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	border: 2px solid rgba(255, 255, 255, 0.45);
+	border-top-color: #fff;
+	border-radius: 50%;
+	animation: article-image-spin 0.8s linear infinite;
+}
+
+.article-image-button-secondary .article-image-spinner {
+	border-color: rgba(255, 255, 255, 0.35);
+	border-top-color: #fff;
+}
+
+@keyframes article-image-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .article-image-error {
