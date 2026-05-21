@@ -13,11 +13,11 @@
 			@error="handleImageError"
 		>
 
-		<div v-if="canShowActions" class="article-image-action-bar">
+		<div v-if="canShowActions && (!isEnhancing || hasPendingPreview)" class="article-image-action-bar">
 			<button
 				v-if="!hasPendingPreview"
 				type="button"
-				class="uk-button uk-button-small uk-button-primary"
+				class="uk-button uk-button-small uk-button-primary article-image-button article-image-button-primary"
 				:disabled="isBusy"
 				@click.prevent="enhanceImage"
 			>
@@ -27,7 +27,7 @@
 			<template v-else>
 				<button
 					type="button"
-					class="uk-button uk-button-small uk-button-primary"
+					class="uk-button uk-button-small uk-button-primary article-image-button article-image-button-primary"
 					:disabled="isBusy"
 					@click.prevent="keepEnhancedImage"
 				>
@@ -35,7 +35,7 @@
 				</button>
 				<button
 					type="button"
-					class="uk-button uk-button-small uk-button-default"
+					class="uk-button uk-button-small uk-button-default article-image-button article-image-button-secondary"
 					:disabled="isBusy"
 					@click.prevent="discardEnhancedImage"
 				>
@@ -65,10 +65,11 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, getCurrentInstance, onBeforeUnmount, ref, watch } from 'vue';
 
 // Expected endpoint contract:
-// enhanceUrl returns { success: true, enhancedUrl: "...", previewId: "..." }.
+// enhanceUrl returns { success: true, queued: true, token: "...", jobId: 123, statusUrl: "..." }.
+// statusUrl returns { success: true, status: "queued|running|complete|failed", enhancedUrl: "...", previewId: "..." }.
 // keepUrl returns { success: true, imageUrl: "..." } after replacing the original asset.
 // discardUrl returns { success: true } after removing the temporary enhanced preview.
 const props = defineProps({
@@ -124,6 +125,10 @@ const props = defineProps({
 		type: String,
 		required: true,
 	},
+	statusUrl: {
+		type: String,
+		default: '',
+	},
 	keepUrl: {
 		type: String,
 		required: true,
@@ -164,6 +169,14 @@ const props = defineProps({
 		type: String,
 		default: 'Discarding...',
 	},
+	pollIntervalMs: {
+		type: Number,
+		default: 1500,
+	},
+	pollTimeoutMs: {
+		type: Number,
+		default: 180000,
+	},
 });
 
 const emit = defineEmits(['enhanced', 'kept', 'discarded', 'error']);
@@ -174,15 +187,23 @@ const currentSrc = ref(originalSrc.value);
 const currentSrcset = ref(originalSrcset.value);
 const imageKey = ref(0);
 const preview = ref(null);
+const activeJob = ref(null);
 const errorMessage = ref('');
+const remoteStatusLabel = ref('');
 const isEnhancing = ref(false);
 const isKeeping = ref(false);
 const isDiscarding = ref(false);
+const pollTimer = ref(null);
+const pollStartedAt = ref(0);
+const component = getCurrentInstance()?.proxy;
 
 const isBusy = computed(() => isEnhancing.value || isKeeping.value || isDiscarding.value);
 const hasPendingPreview = computed(() => preview.value !== null);
 const canShowActions = computed(() => Boolean(props.enhanceable && props.assetId && props.enhanceUrl && props.keepUrl && props.discardUrl));
 const statusLabel = computed(() => {
+	if (remoteStatusLabel.value) {
+		return remoteStatusLabel.value;
+	}
 	if (isEnhancing.value) {
 		return props.enhancingLabel;
 	}
@@ -211,34 +232,39 @@ watch(
 	}
 );
 
+onBeforeUnmount(() => {
+	clearPolling();
+});
+
 async function enhanceImage() {
+	log('function/enhanceImage/start');
 	errorMessage.value = '';
 	isEnhancing.value = true;
+	remoteStatusLabel.value = props.enhancingLabel;
 
 	try {
 		const response = await postAction(props.enhanceUrl, {
 			assetId: props.assetId,
 		});
-		const enhancedUrl = response.enhancedUrl || response.imageUrl || response.assetUrl || response.url;
-		const previewId = response.previewId || response.previewToken || response.enhancedAssetId || response.tempAssetId || null;
 
-		if (!enhancedUrl) {
-			throw new Error('The enhancement response did not include an enhanced image URL.');
+		if (response.queued || response.token || response.jobId) {
+			startPolling(response);
+			log('function/enhanceImage/queued');
+			return;
 		}
 
-		preview.value = {
-			id: previewId,
-			url: enhancedUrl,
-			response,
-		};
-		currentSrc.value = enhancedUrl;
-		currentSrcset.value = '';
-		imageKey.value += 1;
-		emit('enhanced', response);
+		applyEnhancedPreview(response);
+		isEnhancing.value = false;
+		remoteStatusLabel.value = '';
+		log('function/enhanceImage/direct-complete');
 	} catch (error) {
 		handleError(error);
-	} finally {
 		isEnhancing.value = false;
+		remoteStatusLabel.value = '';
+	} finally {
+		if (!activeJob.value) {
+			isEnhancing.value = false;
+		}
 	}
 }
 
@@ -247,8 +273,10 @@ async function keepEnhancedImage() {
 		return;
 	}
 
+	log('function/keepEnhancedImage/start');
 	errorMessage.value = '';
 	isKeeping.value = true;
+	remoteStatusLabel.value = props.keepingLabel;
 
 	try {
 		const response = await postAction(props.keepUrl, previewPayload());
@@ -259,12 +287,15 @@ async function keepEnhancedImage() {
 		currentSrc.value = keptUrl;
 		currentSrcset.value = '';
 		preview.value = null;
+		activeJob.value = null;
 		imageKey.value += 1;
 		emit('kept', response);
+		log('function/keepEnhancedImage/complete');
 	} catch (error) {
 		handleError(error);
 	} finally {
 		isKeeping.value = false;
+		remoteStatusLabel.value = '';
 	}
 }
 
@@ -273,8 +304,10 @@ async function discardEnhancedImage() {
 		return;
 	}
 
+	log('function/discardEnhancedImage/start');
 	errorMessage.value = '';
 	isDiscarding.value = true;
+	remoteStatusLabel.value = props.discardingLabel;
 
 	try {
 		const response = await postAction(props.discardUrl, previewPayload());
@@ -282,12 +315,15 @@ async function discardEnhancedImage() {
 		currentSrc.value = originalSrc.value;
 		currentSrcset.value = originalSrcset.value;
 		preview.value = null;
+		activeJob.value = null;
 		imageKey.value += 1;
 		emit('discarded', response);
+		log('function/discardEnhancedImage/complete');
 	} catch (error) {
 		handleError(error);
 	} finally {
 		isDiscarding.value = false;
+		remoteStatusLabel.value = '';
 	}
 }
 
@@ -295,11 +331,102 @@ function previewPayload() {
 	return {
 		assetId: props.assetId,
 		previewId: preview.value?.id,
+		token: preview.value?.token || activeJob.value?.token,
 		previewUrl: preview.value?.url,
 	};
 }
 
+function startPolling(response) {
+	const statusUrl = response.statusUrl || props.statusUrl;
+	if (!statusUrl || !response.token) {
+		throw new Error('The enhancement response did not include a status URL and token.');
+	}
+
+	clearPolling();
+	activeJob.value = {
+		token: response.token,
+		jobId: response.jobId || null,
+		statusUrl,
+	};
+	pollStartedAt.value = Date.now();
+	remoteStatusLabel.value = response.progressLabel || 'Queued';
+	pollEnhancementStatus();
+}
+
+async function pollEnhancementStatus() {
+	if (!activeJob.value) {
+		return;
+	}
+
+	try {
+		const response = await postAction(activeJob.value.statusUrl, {
+			assetId: props.assetId,
+			token: activeJob.value.token,
+			jobId: activeJob.value.jobId,
+		});
+
+		if (response.progressLabel) {
+			remoteStatusLabel.value = response.progressLabel;
+		}
+
+		if (response.status === 'complete') {
+			applyEnhancedPreview({
+				...response,
+				token: activeJob.value.token,
+			});
+			clearPolling();
+			isEnhancing.value = false;
+			remoteStatusLabel.value = '';
+			log('function/pollEnhancementStatus/complete');
+			return;
+		}
+
+		if (response.status === 'failed') {
+			throw new Error(response.message || 'Enhancement failed.');
+		}
+
+		if (Date.now() - pollStartedAt.value > props.pollTimeoutMs) {
+			throw new Error('Enhancement is taking longer than expected. Please try again.');
+		}
+
+		pollTimer.value = window.setTimeout(pollEnhancementStatus, props.pollIntervalMs);
+	} catch (error) {
+		clearPolling();
+		isEnhancing.value = false;
+		remoteStatusLabel.value = '';
+		handleError(error);
+	}
+}
+
+function applyEnhancedPreview(response) {
+	const enhancedUrl = response.enhancedUrl || response.imageUrl || response.assetUrl || response.url;
+	const previewId = response.previewId || response.previewToken || response.enhancedAssetId || response.tempAssetId || null;
+
+	if (!enhancedUrl) {
+		throw new Error('The enhancement response did not include an enhanced image URL.');
+	}
+
+	preview.value = {
+		id: previewId,
+		token: response.token || activeJob.value?.token,
+		url: enhancedUrl,
+		response,
+	};
+	currentSrc.value = enhancedUrl;
+	currentSrcset.value = '';
+	imageKey.value += 1;
+	emit('enhanced', response);
+}
+
+function clearPolling() {
+	if (pollTimer.value) {
+		window.clearTimeout(pollTimer.value);
+		pollTimer.value = null;
+	}
+}
+
 async function postAction(url, payload) {
+	log(`function/postAction/${url}`);
 	const formData = new FormData();
 
 	Object.entries(payload).forEach(([key, value]) => {
@@ -343,7 +470,14 @@ function handleError(error) {
 	const message = error instanceof Error ? error.message : 'Something went wrong while enhancing this image.';
 
 	errorMessage.value = message;
+	log(`function/error/${message}`);
 	emit('error', error);
+}
+
+function log(message) {
+	if (component?.$logger) {
+		component.$logger(`Vue/components/articleImage/${message}`);
+	}
 }
 </script>
 
@@ -356,13 +490,53 @@ function handleError(error) {
 	flex-wrap: wrap;
 	gap: 8px;
 	justify-content: flex-end;
+	max-width: calc(100% - 24px);
+	padding: 6px;
+	border-radius: 6px;
+	background: rgba(0, 0, 0, 0.32);
+	backdrop-filter: blur(4px);
 	z-index: 3;
+}
+
+.article-image-button {
+	min-height: 32px;
+	border-radius: 4px;
+	font-weight: 700;
+	line-height: 30px;
+	white-space: nowrap;
+	text-shadow: none;
+}
+
+.article-image-button-primary,
+.article-image-button-primary:disabled {
+	border-color: #ff5a00;
+	background: #ff5a00;
+	color: #fff;
+}
+
+.article-image-button-secondary,
+.article-image-button-secondary:disabled {
+	border-color: rgba(255, 255, 255, 0.7);
+	background: rgba(0, 0, 0, 0.35);
+	color: #fff;
+}
+
+.article-image-button:disabled {
+	opacity: 0.65;
 }
 
 .article-image-status {
 	position: absolute;
 	left: 12px;
 	top: 12px;
+	max-width: calc(100% - 24px);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	border-radius: 4px;
+	background: #ff5a00;
+	color: #fff;
+	font-weight: 700;
 	z-index: 3;
 }
 
@@ -380,5 +554,17 @@ function handleError(error) {
 
 .article-image-container.is-processing img {
 	filter: brightness(0.82);
+}
+
+@media (max-width: 640px) {
+	.article-image-action-bar {
+		left: 12px;
+		right: 12px;
+	}
+
+	.article-image-button {
+		flex: 1 1 auto;
+		white-space: normal;
+	}
 }
 </style>

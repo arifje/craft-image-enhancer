@@ -3,12 +3,11 @@
 namespace arjanbrinkman\craftimagequalitychecker\controllers;
 
 use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageEnhancementJob;
 use Craft;
 use craft\elements\Asset;
+use craft\helpers\UrlHelper;
 use craft\web\Controller;
-use GuzzleHttp\ClientInterface;
-use Imagick;
 use yii\web\Response;
 
 class ArticleImageController extends Controller
@@ -27,10 +26,7 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('You do not have permission to enhance this asset.');
 		}
 
-		$settings = ImageQualityChecker::getInstance()->getSettings();
-		$apiKey = $settings->chatGptApiKey;
-
-		if (!$apiKey) {
+		if (!ImageQualityChecker::getInstance()->getSettings()->chatGptApiKey) {
 			return $this->asJsonFailure('OpenAI API key is missing.');
 		}
 
@@ -40,24 +36,69 @@ class ArticleImageController extends Controller
 		}
 
 		try {
-			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $apiKey);
-			$previewAsset = $this->createPreviewAsset($asset, $tempPath);
-
-			if (!$previewAsset instanceof Asset) {
-				@unlink($tempPath);
-				return $this->asJsonFailure('Could not save the enhanced preview asset.');
-			}
+			$token = bin2hex(random_bytes(16));
+			$this->setEnhancementStatus($token, [
+				'status' => 'queued',
+				'assetId' => $asset->id,
+				'progress' => 0,
+				'progressLabel' => 'Queued',
+			]);
+			$jobId = Craft::$app->queue->push(new ArticleImageEnhancementJob([
+				'assetId' => $asset->id,
+				'userId' => Craft::$app->getUser()->getId(),
+				'token' => $token,
+			]));
+			$this->setEnhancementStatus($token, [
+				'status' => 'queued',
+				'assetId' => $asset->id,
+				'jobId' => $jobId,
+				'progress' => 0,
+				'progressLabel' => 'Queued',
+			]);
 
 			return $this->asJson([
 				'success' => true,
+				'queued' => true,
 				'assetId' => $asset->id,
-				'previewId' => $previewAsset->id,
-				'enhancedUrl' => $this->appendCacheBuster($previewAsset->getUrl()),
+				'jobId' => $jobId,
+				'token' => $token,
+				'statusUrl' => UrlHelper::actionUrl('_image-quality-checker/article-image/status'),
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Article image enhancement failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asJsonFailure('Enhancement failed: ' . $e->getMessage());
+			Craft::error('ImageQualityChecker: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
+			return $this->asJsonFailure('Could not queue enhancement: ' . $e->getMessage());
 		}
+	}
+
+	public function actionStatus(): Response
+	{
+		$this->requireLogin();
+		$this->requirePostRequest();
+		$this->requireAcceptsJson();
+
+		$assetId = (int) Craft::$app->getRequest()->getBodyParam('assetId');
+		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
+
+		if (!$assetId || !$token) {
+			return $this->asJsonFailure('Missing enhancement status token.');
+		}
+
+		$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
+		if (!is_array($status)) {
+			return $this->asJson([
+				'success' => true,
+				'status' => 'pending',
+				'assetId' => $assetId,
+				'progress' => 0,
+				'progressLabel' => 'Waiting for queue',
+			]);
+		}
+
+		if ((int) ($status['assetId'] ?? 0) !== $assetId) {
+			return $this->asJsonFailure('Enhancement status token does not match this asset.');
+		}
+
+		return $this->asJson(array_merge(['success' => true], $status));
 	}
 
 	public function actionKeep(): Response
@@ -68,8 +109,9 @@ class ArticleImageController extends Controller
 
 		$asset = $this->getPostedAsset();
 		$previewAsset = $this->getPostedPreviewAsset();
+		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
 
-		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset)) {
+		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)) {
 			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
 		if (!$this->canSaveAsset($asset) || !$this->canDeleteAsset($previewAsset)) {
@@ -104,6 +146,7 @@ class ArticleImageController extends Controller
 			}
 
 			$this->deleteElement($previewAsset);
+			$this->deleteEnhancementStatus($token);
 
 			return $this->asJson([
 				'success' => true,
@@ -128,8 +171,9 @@ class ArticleImageController extends Controller
 
 		$asset = $this->getPostedAsset();
 		$previewAsset = $this->getPostedPreviewAsset();
+		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
 
-		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset)) {
+		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)) {
 			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
 		if (!$this->canDeleteAsset($previewAsset)) {
@@ -138,6 +182,7 @@ class ArticleImageController extends Controller
 
 		try {
 			$this->deleteElement($previewAsset);
+			$this->deleteEnhancementStatus($token);
 
 			return $this->asJson([
 				'success' => true,
@@ -200,90 +245,6 @@ class ArticleImageController extends Controller
 		return $user && $asset->canDelete($user);
 	}
 
-	private function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): string
-	{
-		$handle = fopen($localPath, 'rb');
-		if ($handle === false) {
-			throw new \RuntimeException('Could not open the original asset file.');
-		}
-
-		try {
-			[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
-			$response = $client->post('https://api.openai.com/v1/images/edits', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $apiKey,
-				],
-				'multipart' => [
-					[
-						'name' => 'model',
-						'contents' => $settings->imageEnhancementModel,
-					],
-					[
-						'name' => 'image',
-						'contents' => $handle,
-						'filename' => $asset->filename,
-					],
-					[
-						'name' => 'prompt',
-						'contents' => $settings->getCreativeEnhancementPromptForRequest(),
-					],
-					[
-						'name' => 'size',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'quality',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'output_format',
-						'contents' => $asset->mimeType === 'image/png' ? 'png' : 'jpeg',
-					],
-				],
-			]);
-			$data = json_decode((string) $response->getBody(), true);
-			$imageData = $data['data'][0]['b64_json'] ?? null;
-
-			if (!$imageData) {
-				throw new \RuntimeException('OpenAI returned no enhanced image data.');
-			}
-
-			$tempPath = $this->getTempReplacementPath($asset);
-			file_put_contents($tempPath, base64_decode($imageData));
-
-			if ($originalWidth && $originalHeight) {
-				$this->normalizeReplacementImageDimensions($asset, $tempPath, $originalWidth, $originalHeight);
-			}
-
-			return $tempPath;
-		} finally {
-			if (is_resource($handle)) {
-				fclose($handle);
-			}
-		}
-	}
-
-	private function createPreviewAsset(Asset $originalAsset, string $tempPath): ?Asset
-	{
-		$previewAsset = new Asset();
-		$previewAsset->tempFilePath = $tempPath;
-		$previewAsset->filename = $this->getPreviewFilename($originalAsset);
-		$previewAsset->newFolderId = $originalAsset->folderId;
-		$previewAsset->volumeId = $originalAsset->volumeId;
-		$previewAsset->uploaderId = Craft::$app->getUser()->getId() ?: $originalAsset->uploaderId;
-		$previewAsset->avoidFilenameConflicts = true;
-		$previewAsset->setScenario(Asset::SCENARIO_CREATE);
-
-		ImageQualityChecker::$skipAssetQueue = true;
-		try {
-			$saved = Craft::$app->elements->saveElement($previewAsset);
-		} finally {
-			ImageQualityChecker::$skipAssetQueue = false;
-		}
-
-		return $saved ? $previewAsset : null;
-	}
-
 	private function deleteElement(Asset $asset): void
 	{
 		ImageQualityChecker::$skipAssetQueue = true;
@@ -292,29 +253,6 @@ class ArticleImageController extends Controller
 		} finally {
 			ImageQualityChecker::$skipAssetQueue = false;
 		}
-	}
-
-	private function normalizeReplacementImageDimensions(Asset $asset, string $path, int $targetWidth, int $targetHeight): void
-	{
-		if (!class_exists(Imagick::class)) {
-			return;
-		}
-
-		$image = new Imagick($path);
-		$image->setImageGravity(Imagick::GRAVITY_CENTER);
-		$image->cropThumbnailImage($targetWidth, $targetHeight);
-
-		if (in_array($asset->mimeType, ['image/jpeg', 'image/jpg'], true)) {
-			$image->setImageCompression(Imagick::COMPRESSION_JPEG);
-			$image->setImageCompressionQuality(90);
-			$image->setImageFormat('jpeg');
-		} elseif ($asset->mimeType === 'image/png') {
-			$image->setImageFormat('png');
-		}
-
-		$image->writeImage($path);
-		$image->clear();
-		$image->destroy();
 	}
 
 	private function getTempReplacementPath(Asset $asset): string
@@ -331,23 +269,31 @@ class ArticleImageController extends Controller
 		return $tempPath . '.' . $extension;
 	}
 
-	private function getPreviewFilename(Asset $asset): string
+	private function isPreviewAssetForOriginal(Asset $previewAsset, Asset $originalAsset, ?string $token = null): bool
 	{
-		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$baseName = pathinfo($asset->filename, PATHINFO_FILENAME);
-		$baseName = preg_replace('/[^A-Za-z0-9._-]+/', '-', $baseName) ?: 'image';
+		if ($token) {
+			$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
+			if (
+				is_array($status) &&
+				(int) ($status['assetId'] ?? 0) === (int) $originalAsset->id &&
+				(int) ($status['previewId'] ?? 0) === (int) $previewAsset->id
+			) {
+				return true;
+			}
+		}
 
-		return $baseName . '-enhancement-preview-' . date('YmdHis') . ($extension ? '.' . $extension : '');
-	}
-
-	private function isPreviewAssetForOriginal(Asset $previewAsset, Asset $originalAsset): bool
-	{
 		$originalBaseName = preg_replace('/[^A-Za-z0-9._-]+/', '-', pathinfo($originalAsset->filename, PATHINFO_FILENAME)) ?: 'image';
 
 		return $previewAsset->id !== $originalAsset->id &&
 			$previewAsset->volumeId === $originalAsset->volumeId &&
-			$previewAsset->folderId === $originalAsset->folderId &&
-			str_starts_with($previewAsset->filename, $originalBaseName . '-enhancement-preview-');
+			(
+				$previewAsset->folderId === $originalAsset->folderId ||
+				str_contains($previewAsset->filename, '-enhancement-preview-')
+			) &&
+			(
+				str_starts_with($previewAsset->filename, $originalBaseName . '-enhancement-preview-') ||
+				str_contains($previewAsset->filename, '-enhancement-preview-')
+			);
 	}
 
 	private function getFullAssetPath(Asset $asset): ?string
@@ -371,6 +317,23 @@ class ArticleImageController extends Controller
 		}
 
 		return $url . (str_contains($url, '?') ? '&' : '?') . 'v=' . time();
+	}
+
+	private function setEnhancementStatus(string $token, array $status): void
+	{
+		Craft::$app->getCache()->set($this->getEnhancementStatusCacheKey($token), $status, 3600);
+	}
+
+	private function deleteEnhancementStatus(?string $token): void
+	{
+		if ($token) {
+			Craft::$app->getCache()->delete($this->getEnhancementStatusCacheKey($token));
+		}
+	}
+
+	private function getEnhancementStatusCacheKey(string $token): string
+	{
+		return 'image-quality-checker:article-image-enhancement:' . $token;
 	}
 
 	private function asJsonFailure(string $message): Response
