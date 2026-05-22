@@ -131,18 +131,11 @@ class ArticleImageController extends Controller
 				return $this->asJsonFailure('Could not prepare the enhanced file for replacement.');
 			}
 
-			$asset->tempFilePath = $tempPath;
-			$asset->setScenario(Asset::SCENARIO_REPLACE);
-
 			ImageQualityChecker::$skipAssetQueue = true;
 			try {
-				$saved = Craft::$app->elements->saveElement($asset);
+				Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			} finally {
 				ImageQualityChecker::$skipAssetQueue = false;
-			}
-
-			if (!$saved) {
-				return $this->asJsonFailure('Could not replace the original asset: ' . implode(', ', $asset->getFirstErrors()));
 			}
 
 			$this->deleteElement($previewAsset);

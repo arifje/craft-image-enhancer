@@ -2,7 +2,7 @@
   "name": "arjan-brinkman/craft-image-quality-checker",
   "description": "Checks an image after upload on multiple quality criterias like blurriness, resolution, noise, and alerts user.",
   "type": "craft-plugin",
-  "version": "1.7.8",
+  "version": "1.7.9",
   "require": {
     "php": ">=8.2",
     "craftcms/cms": "^4.0.0|^5.0.0"
