@@ -23,6 +23,11 @@ class ArticleImageEnhancementJob extends BaseJob
 		$this->setProgress($queue, 0.05, 'Loading asset');
 
 		try {
+			if ($this->isCanceled()) {
+				$this->finishCanceled($queue);
+				return;
+			}
+
 			$asset = Craft::$app->assets->getAssetById($this->assetId);
 			if (!$this->isSupportedImageAsset($asset)) {
 				throw new \RuntimeException('Asset not found or unsupported.');
@@ -42,6 +47,12 @@ class ArticleImageEnhancementJob extends BaseJob
 			$this->setProgress($queue, 0.2, 'Sending image to OpenAI');
 			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $apiKey);
 
+			if ($this->isCanceled()) {
+				@unlink($tempPath);
+				$this->finishCanceled($queue);
+				return;
+			}
+
 			$this->updateStatus('running', 0.85, 'Saving enhanced preview');
 			$this->setProgress($queue, 0.85, 'Saving enhanced preview');
 			$previewAsset = $this->createPreviewAsset($asset, $tempPath);
@@ -51,12 +62,23 @@ class ArticleImageEnhancementJob extends BaseJob
 				throw new \RuntimeException('Could not save the enhanced preview asset.');
 			}
 
+			if ($this->isCanceled()) {
+				$this->deletePreviewAsset($previewAsset);
+				$this->finishCanceled($queue);
+				return;
+			}
+
 			$this->updateStatus('complete', 1, 'Enhanced preview ready', [
 				'previewId' => $previewAsset->id,
 				'enhancedUrl' => $this->appendCacheBuster($previewAsset->getUrl()),
 			]);
 			$this->setProgress($queue, 1, 'Enhanced preview ready');
 		} catch (\Throwable $e) {
+			if ($this->isCanceled()) {
+				$this->finishCanceled($queue);
+				return;
+			}
+
 			$this->updateStatus('failed', 1, 'Enhancement failed', [
 				'message' => $e->getMessage(),
 			]);
@@ -149,6 +171,16 @@ class ArticleImageEnhancementJob extends BaseJob
 		return $saved ? $previewAsset : null;
 	}
 
+	private function deletePreviewAsset(Asset $asset): void
+	{
+		ImageQualityChecker::$skipAssetQueue = true;
+		try {
+			Craft::$app->elements->deleteElement($asset);
+		} finally {
+			ImageQualityChecker::$skipAssetQueue = false;
+		}
+	}
+
 	private function normalizeReplacementImageDimensions(Asset $asset, string $path, int $targetWidth, int $targetHeight): void
 	{
 		if (!class_exists(Imagick::class)) {
@@ -227,12 +259,29 @@ class ArticleImageEnhancementJob extends BaseJob
 
 	private function updateStatus(string $status, float $progress, string $progressLabel, array $extra = []): void
 	{
+		if ($status !== 'canceled' && $this->isCanceled()) {
+			return;
+		}
+
 		Craft::$app->getCache()->set($this->getStatusCacheKey(), array_merge([
 			'status' => $status,
 			'assetId' => $this->assetId,
 			'progress' => $progress,
 			'progressLabel' => $progressLabel,
 		], $extra), 3600);
+	}
+
+	private function isCanceled(): bool
+	{
+		$status = Craft::$app->getCache()->get($this->getStatusCacheKey());
+
+		return is_array($status) && ($status['status'] ?? null) === 'canceled';
+	}
+
+	private function finishCanceled($queue): void
+	{
+		$this->updateStatus('canceled', 1, 'Canceled');
+		$this->setProgress($queue, 1, 'Canceled');
 	}
 
 	private function getStatusCacheKey(): string

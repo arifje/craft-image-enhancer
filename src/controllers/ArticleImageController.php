@@ -101,6 +101,67 @@ class ArticleImageController extends Controller
 		return $this->asJson(array_merge(['success' => true], $status));
 	}
 
+	public function actionCancel(): Response
+	{
+		$this->requireLogin();
+		$this->requirePostRequest();
+		$this->requireAcceptsJson();
+
+		$asset = $this->getPostedAsset();
+		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
+		$jobId = (string) Craft::$app->getRequest()->getBodyParam('jobId');
+
+		if (!$asset instanceof Asset || !$token) {
+			return $this->asJsonFailure('Missing enhancement cancellation details.');
+		}
+		if (!$this->canSaveAsset($asset)) {
+			return $this->asJsonFailure('You do not have permission to cancel this enhancement.');
+		}
+
+		$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
+		if (is_array($status) && (int) ($status['assetId'] ?? 0) !== (int) $asset->id) {
+			return $this->asJsonFailure('Enhancement status token does not match this asset.');
+		}
+
+		$existingStatus = is_array($status) ? $status : [];
+		$this->setEnhancementStatus($token, array_merge($existingStatus, [
+			'status' => 'canceled',
+			'assetId' => $asset->id,
+			'jobId' => $jobId !== '' ? $jobId : ($existingStatus['jobId'] ?? null),
+			'progress' => 1,
+			'progressLabel' => 'Canceled',
+		]));
+
+		if (!empty($existingStatus['previewId'])) {
+			$previewAsset = Craft::$app->assets->getAssetById((int) $existingStatus['previewId']);
+			if (
+				$previewAsset instanceof Asset &&
+				$this->isPreviewAssetForOriginal($previewAsset, $asset, $token) &&
+				$this->canDeleteAsset($previewAsset)
+			) {
+				$this->deleteElement($previewAsset);
+			}
+		}
+
+		$released = false;
+		if ($jobId !== '') {
+			try {
+				Craft::$app->queue->release($jobId);
+				$released = true;
+			} catch (\Throwable $e) {
+				Craft::warning('ImageQualityChecker: Could not release canceled article image enhancement job: ' . $e->getMessage(), __METHOD__);
+			}
+		}
+
+		return $this->asJson([
+			'success' => true,
+			'status' => 'canceled',
+			'assetId' => $asset->id,
+			'token' => $token,
+			'released' => $released,
+		]);
+	}
+
 	public function actionKeep(): Response
 	{
 		$this->requireLogin();
