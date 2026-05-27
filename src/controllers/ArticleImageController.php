@@ -136,8 +136,7 @@ class ArticleImageController extends Controller
 			$previewAsset = Craft::$app->assets->getAssetById((int) $existingStatus['previewId']);
 			if (
 				$previewAsset instanceof Asset &&
-				$this->isPreviewAssetForOriginal($previewAsset, $asset, $token) &&
-				$this->canDeleteAsset($previewAsset)
+				$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)
 			) {
 				$this->deleteElement($previewAsset);
 			}
@@ -175,7 +174,7 @@ class ArticleImageController extends Controller
 		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)) {
 			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
-		if (!$this->canSaveAsset($asset) || !$this->canDeleteAsset($previewAsset)) {
+		if (!$this->canSaveAsset($asset)) {
 			return $this->asJsonFailure('You do not have permission to keep this enhanced image.');
 		}
 
@@ -230,7 +229,7 @@ class ArticleImageController extends Controller
 		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)) {
 			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
-		if (!$this->canDeleteAsset($previewAsset)) {
+		if (!$this->canSaveAsset($asset)) {
 			return $this->asJsonFailure('You do not have permission to discard this enhanced image.');
 		}
 
@@ -290,13 +289,6 @@ class ArticleImageController extends Controller
 		$user = Craft::$app->getUser()->getIdentity();
 
 		return $user && $asset->canSave($user);
-	}
-
-	private function canDeleteAsset(Asset $asset): bool
-	{
-		$user = Craft::$app->getUser()->getIdentity();
-
-		return $user && $asset->canDelete($user);
 	}
 
 	private function deleteElement(Asset $asset): void
