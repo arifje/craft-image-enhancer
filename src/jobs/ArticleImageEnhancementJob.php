@@ -5,7 +5,10 @@ namespace arjanbrinkman\craftimagequalitychecker\jobs;
 use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
 use arjanbrinkman\craftimagequalitychecker\models\Settings;
 use Craft;
+use craft\db\Query;
+use craft\db\Table;
 use craft\elements\Asset;
+use craft\elements\Entry;
 use craft\queue\BaseJob;
 use GuzzleHttp\ClientInterface;
 use Imagick;
@@ -289,8 +292,98 @@ class ArticleImageEnhancementJob extends BaseJob
 		return 'image-quality-checker:article-image-enhancement:' . $this->token;
 	}
 
+	private function getRelatedEntryForAsset(int $assetId): ?Entry
+	{
+		$sourceId = (new Query())
+			->select(['sourceId'])
+			->from(Table::RELATIONS)
+			->where(['targetId' => $assetId])
+			->scalar();
+
+		if (!$sourceId) {
+			return null;
+		}
+
+		$element = Craft::$app->elements->getElementById((int) $sourceId, null, '*');
+		if (!$element) {
+			return null;
+		}
+
+		if ($element instanceof Entry) {
+			return $this->normalizeEntry($element);
+		}
+
+		$ownerId = $element->ownerId ?? null;
+		if (!$ownerId) {
+			return null;
+		}
+
+		$owner = Entry::find()
+			->id($ownerId)
+			->status(null)
+			->one();
+
+		return $owner instanceof Entry ? $this->normalizeEntry($owner) : null;
+	}
+
+	private function normalizeEntry(Entry $entry, array $seenEntryIds = []): Entry
+	{
+		if (in_array((int) $entry->id, $seenEntryIds, true)) {
+			return $entry;
+		}
+
+		$seenEntryIds[] = (int) $entry->id;
+		$ownerId = $entry->ownerId ?? null;
+
+		if ($ownerId) {
+			$owner = Entry::find()
+				->id($ownerId)
+				->status(null)
+				->one();
+
+			if ($owner instanceof Entry) {
+				return $this->normalizeEntry($owner, $seenEntryIds);
+			}
+		}
+
+		$canonicalId = $entry->canonicalId ?? null;
+		if ($canonicalId && (int) $canonicalId !== (int) $entry->id) {
+			$canonical = Entry::find()
+				->id($canonicalId)
+				->status(null)
+				->one();
+
+			if ($canonical instanceof Entry) {
+				return $this->normalizeEntry($canonical, $seenEntryIds);
+			}
+		}
+
+		return $entry;
+	}
+
+	private function truncateTitle(string $title, int $limit = 25): string
+	{
+		$title = trim($title);
+		if ($title === '') {
+			return '';
+		}
+
+		$length = function_exists('mb_strlen') ? mb_strlen($title) : strlen($title);
+		if ($length <= $limit) {
+			return $title;
+		}
+
+		$sliceLength = max(0, $limit - 3);
+		$slice = function_exists('mb_substr') ? mb_substr($title, 0, $sliceLength) : substr($title, 0, $sliceLength);
+
+		return rtrim($slice) . '...';
+	}
+
 	protected function defaultDescription(): string
 	{
-		return 'Enhance article image preview';
+		$title = $this->getRelatedEntryForAsset($this->assetId)?->title ?? null;
+		$title = $title ? $this->truncateTitle($title) : null;
+
+		return $title ? 'Enhance article image preview: ' . $title : 'Enhance article image preview';
 	}
 }
