@@ -14,67 +14,61 @@ class NotificationsController extends Controller
 		$this->requirePostRequest();
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 
-		if (!$settings->slackNotification) {
+		$primaryChannel = trim($settings->slackChannel);
+		$errorChannel = trim($settings->slackErrorChannel) ?: $primaryChannel;
+		$sendPrimaryTest = $settings->slackNotification;
+		$sendErrorTest = $settings->slackErrorNotification || trim($settings->slackErrorChannel) !== '';
+
+		if (!$sendPrimaryTest && !$sendErrorTest) {
 			return $this->asTestFailure('Slack notifications are disabled.');
 		}
 
-		$blocks = [
-			[
-				'type' => 'section',
-				'text' => [
-					'type' => 'mrkdwn',
-					'text' => "*Beeldkwaliteit test*\nScore: test · Vervanging: test notification",
-				],
-			],
-			[
-				'type' => 'context',
-				'elements' => [[
-					'type' => 'mrkdwn',
-					'text' => 'Sent from Image Quality Checker settings.',
-				]],
-			],
-		];
+		$primaryBlocks = $this->getSlackTestBlocks(
+			'Beeldkwaliteit test',
+			'Score: test · Vervanging: test notification'
+		);
+		$errorBlocks = $this->getSlackTestBlocks(
+			'Image enhancement error test',
+			'This test checks the configured Slack error channel.'
+		);
 
 		try {
 			$client = Craft::createGuzzleClient();
+			$sent = 0;
 
 			if ($settings->slackWebhookUrl) {
-				$client->post($settings->slackWebhookUrl, [
-					'json' => [
-						'text' => 'Beeldkwaliteit test',
-						'blocks' => $blocks,
-						'unfurl_links' => false,
-						'unfurl_media' => false,
-					],
-				]);
+				if ($sendPrimaryTest) {
+					$this->sendWebhookSlackTest($client, $settings->slackWebhookUrl, 'Beeldkwaliteit test', $primaryBlocks, $primaryChannel);
+					$sent++;
+				}
+				if ($sendErrorTest && (!$sendPrimaryTest || $errorChannel !== $primaryChannel)) {
+					$this->sendWebhookSlackTest($client, $settings->slackWebhookUrl, 'Image enhancement error test', $errorBlocks, $errorChannel);
+					$sent++;
+				}
 
-				return $this->asTestSuccess('Slack test notification sent via webhook.');
+				return $this->asTestSuccess($sent === 1 ? 'Slack test notification sent via webhook.' : 'Slack test notifications sent via webhook.');
 			}
 
-			if (!$settings->slackBotToken || !$settings->slackChannel) {
+			if (!$settings->slackBotToken) {
 				return $this->asTestFailure('Slack bot token or channel is missing.');
 			}
 
-			$response = $client->post('https://slack.com/api/chat.postMessage', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $settings->slackBotToken,
-					'Content-Type' => 'application/json',
-				],
-				'json' => [
-					'channel' => $settings->slackChannel,
-					'text' => 'Beeldkwaliteit test',
-					'blocks' => $blocks,
-					'unfurl_links' => false,
-					'unfurl_media' => false,
-				],
-			]);
-			$responseData = json_decode((string) $response->getBody(), true);
-
-			if (($responseData['ok'] ?? true) === false) {
-				return $this->asTestFailure('Slack API error: ' . ($responseData['error'] ?? 'unknown'));
+			if ($sendPrimaryTest) {
+				if ($primaryChannel === '') {
+					return $this->asTestFailure('Slack channel is missing.');
+				}
+				$this->sendBotSlackTest($client, $settings->slackBotToken, $primaryChannel, 'Beeldkwaliteit test', $primaryBlocks);
+				$sent++;
+			}
+			if ($sendErrorTest && (!$sendPrimaryTest || $errorChannel !== $primaryChannel)) {
+				if ($errorChannel === '') {
+					return $this->asTestFailure('Slack error channel is missing.');
+				}
+				$this->sendBotSlackTest($client, $settings->slackBotToken, $errorChannel, 'Image enhancement error test', $errorBlocks);
+				$sent++;
 			}
 
-			return $this->asTestSuccess('Slack test notification sent via bot token.');
+			return $this->asTestSuccess($sent === 1 ? 'Slack test notification sent via bot token.' : 'Slack test notifications sent via bot token.');
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Slack test notification failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asTestFailure('Slack test notification failed: ' . $e->getMessage());
@@ -107,6 +101,66 @@ class NotificationsController extends Controller
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Email test notification failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asTestFailure('Email test notification failed: ' . $e->getMessage());
+		}
+	}
+
+	private function getSlackTestBlocks(string $title, string $message): array
+	{
+		return [
+			[
+				'type' => 'section',
+				'text' => [
+					'type' => 'mrkdwn',
+					'text' => '*' . $title . "*\n" . $message,
+				],
+			],
+			[
+				'type' => 'context',
+				'elements' => [[
+					'type' => 'mrkdwn',
+					'text' => 'Sent from Image Quality Checker settings.',
+				]],
+			],
+		];
+	}
+
+	private function sendWebhookSlackTest($client, string $webhookUrl, string $text, array $blocks, string $channel = ''): void
+	{
+		$payload = [
+			'text' => $text,
+			'blocks' => $blocks,
+			'unfurl_links' => false,
+			'unfurl_media' => false,
+		];
+
+		if ($channel !== '') {
+			$payload['channel'] = $channel;
+		}
+
+		$client->post($webhookUrl, [
+			'json' => $payload,
+		]);
+	}
+
+	private function sendBotSlackTest($client, string $botToken, string $channel, string $text, array $blocks): void
+	{
+		$response = $client->post('https://slack.com/api/chat.postMessage', [
+			'headers' => [
+				'Authorization' => 'Bearer ' . $botToken,
+				'Content-Type' => 'application/json',
+			],
+			'json' => [
+				'channel' => $channel,
+				'text' => $text,
+				'blocks' => $blocks,
+				'unfurl_links' => false,
+				'unfurl_media' => false,
+			],
+		]);
+		$responseData = json_decode((string) $response->getBody(), true);
+
+		if (($responseData['ok'] ?? true) === false) {
+			throw new \RuntimeException('Slack API error: ' . ($responseData['error'] ?? 'unknown'));
 		}
 	}
 
