@@ -236,6 +236,33 @@
 
 	<hr>
 
+	<h2>Failed job retry</h2>
+
+	{{ forms.lightswitchField({
+		label: 'Retry failed enhancement jobs',
+		id: 'retryFailedEnhancementJobs',
+		name: 'retryFailedEnhancementJobs',
+		on: settings.retryFailedEnhancementJobs,
+		instructions: 'When enabled, a failed article image enhancement queue job gets one delayed retry before the error is reported.',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Retry delay',
+		name: 'failedEnhancementRetryDelay',
+		id: 'failedEnhancementRetryDelay',
+		type: 'number',
+		min: 0,
+		max: 86400,
+		step: 1,
+		size: 6,
+		unit: 'seconds',
+		instructions: 'How many seconds to wait before retrying a failed enhancement job.',
+		value: settings.failedEnhancementRetryDelay,
+		placeholder: '60',
+	}) }}
+
+	<hr>
+
 	<h2>AI tuning levels</h2>
 
 	{{ forms.textField({

@@ -141,6 +141,8 @@ PROMPT;
 	public int $creativeEnhancementContrastLevel = 5;
 	public int $creativeEnhancementColorLevel = 5;
 	public int $creativeEnhancementNoiseReductionLevel = 5;
+	public bool $retryFailedEnhancementJobs = false;
+	public int $failedEnhancementRetryDelay = 60;
 	public int $safeEnhancementMaxWidth = 2400;
 	public int $safeEnhancementJpegQuality = 90;
 	public string $creativeEnhancementPrompt = self::DEFAULT_CREATIVE_ENHANCEMENT_PROMPT;
@@ -149,8 +151,9 @@ PROMPT;
 	{
 		return [
 			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
-			[['slackNotification', 'slackErrorNotification', 'emailNotification', 'debugLogging'], 'boolean'],
+			[['slackNotification', 'slackErrorNotification', 'emailNotification', 'retryFailedEnhancementJobs', 'debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
+			[['failedEnhancementRetryDelay'], 'integer', 'min' => 0, 'max' => 86400],
 			[['creativeEnhancementClarityLevel', 'creativeEnhancementContrastLevel', 'creativeEnhancementColorLevel', 'creativeEnhancementNoiseReductionLevel'], 'integer', 'min' => self::ENHANCEMENT_LEVEL_MIN, 'max' => self::ENHANCEMENT_LEVEL_MAX],
 			[['allowedAssetFieldHandles'], 'safe'],
 		];

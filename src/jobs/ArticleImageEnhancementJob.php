@@ -9,6 +9,7 @@ use craft\db\Query;
 use craft\db\Table;
 use craft\elements\Asset;
 use craft\elements\Entry;
+use craft\helpers\Queue;
 use craft\queue\BaseJob;
 use GuzzleHttp\ClientInterface;
 use Imagick;
@@ -18,6 +19,7 @@ class ArticleImageEnhancementJob extends BaseJob
 	public int $assetId;
 	public ?int $userId = null;
 	public string $token;
+	public int $retryAttempt = 0;
 
 	public function execute($queue): void
 	{
@@ -80,6 +82,11 @@ class ArticleImageEnhancementJob extends BaseJob
 			if ($this->isCanceled()) {
 				$this->finishCanceled($queue);
 				return;
+			}
+
+			if ($this->queueRetryIfEnabled($settings, $e)) {
+				Craft::warning('ImageQualityChecker: Article image enhancement failed; retry queued: ' . $e->getMessage(), __METHOD__);
+				throw $e;
 			}
 
 			$this->updateStatus('failed', 1, 'Enhancement failed', [
@@ -286,6 +293,37 @@ class ArticleImageEnhancementJob extends BaseJob
 	{
 		$this->updateStatus('canceled', 1, 'Canceled');
 		$this->setProgress($queue, 1, 'Canceled');
+	}
+
+	private function queueRetryIfEnabled(Settings $settings, \Throwable $error): bool
+	{
+		if (!$settings->retryFailedEnhancementJobs || $this->retryAttempt >= 1 || $this->isCanceled()) {
+			return false;
+		}
+
+		$delay = max(0, (int) $settings->failedEnhancementRetryDelay);
+		$nextAttempt = $this->retryAttempt + 1;
+
+		try {
+			$jobId = Queue::push(new self([
+				'assetId' => $this->assetId,
+				'userId' => $this->userId,
+				'token' => $this->token,
+				'retryAttempt' => $nextAttempt,
+			]), null, $delay);
+
+			$this->updateStatus('queued', 0, $delay > 0 ? 'Retrying in ' . $delay . ' seconds' : 'Retrying', [
+				'jobId' => $jobId,
+				'retryAttempt' => $nextAttempt,
+				'retryDelay' => $delay,
+				'previousError' => $error->getMessage(),
+			]);
+
+			return true;
+		} catch (\Throwable $e) {
+			Craft::error('ImageQualityChecker: Could not queue retry for failed article image enhancement: ' . $e->getMessage(), __METHOD__);
+			return false;
+		}
 	}
 
 	private function sendSlackErrorNotification(Settings $settings, \Throwable $error): void
