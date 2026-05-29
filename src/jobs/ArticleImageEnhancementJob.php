@@ -306,20 +306,26 @@ class ArticleImageEnhancementJob extends BaseJob
 
 		try {
 			$client = Craft::createGuzzleClient();
+			$errorChannel = trim($settings->slackErrorChannel) ?: trim($settings->slackChannel);
 
 			if ($settings->slackWebhookUrl) {
+				$payload = [
+					'text' => 'Image enhancement error',
+					'blocks' => $blocks,
+					'unfurl_links' => false,
+					'unfurl_media' => false,
+				];
+				if ($errorChannel !== '') {
+					$payload['channel'] = $errorChannel;
+				}
+
 				$client->post($settings->slackWebhookUrl, [
-					'json' => [
-						'text' => 'Image enhancement error',
-						'blocks' => $blocks,
-						'unfurl_links' => false,
-						'unfurl_media' => false,
-					],
+					'json' => $payload,
 				]);
 				return;
 			}
 
-			if (!$settings->slackBotToken || !$settings->slackChannel) {
+			if (!$settings->slackBotToken || $errorChannel === '') {
 				Craft::warning('ImageQualityChecker: Slack error notification skipped because bot token or channel is missing.', __METHOD__);
 				return;
 			}
@@ -330,7 +336,7 @@ class ArticleImageEnhancementJob extends BaseJob
 					'Content-Type' => 'application/json',
 				],
 				'json' => [
-					'channel' => $settings->slackChannel,
+					'channel' => $errorChannel,
 					'text' => 'Image enhancement error',
 					'blocks' => $blocks,
 					'unfurl_links' => false,

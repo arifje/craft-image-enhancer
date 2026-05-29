@@ -104,6 +104,15 @@
 		placeholder: '#media'
 	}) }}
 
+	{{ forms.textField({
+		label: 'Slack Error Channel',
+		name: 'slackErrorChannel',
+		id: 'slackErrorChannel',
+		instructions: 'Optional channel for error notifications. Leave empty to use the normal Slack channel. For webhook delivery, the webhook may still control the destination channel.',
+		value: settings.slackErrorChannel,
+		placeholder: '#image-errors'
+	}) }}
+
 	<button type="button" class="btn" data-image-quality-test-action="_image-quality-checker/notifications/test-slack">
 		Send Slack test notification
 	</button>

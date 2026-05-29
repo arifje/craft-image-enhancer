@@ -117,6 +117,7 @@ PROMPT;
 	public string $slackWebhookUrl = '';
 	public string $slackBotToken = ''; // Required for postMessage method
  	public string $slackChannel = '';
+	public string $slackErrorChannel = '';
 	
 	// Email notification
 	public bool $emailNotification = false;
@@ -147,7 +148,7 @@ PROMPT;
 	public function rules(): array
 	{
 		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
+			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
 			[['slackNotification', 'slackErrorNotification', 'emailNotification', 'debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['creativeEnhancementClarityLevel', 'creativeEnhancementContrastLevel', 'creativeEnhancementColorLevel', 'creativeEnhancementNoiseReductionLevel'], 'integer', 'min' => self::ENHANCEMENT_LEVEL_MIN, 'max' => self::ENHANCEMENT_LEVEL_MAX],
