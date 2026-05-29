@@ -113,6 +113,7 @@ PROMPT;
 	
 	// Slack notification
 	public bool $slackNotification = true;
+	public bool $slackErrorNotification = false;
 	public string $slackWebhookUrl = '';
 	public string $slackBotToken = ''; // Required for postMessage method
  	public string $slackChannel = '';
@@ -147,7 +148,7 @@ PROMPT;
 	{
 		return [
 			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel','chatGptResultLanguage','slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
-			[['debugLogging'], 'boolean'],
+			[['slackNotification', 'slackErrorNotification', 'emailNotification', 'debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['creativeEnhancementClarityLevel', 'creativeEnhancementContrastLevel', 'creativeEnhancementColorLevel', 'creativeEnhancementNoiseReductionLevel'], 'integer', 'min' => self::ENHANCEMENT_LEVEL_MIN, 'max' => self::ENHANCEMENT_LEVEL_MAX],
 			[['allowedAssetFieldHandles'], 'safe'],

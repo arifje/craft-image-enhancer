@@ -85,6 +85,7 @@ class ArticleImageEnhancementJob extends BaseJob
 			$this->updateStatus('failed', 1, 'Enhancement failed', [
 				'message' => $e->getMessage(),
 			]);
+			$this->sendSlackErrorNotification($settings, $e);
 			Craft::error('ImageQualityChecker: Article image enhancement queue job failed: ' . $e->getMessage(), __METHOD__);
 			throw $e;
 		}
@@ -287,6 +288,64 @@ class ArticleImageEnhancementJob extends BaseJob
 		$this->setProgress($queue, 1, 'Canceled');
 	}
 
+	private function sendSlackErrorNotification(Settings $settings, \Throwable $error): void
+	{
+		if (!$settings->slackErrorNotification) {
+			return;
+		}
+
+		$blocks = [
+			[
+				'type' => 'section',
+				'text' => [
+					'type' => 'mrkdwn',
+					'text' => $this->getSlackErrorText($error),
+				],
+			],
+		];
+
+		try {
+			$client = Craft::createGuzzleClient();
+
+			if ($settings->slackWebhookUrl) {
+				$client->post($settings->slackWebhookUrl, [
+					'json' => [
+						'text' => 'Image enhancement error',
+						'blocks' => $blocks,
+						'unfurl_links' => false,
+						'unfurl_media' => false,
+					],
+				]);
+				return;
+			}
+
+			if (!$settings->slackBotToken || !$settings->slackChannel) {
+				Craft::warning('ImageQualityChecker: Slack error notification skipped because bot token or channel is missing.', __METHOD__);
+				return;
+			}
+
+			$response = $client->post('https://slack.com/api/chat.postMessage', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $settings->slackBotToken,
+					'Content-Type' => 'application/json',
+				],
+				'json' => [
+					'channel' => $settings->slackChannel,
+					'text' => 'Image enhancement error',
+					'blocks' => $blocks,
+					'unfurl_links' => false,
+					'unfurl_media' => false,
+				],
+			]);
+			$responseData = json_decode((string) $response->getBody(), true);
+			if (($responseData['ok'] ?? true) === false) {
+				Craft::warning('ImageQualityChecker: Slack error notification API error: ' . ($responseData['error'] ?? 'unknown'), __METHOD__);
+			}
+		} catch (\Throwable $e) {
+			Craft::error('ImageQualityChecker: Slack error notification failed: ' . $e->getMessage(), __METHOD__);
+		}
+	}
+
 	private function getStatusCacheKey(): string
 	{
 		return 'image-quality-checker:article-image-enhancement:' . $this->token;
@@ -363,20 +422,51 @@ class ArticleImageEnhancementJob extends BaseJob
 
 	private function truncateTitle(string $title, int $limit = 25): string
 	{
-		$title = trim($title);
-		if ($title === '') {
+		return $this->truncateText($title, $limit);
+	}
+
+	private function getSlackErrorText(\Throwable $error): string
+	{
+		$entry = $this->getRelatedEntryForAsset($this->assetId);
+		$title = $entry?->title ?: 'onbekend artikel';
+		$article = $entry?->getCpEditUrl()
+			? $this->formatSlackLink($entry->getCpEditUrl(), $title)
+			: $this->escapeSlackText($title);
+		$message = $this->escapeSlackText($this->truncateText($error->getMessage(), 700));
+
+		return "⚠️ Image enhancement failed for article: {$article}\nAsset ID: {$this->assetId}\nError: {$message}";
+	}
+
+	private function truncateText(string $text, int $limit): string
+	{
+		$text = trim($text);
+		if ($text === '') {
 			return '';
 		}
 
-		$length = function_exists('mb_strlen') ? mb_strlen($title) : strlen($title);
+		$length = function_exists('mb_strlen') ? mb_strlen($text) : strlen($text);
 		if ($length <= $limit) {
-			return $title;
+			return $text;
 		}
 
 		$sliceLength = max(0, $limit - 3);
-		$slice = function_exists('mb_substr') ? mb_substr($title, 0, $sliceLength) : substr($title, 0, $sliceLength);
+		$slice = function_exists('mb_substr') ? mb_substr($text, 0, $sliceLength) : substr($text, 0, $sliceLength);
 
 		return rtrim($slice) . '...';
+	}
+
+	private function formatSlackLink(string $url, string $label): string
+	{
+		return '<' . str_replace('>', '%3E', $url) . '|' . $this->escapeSlackText($label) . '>';
+	}
+
+	private function escapeSlackText(string $text): string
+	{
+		return str_replace(
+			['&', '<', '>', '|'],
+			['&amp;', '&lt;', '&gt;', '/'],
+			$text
+		);
 	}
 
 	protected function defaultDescription(): string

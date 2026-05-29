@@ -68,6 +68,14 @@
 		on: settings.slackNotification,
 		instructions: "Also fill in the Slack variables below.",
 	}) }}
+
+	{{ forms.lightswitchField({
+		label: "Send errors to Slack"|t,
+		id: 'slackErrorNotification',
+		name: 'slackErrorNotification',
+		on: settings.slackErrorNotification,
+		instructions: "Send failed image enhancement queue jobs to Slack using the same Slack variables below.",
+	}) }}
 	
 	{{ forms.textField({
 		label: 'Slack Bot Token',
