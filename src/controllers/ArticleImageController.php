@@ -79,18 +79,25 @@ class ArticleImageController extends Controller
 		$assetId = (int) Craft::$app->getRequest()->getBodyParam('assetId');
 		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
 
-		if (!$assetId || !$token) {
-			return $this->asJsonFailure('Missing enhancement status token.');
+		if (!$assetId) {
+			return $this->asJsonFailure('Missing enhancement asset.');
 		}
 
-		$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
+		$asset = Craft::$app->assets->getAssetById($assetId);
+		if (!$this->isSupportedImageAsset($asset) || !$this->canSaveAsset($asset)) {
+			return $this->asJsonFailure('You do not have permission to view this enhancement status.');
+		}
+
+		$status = $token !== ''
+			? Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token))
+			: Craft::$app->getCache()->get($this->getEnhancementAssetStatusCacheKey($assetId));
 		if (!is_array($status)) {
 			return $this->asJson([
 				'success' => true,
-				'status' => 'pending',
+				'status' => $token !== '' ? 'pending' : 'idle',
 				'assetId' => $assetId,
 				'progress' => 0,
-				'progressLabel' => 'Waiting for queue',
+				'progressLabel' => $token !== '' ? 'Waiting for queue' : 'Idle',
 			]);
 		}
 
@@ -367,19 +374,37 @@ class ArticleImageController extends Controller
 
 	private function setEnhancementStatus(string $token, array $status): void
 	{
-		Craft::$app->getCache()->set($this->getEnhancementStatusCacheKey($token), $status, 3600);
+		$statusWithToken = array_merge($status, ['token' => $token]);
+
+		Craft::$app->getCache()->set($this->getEnhancementStatusCacheKey($token), $statusWithToken, 3600);
+
+		$assetId = (int) ($status['assetId'] ?? 0);
+		if ($assetId) {
+			Craft::$app->getCache()->set($this->getEnhancementAssetStatusCacheKey($assetId), $statusWithToken, 3600);
+		}
 	}
 
 	private function deleteEnhancementStatus(?string $token): void
 	{
 		if ($token) {
+			$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
 			Craft::$app->getCache()->delete($this->getEnhancementStatusCacheKey($token));
+
+			$assetId = is_array($status) ? (int) ($status['assetId'] ?? 0) : 0;
+			if ($assetId) {
+				Craft::$app->getCache()->delete($this->getEnhancementAssetStatusCacheKey($assetId));
+			}
 		}
 	}
 
 	private function getEnhancementStatusCacheKey(string $token): string
 	{
 		return 'image-quality-checker:article-image-enhancement:' . $token;
+	}
+
+	private function getEnhancementAssetStatusCacheKey(int $assetId): string
+	{
+		return 'image-quality-checker:article-image-enhancement-asset:' . $assetId;
 	}
 
 	private function asJsonFailure(string $message): Response

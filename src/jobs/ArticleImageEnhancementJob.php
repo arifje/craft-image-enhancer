@@ -274,12 +274,16 @@ class ArticleImageEnhancementJob extends BaseJob
 			return;
 		}
 
-		Craft::$app->getCache()->set($this->getStatusCacheKey(), array_merge([
+		$statusPayload = array_merge([
 			'status' => $status,
 			'assetId' => $this->assetId,
+			'token' => $this->token,
 			'progress' => $progress,
 			'progressLabel' => $progressLabel,
-		], $extra), 3600);
+		], $extra);
+
+		Craft::$app->getCache()->set($this->getStatusCacheKey(), $statusPayload, 3600);
+		Craft::$app->getCache()->set($this->getAssetStatusCacheKey(), $statusPayload, 3600);
 	}
 
 	private function isCanceled(): bool
@@ -393,6 +397,11 @@ class ArticleImageEnhancementJob extends BaseJob
 	private function getStatusCacheKey(): string
 	{
 		return 'image-quality-checker:article-image-enhancement:' . $this->token;
+	}
+
+	private function getAssetStatusCacheKey(): string
+	{
+		return 'image-quality-checker:article-image-enhancement-asset:' . $this->assetId;
 	}
 
 	private function getRelatedEntryForAsset(int $assetId): ?Entry
