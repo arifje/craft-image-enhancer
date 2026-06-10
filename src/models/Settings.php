@@ -20,6 +20,13 @@ class Settings extends Model
 	public const ENHANCEMENT_ACTION_ADD = 'add';
 	public const IMAGE_MODEL_GPT_IMAGE_2 = 'gpt-image-2';
 	public const IMAGE_MODEL_GPT_IMAGE_1 = 'gpt-image-1';
+	public const IMAGE_PROVIDER_OPENAI = 'openai';
+	public const IMAGE_PROVIDER_XAI = 'xai';
+	public const IMAGE_PROVIDER_GOOGLE = 'google';
+	public const XAI_IMAGE_MODEL_GROK_IMAGINE_QUALITY = 'grok-imagine-image-quality';
+	public const GOOGLE_IMAGE_MODEL_GEMINI_3_1_FLASH_IMAGE = 'gemini-3.1-flash-image';
+	public const GOOGLE_IMAGE_MODEL_GEMINI_3_PRO_IMAGE = 'gemini-3-pro-image';
+	public const GOOGLE_IMAGE_MODEL_GEMINI_2_5_FLASH_IMAGE = 'gemini-2.5-flash-image';
 	public const FACE_HANDLING_ALLOW_AI = 'allow_ai';
 	public const FACE_HANDLING_SAFE_FALLBACK = 'safe_fallback';
 	public const ENHANCEMENT_LEVEL_MIN = 1;
@@ -135,7 +142,12 @@ PROMPT;
 	public string $imageEnhancementMode = self::ENHANCEMENT_DISABLED;
 	public string $imageEnhancementTrigger = self::ENHANCEMENT_TRIGGER_THRESHOLD;
 	public string $imageEnhancementAction = self::ENHANCEMENT_ACTION_REPLACE;
+	public string $imageEnhancementProvider = self::IMAGE_PROVIDER_OPENAI;
 	public string $imageEnhancementModel = self::IMAGE_MODEL_GPT_IMAGE_2;
+	public string $xAiApiKey = '';
+	public string $xAiImageEnhancementModel = self::XAI_IMAGE_MODEL_GROK_IMAGINE_QUALITY;
+	public string $googleAiApiKey = '';
+	public string $googleImageEnhancementModel = self::GOOGLE_IMAGE_MODEL_GEMINI_3_1_FLASH_IMAGE;
 	public string $imageEnhancementFaceHandling = self::FACE_HANDLING_ALLOW_AI;
 	public int $creativeEnhancementClarityLevel = 5;
 	public int $creativeEnhancementContrastLevel = 5;
@@ -150,7 +162,7 @@ PROMPT;
 	public function rules(): array
 	{
 		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
+			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementProvider', 'imageEnhancementModel', 'xAiApiKey', 'xAiImageEnhancementModel', 'googleAiApiKey', 'googleImageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
 			[['slackNotification', 'slackErrorNotification', 'emailNotification', 'retryFailedEnhancementJobs', 'debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['failedEnhancementRetryDelay'], 'integer', 'min' => 0, 'max' => 86400],
@@ -195,7 +207,16 @@ PROMPT;
 		return [
 			['label' => 'Disabled', 'value' => self::ENHANCEMENT_DISABLED],
 			['label' => 'Imagick safe optimization', 'value' => self::ENHANCEMENT_SAFE],
-			['label' => 'OpenAI / ChatGPT AI enhancement', 'value' => self::ENHANCEMENT_CREATIVE],
+			['label' => 'AI enhancement', 'value' => self::ENHANCEMENT_CREATIVE],
+		];
+	}
+
+	public static function imageEnhancementProviderOptions(): array
+	{
+		return [
+			['label' => 'OpenAI', 'value' => self::IMAGE_PROVIDER_OPENAI],
+			['label' => 'Grok Imagine (xAI)', 'value' => self::IMAGE_PROVIDER_XAI],
+			['label' => 'Google Nano Banana', 'value' => self::IMAGE_PROVIDER_GOOGLE],
 		];
 	}
 
@@ -220,6 +241,22 @@ PROMPT;
 		return [
 			['label' => 'GPT Image 2', 'value' => self::IMAGE_MODEL_GPT_IMAGE_2],
 			['label' => 'GPT Image 1', 'value' => self::IMAGE_MODEL_GPT_IMAGE_1],
+		];
+	}
+
+	public static function xAiImageEnhancementModelOptions(): array
+	{
+		return [
+			['label' => 'Grok Imagine Image Quality', 'value' => self::XAI_IMAGE_MODEL_GROK_IMAGINE_QUALITY],
+		];
+	}
+
+	public static function googleImageEnhancementModelOptions(): array
+	{
+		return [
+			['label' => 'Gemini 3.1 Flash Image (Nano Banana 2)', 'value' => self::GOOGLE_IMAGE_MODEL_GEMINI_3_1_FLASH_IMAGE],
+			['label' => 'Gemini 3 Pro Image (Nano Banana Pro)', 'value' => self::GOOGLE_IMAGE_MODEL_GEMINI_3_PRO_IMAGE],
+			['label' => 'Gemini 2.5 Flash Image (Nano Banana)', 'value' => self::GOOGLE_IMAGE_MODEL_GEMINI_2_5_FLASH_IMAGE],
 		];
 	}
 

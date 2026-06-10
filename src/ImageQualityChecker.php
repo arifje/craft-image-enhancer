@@ -5,6 +5,7 @@ namespace arjanbrinkman\craftimagequalitychecker;
 use Craft;
 
 use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimagequalitychecker\services\AiImageEnhancementService;
 use arjanbrinkman\craftimagequalitychecker\services\ImageQualityService;
 use arjanbrinkman\craftimagequalitychecker\services\RuntimeSettingsService;
 use arjanbrinkman\craftimagequalitychecker\jobs\AnalyzeImageJob;
@@ -31,6 +32,7 @@ use craft\events\TemplateEvent;
  *
  * @method static ImageQualityChecker getInstance()
  * @method Settings getSettings()
+ * @property AiImageEnhancementService $aiImageEnhancement
  * @property RuntimeSettingsService $runtimeSettings
  */
 class ImageQualityChecker extends Plugin
@@ -44,6 +46,7 @@ class ImageQualityChecker extends Plugin
 		return [
 			'components' => [
 				'imageQualityService' => ImageQualityService::class,
+				'aiImageEnhancement' => AiImageEnhancementService::class,
 				'runtimeSettings' => RuntimeSettingsService::class,
 			],
 		];
@@ -85,7 +88,10 @@ class ImageQualityChecker extends Plugin
 			'imageEnhancementModeOptions' => Settings::imageEnhancementModeOptions(),
 			'imageEnhancementTriggerOptions' => Settings::imageEnhancementTriggerOptions(),
 			'imageEnhancementActionOptions' => Settings::imageEnhancementActionOptions(),
+			'imageEnhancementProviderOptions' => Settings::imageEnhancementProviderOptions(),
 			'imageEnhancementModelOptions' => Settings::imageEnhancementModelOptions(),
+			'xAiImageEnhancementModelOptions' => Settings::xAiImageEnhancementModelOptions(),
+			'googleImageEnhancementModelOptions' => Settings::googleImageEnhancementModelOptions(),
 			'imageEnhancementFaceHandlingOptions' => Settings::imageEnhancementFaceHandlingOptions(),
 		]);
 	}

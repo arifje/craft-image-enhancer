@@ -193,7 +193,7 @@
 		label: 'Enhancement mode',
 		name: 'imageEnhancementMode',
 		id: 'imageEnhancementMode',
-		instructions: 'When an image score is below the notification threshold, choose whether replacement is handled by Imagick or OpenAI/ChatGPT AI.',
+		instructions: 'When an image score is below the notification threshold, choose whether replacement is handled by Imagick or an AI image provider.',
 		value: settings.imageEnhancementMode,
 		options: imageEnhancementModeOptions,
 	}) }}
@@ -217,12 +217,57 @@
 	}) }}
 
 	{{ forms.selectField({
+		label: 'AI image provider',
+		name: 'imageEnhancementProvider',
+		id: 'imageEnhancementProvider',
+		instructions: 'Choose the platform used for AI image enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab.',
+		value: settings.imageEnhancementProvider,
+		options: imageEnhancementProviderOptions,
+	}) }}
+
+	{{ forms.selectField({
 		label: 'OpenAI image enhancement model',
 		name: 'imageEnhancementModel',
 		id: 'imageEnhancementModel',
-		instructions: 'Choose which OpenAI image model is used when AI enhancement is allowed to run.',
+		instructions: 'Used when the AI image provider is OpenAI.',
 		value: settings.imageEnhancementModel,
 		options: imageEnhancementModelOptions,
+	}) }}
+
+	{{ forms.textField({
+		label: 'xAI API key',
+		name: 'xAiApiKey',
+		id: 'xAiApiKey',
+		instructions: 'Used when the AI image provider is Grok Imagine.',
+		value: settings.xAiApiKey,
+		placeholder: 'xai-...',
+	}) }}
+
+	{{ forms.selectField({
+		label: 'Grok Imagine image model',
+		name: 'xAiImageEnhancementModel',
+		id: 'xAiImageEnhancementModel',
+		instructions: 'Used when the AI image provider is Grok Imagine.',
+		value: settings.xAiImageEnhancementModel,
+		options: xAiImageEnhancementModelOptions,
+	}) }}
+
+	{{ forms.textField({
+		label: 'Google AI API key',
+		name: 'googleAiApiKey',
+		id: 'googleAiApiKey',
+		instructions: 'Used when the AI image provider is Google Nano Banana.',
+		value: settings.googleAiApiKey,
+		placeholder: 'AIza...',
+	}) }}
+
+	{{ forms.selectField({
+		label: 'Google Nano Banana image model',
+		name: 'googleImageEnhancementModel',
+		id: 'googleImageEnhancementModel',
+		instructions: 'Used when the AI image provider is Google Nano Banana.',
+		value: settings.googleImageEnhancementModel,
+		options: googleImageEnhancementModelOptions,
 	}) }}
 
 	{{ forms.selectField({
@@ -340,11 +385,11 @@
 	}) }}
 
 	{{ forms.textareaField({
-		label: 'OpenAI / ChatGPT AI enhancement prompt',
+		label: 'AI enhancement prompt',
 		name: 'creativeEnhancementPrompt',
 		id: 'creativeEnhancementPrompt',
 		rows: 16,
-		instructions: 'Used for OpenAI/ChatGPT AI enhancement mode. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details.',
+		instructions: 'Used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details.',
 		value: settings.effectiveCreativeEnhancementPrompt,
 	}) }}
 

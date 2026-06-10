@@ -38,19 +38,15 @@ class ArticleImageEnhancementJob extends BaseJob
 				throw new \RuntimeException('Asset not found or unsupported.');
 			}
 
-			$apiKey = $settings->chatGptApiKey;
-			if (!$apiKey) {
-				throw new \RuntimeException('OpenAI API key is missing.');
-			}
-
 			$localPath = $this->getFullAssetPath($asset);
 			if (!$localPath || !file_exists($localPath)) {
 				throw new \RuntimeException('Could not find the original asset file.');
 			}
 
-			$this->updateStatus('running', 0.2, 'Sending image to OpenAI');
-			$this->setProgress($queue, 0.2, 'Sending image to OpenAI');
-			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $apiKey);
+			$providerLabel = ImageQualityChecker::getInstance()->aiImageEnhancement->getProviderLabel($settings);
+			$this->updateStatus('running', 0.2, 'Sending image to ' . $providerLabel);
+			$this->setProgress($queue, 0.2, 'Sending image to ' . $providerLabel);
+			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath);
 
 			if ($this->isCanceled()) {
 				@unlink($tempPath);
@@ -98,67 +94,16 @@ class ArticleImageEnhancementJob extends BaseJob
 		}
 	}
 
-	private function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): string
+	private function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath): string
 	{
-		$handle = fopen($localPath, 'rb');
-		if ($handle === false) {
-			throw new \RuntimeException('Could not open the original asset file.');
+		[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
+		$tempPath = ImageQualityChecker::getInstance()->aiImageEnhancement->enhanceToTempFile($client, $settings, $asset, $localPath);
+
+		if ($originalWidth && $originalHeight) {
+			$this->normalizeReplacementImageDimensions($asset, $tempPath, $originalWidth, $originalHeight);
 		}
 
-		try {
-			[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
-			$response = $client->post('https://api.openai.com/v1/images/edits', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $apiKey,
-				],
-				'multipart' => [
-					[
-						'name' => 'model',
-						'contents' => $settings->imageEnhancementModel,
-					],
-					[
-						'name' => 'image',
-						'contents' => $handle,
-						'filename' => $asset->filename,
-					],
-					[
-						'name' => 'prompt',
-						'contents' => $settings->getCreativeEnhancementPromptForRequest(),
-					],
-					[
-						'name' => 'size',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'quality',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'output_format',
-						'contents' => $asset->mimeType === 'image/png' ? 'png' : 'jpeg',
-					],
-				],
-			]);
-			$data = json_decode((string) $response->getBody(), true);
-			$imageData = $data['data'][0]['b64_json'] ?? null;
-
-			if (!$imageData) {
-				throw new \RuntimeException('OpenAI returned no enhanced image data.');
-			}
-
-			$tempPath = $this->getTempReplacementPath($asset);
-			file_put_contents($tempPath, base64_decode($imageData));
-
-			if ($originalWidth && $originalHeight) {
-				$this->normalizeReplacementImageDimensions($asset, $tempPath, $originalWidth, $originalHeight);
-			}
-
-			return $tempPath;
-		} finally {
-			if (is_resource($handle)) {
-				fclose($handle);
-			}
-		}
+		return $tempPath;
 	}
 
 	private function createPreviewAsset(Asset $originalAsset, string $tempPath): ?Asset

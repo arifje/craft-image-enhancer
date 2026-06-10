@@ -111,15 +111,7 @@ class AnalyzeImageJob extends BaseJob
 		
 		$imageBase64 = base64_encode(file_get_contents($localPath));
 		
-		$apiKey = $settings->chatGptApiKey;
-
-		if (!$apiKey) {
-			$this->debugLog($settings, 'Skipping analysis because OpenAI API key is missing');
-			Craft::warning("AnalyzeImageJob: API key missing in settings.", __METHOD__);
-			$this->updateProgress($queue, 1, 'Skipped: missing OpenAI API key');
-			return;
-		}
-
+		$apiKey = trim($settings->chatGptApiKey);
 		$client = Craft::createGuzzleClient();
 		$imageUrl = $asset->getUrl();
 		$relatedEntry = $this->getRelatedEntryForAsset($asset->id);
@@ -152,6 +144,13 @@ class AnalyzeImageJob extends BaseJob
 			$this->sendSlackNotification($data);
 			$this->sendEmailNotification($data);
 			$this->updateProgress($queue, 1, 'Done');
+			return;
+		}
+
+		if (!$apiKey) {
+			$this->debugLog($settings, 'Skipping analysis because OpenAI API key is missing');
+			Craft::warning("AnalyzeImageJob: API key missing in settings.", __METHOD__);
+			$this->updateProgress($queue, 1, 'Skipped: missing OpenAI API key');
 			return;
 		}
 
@@ -376,35 +375,26 @@ class AnalyzeImageJob extends BaseJob
 	{
 		if (
 			$settings->imageEnhancementFaceHandling === Settings::FACE_HANDLING_SAFE_FALLBACK &&
-			$this->shouldUseSafeEnhancementForFaces($client, $settings, $asset, $localPath, $apiKey)
+			($apiKey === '' || $this->shouldUseSafeEnhancementForFaces($client, $settings, $asset, $localPath, $apiKey))
 		) {
-			$this->debugLog($settings, 'Using safe enhancement instead of AI enhancement because a visible human face was detected or face detection failed', [
+			$this->debugLog($settings, 'Using safe enhancement instead of AI enhancement because a visible human face was detected, face detection failed, or OpenAI face detection is unavailable', [
 				'assetId' => $asset->id,
 			]);
 
 			return $this->safeEnhanceImage($settings, $asset, $localPath);
 		}
 
-		$handle = fopen($localPath, 'rb');
-
-		if ($handle === false) {
-			Craft::warning('ImageQualityChecker: Could not open image for AI enhancement.', __METHOD__);
-			return [
-				'label' => 'Niet vervangen',
-				'status' => 'AI enhancement mislukt: bestand kon niet worden geopend.',
-				'action' => 'failed',
-				'imageUrl' => $asset->getUrl(),
-				'slackAction' => 'Optimalisatie met AI is mislukt: bestand kon niet worden geopend',
-			];
-		}
-
 		try {
 			[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
 			$creativeEnhancementPrompt = $settings->getCreativeEnhancementPromptForRequest();
-			$this->debugLog($settings, 'Starting OpenAI image enhancement', [
+			$enhancementService = ImageQualityChecker::getInstance()->aiImageEnhancement;
+			$providerLabel = $enhancementService->getProviderLabel($settings);
+			$this->debugLog($settings, 'Starting AI image enhancement', [
 				'assetId' => $asset->id,
 				'filename' => $asset->filename,
-				'imageEnhancementModel' => $settings->imageEnhancementModel,
+				'imageEnhancementProvider' => $settings->imageEnhancementProvider,
+				'imageEnhancementProviderLabel' => $providerLabel,
+				'imageEnhancementModel' => $enhancementService->getProviderModel($settings),
 				'imageEnhancementFaceHandling' => $settings->imageEnhancementFaceHandling,
 				'creativeEnhancementTuningLevels' => $settings->getCreativeEnhancementTuningLevels(),
 				'creativeEnhancementPromptLength' => strlen($creativeEnhancementPrompt),
@@ -416,62 +406,13 @@ class AnalyzeImageJob extends BaseJob
 				'originalHeight' => $originalHeight,
 				'originalOwnership' => $this->getFileOwnershipContext($localPath),
 			]);
-			$response = $client->post('https://api.openai.com/v1/images/edits', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $apiKey,
-				],
-				'multipart' => [
-					[
-						'name' => 'model',
-						'contents' => $settings->imageEnhancementModel,
-					],
-					[
-						'name' => 'image',
-						'contents' => $handle,
-						'filename' => $asset->filename,
-					],
-					[
-						'name' => 'prompt',
-						'contents' => $creativeEnhancementPrompt,
-					],
-					[
-						'name' => 'size',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'quality',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'output_format',
-						'contents' => $asset->mimeType === 'image/png' ? 'png' : 'jpeg',
-					],
-				],
-			]);
-			$data = json_decode((string) $response->getBody(), true);
-			$imageData = $data['data'][0]['b64_json'] ?? null;
 
-			if (!$imageData) {
-				$this->debugLog($settings, 'OpenAI image enhancement returned no image data', [
-					'responseKeys' => is_array($data) ? array_keys($data) : [],
-				]);
-				Craft::warning('ImageQualityChecker: AI image enhancement returned no image data.', __METHOD__);
-				return [
-					'label' => 'Niet vervangen',
-					'status' => 'AI enhancement gaf geen vervangende afbeelding terug.',
-					'action' => 'failed',
-					'imageUrl' => $asset->getUrl(),
-					'slackAction' => 'Optimalisatie met AI is mislukt: geen vervangende afbeelding ontvangen',
-				];
-			}
-
-			$tempPath = $this->getTempReplacementPath($asset);
-			file_put_contents($tempPath, base64_decode($imageData));
+			$tempPath = $enhancementService->enhanceToTempFile($client, $settings, $asset, $localPath);
 			if ($originalWidth && $originalHeight) {
 				$this->normalizeReplacementImageDimensions($settings, $asset, $tempPath, $originalWidth, $originalHeight);
 			}
 			$normalizedSize = file_exists($tempPath) ? @getimagesize($tempPath) : null;
-			$this->debugLog($settings, 'OpenAI image enhancement wrote replacement temp file', [
+			$this->debugLog($settings, 'AI image enhancement wrote replacement temp file', [
 				'tempPath' => $tempPath,
 				'tempFileExists' => file_exists($tempPath),
 				'tempFileSize' => file_exists($tempPath) ? filesize($tempPath) : null,
@@ -481,7 +422,7 @@ class AnalyzeImageJob extends BaseJob
 			]);
 			return $this->storeEnhancedImage($settings, $asset, $tempPath, $localPath, 'ai');
 		} catch (\Throwable $e) {
-			$this->debugLog($settings, 'OpenAI image enhancement failed', [
+			$this->debugLog($settings, 'AI image enhancement failed', [
 				'error' => $e->getMessage(),
 			]);
 			Craft::error('ImageQualityChecker: AI image enhancement failed: ' . $e->getMessage(), __METHOD__);
@@ -493,10 +434,6 @@ class AnalyzeImageJob extends BaseJob
 				'imageUrl' => $asset->getUrl(),
 				'slackAction' => 'Optimalisatie met AI is mislukt',
 			];
-		} finally {
-			if (is_resource($handle)) {
-				fclose($handle);
-			}
 		}
 	}
 

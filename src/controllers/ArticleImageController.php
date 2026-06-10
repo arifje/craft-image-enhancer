@@ -26,8 +26,10 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('You do not have permission to enhance this asset.');
 		}
 
-		if (!ImageQualityChecker::getInstance()->getSettings()->chatGptApiKey) {
-			return $this->asJsonFailure('OpenAI API key is missing.');
+		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$enhancementService = ImageQualityChecker::getInstance()->aiImageEnhancement;
+		if ($enhancementService->getConfiguredApiKey($settings) === '') {
+			return $this->asJsonFailure($enhancementService->getProviderLabel($settings) . ' API key is missing.');
 		}
 
 		$localPath = $this->getFullAssetPath($asset);
