@@ -208,6 +208,39 @@ class ArticleImageController extends Controller
 		]);
 	}
 
+	public function actionReset(): Response
+	{
+		$this->requireLogin();
+		$this->requirePostRequest();
+		$this->requireAcceptsJson();
+
+		$asset = $this->getPostedAsset();
+		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
+
+		if (!$asset instanceof Asset) {
+			return $this->asJsonFailure('Missing enhancement asset.');
+		}
+		if (!$this->canSaveAsset($asset)) {
+			return $this->asJsonFailure('You do not have permission to reset this enhancement status.');
+		}
+
+		$status = $token !== ''
+			? Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token))
+			: Craft::$app->getCache()->get($this->getEnhancementAssetStatusCacheKey((int) $asset->id));
+
+		if (is_array($status) && (int) ($status['assetId'] ?? 0) !== (int) $asset->id) {
+			return $this->asJsonFailure('Enhancement status token does not match this asset.');
+		}
+
+		$this->deleteEnhancementStatus($token !== '' ? $token : ($status['token'] ?? null), (int) $asset->id);
+
+		return $this->asJson([
+			'success' => true,
+			'status' => 'idle',
+			'assetId' => $asset->id,
+		]);
+	}
+
 	public function actionKeep(): Response
 	{
 		$this->requireLogin();
@@ -424,16 +457,17 @@ class ArticleImageController extends Controller
 		}
 	}
 
-	private function deleteEnhancementStatus(?string $token): void
+	private function deleteEnhancementStatus(?string $token, ?int $assetId = null): void
 	{
 		if ($token) {
 			$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
 			Craft::$app->getCache()->delete($this->getEnhancementStatusCacheKey($token));
 
-			$assetId = is_array($status) ? (int) ($status['assetId'] ?? 0) : 0;
-			if ($assetId) {
-				Craft::$app->getCache()->delete($this->getEnhancementAssetStatusCacheKey($assetId));
-			}
+			$assetId = $assetId ?: (is_array($status) ? (int) ($status['assetId'] ?? 0) : 0);
+		}
+
+		if ($assetId) {
+			Craft::$app->getCache()->delete($this->getEnhancementAssetStatusCacheKey($assetId));
 		}
 	}
 
