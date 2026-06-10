@@ -20,6 +20,8 @@ class ArticleImageEnhancementJob extends BaseJob
 	public ?int $userId = null;
 	public string $token;
 	public int $retryAttempt = 0;
+	public ?string $imageEnhancementProvider = null;
+	public ?string $imageEnhancementModel = null;
 
 	public function execute($queue): void
 	{
@@ -43,10 +45,11 @@ class ArticleImageEnhancementJob extends BaseJob
 				throw new \RuntimeException('Could not find the original asset file.');
 			}
 
-			$providerLabel = ImageQualityChecker::getInstance()->aiImageEnhancement->getProviderLabel($settings);
+			$providerOptions = $this->getProviderOptions();
+			$providerLabel = ImageQualityChecker::getInstance()->aiImageEnhancement->getProviderLabel($settings, $providerOptions);
 			$this->updateStatus('running', 0.2, 'Sending image to ' . $providerLabel);
 			$this->setProgress($queue, 0.2, 'Sending image to ' . $providerLabel);
-			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath);
+			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $providerOptions);
 
 			if ($this->isCanceled()) {
 				@unlink($tempPath);
@@ -94,16 +97,28 @@ class ArticleImageEnhancementJob extends BaseJob
 		}
 	}
 
-	private function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath): string
+	private function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, array $providerOptions = []): string
 	{
 		[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
-		$tempPath = ImageQualityChecker::getInstance()->aiImageEnhancement->enhanceToTempFile($client, $settings, $asset, $localPath);
+		$tempPath = ImageQualityChecker::getInstance()->aiImageEnhancement->enhanceToTempFile($client, $settings, $asset, $localPath, $providerOptions);
 
 		if ($originalWidth && $originalHeight) {
 			$this->normalizeReplacementImageDimensions($asset, $tempPath, $originalWidth, $originalHeight);
 		}
 
 		return $tempPath;
+	}
+
+	private function getProviderOptions(): array
+	{
+		if (!$this->imageEnhancementProvider || !$this->imageEnhancementModel) {
+			return [];
+		}
+
+		return [
+			'provider' => $this->imageEnhancementProvider,
+			'model' => $this->imageEnhancementModel,
+		];
 	}
 
 	private function createPreviewAsset(Asset $originalAsset, string $tempPath): ?Asset
@@ -259,6 +274,8 @@ class ArticleImageEnhancementJob extends BaseJob
 				'userId' => $this->userId,
 				'token' => $this->token,
 				'retryAttempt' => $nextAttempt,
+				'imageEnhancementProvider' => $this->imageEnhancementProvider,
+				'imageEnhancementModel' => $this->imageEnhancementModel,
 			]), null, $delay);
 
 			$this->updateStatus('queued', 0, $delay > 0 ? 'Retrying in ' . $delay . ' seconds' : 'Retrying', [

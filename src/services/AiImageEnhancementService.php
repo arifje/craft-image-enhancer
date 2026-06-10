@@ -9,48 +9,65 @@ use GuzzleHttp\ClientInterface;
 
 class AiImageEnhancementService extends Component
 {
-	public function getProviderLabel(Settings $settings): string
+	public function getProviderLabel(Settings $settings, array $providerOptions = []): string
 	{
-		return match ($settings->imageEnhancementProvider) {
+		return match ($this->resolveProvider($settings, $providerOptions)) {
 			Settings::IMAGE_PROVIDER_XAI => 'Grok Imagine',
 			Settings::IMAGE_PROVIDER_GOOGLE => 'Google Nano Banana',
 			default => 'OpenAI',
 		};
 	}
 
-	public function getProviderModel(Settings $settings): string
+	public function getProviderModel(Settings $settings, array $providerOptions = []): string
 	{
-		return match ($settings->imageEnhancementProvider) {
-			Settings::IMAGE_PROVIDER_XAI => $settings->xAiImageEnhancementModel,
-			Settings::IMAGE_PROVIDER_GOOGLE => $settings->googleImageEnhancementModel,
-			default => $settings->imageEnhancementModel,
+		return match ($this->resolveProvider($settings, $providerOptions)) {
+			Settings::IMAGE_PROVIDER_XAI => (string) ($providerOptions['model'] ?? $settings->xAiImageEnhancementModel),
+			Settings::IMAGE_PROVIDER_GOOGLE => (string) ($providerOptions['model'] ?? $settings->googleImageEnhancementModel),
+			default => (string) ($providerOptions['model'] ?? $settings->imageEnhancementModel),
 		};
 	}
 
-	public function getConfiguredApiKey(Settings $settings): string
+	public function getConfiguredApiKey(Settings $settings, array $providerOptions = []): string
 	{
-		return match ($settings->imageEnhancementProvider) {
+		return match ($this->resolveProvider($settings, $providerOptions)) {
 			Settings::IMAGE_PROVIDER_XAI => trim($settings->xAiApiKey),
 			Settings::IMAGE_PROVIDER_GOOGLE => trim($settings->googleAiApiKey),
 			default => trim($settings->chatGptApiKey),
 		};
 	}
 
-	public function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath): string
+	public function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, array $providerOptions = []): string
 	{
-		$apiKey = $this->getConfiguredApiKey($settings);
+		$provider = $this->resolveProvider($settings, $providerOptions);
+		$model = $this->getProviderModel($settings, $providerOptions);
+		$apiKey = $this->getConfiguredApiKey($settings, $providerOptions);
 		if ($apiKey === '') {
-			throw new \RuntimeException($this->getProviderLabel($settings) . ' API key is missing.');
+			throw new \RuntimeException($this->getProviderLabel($settings, $providerOptions) . ' API key is missing.');
 		}
 
-		return match ($settings->imageEnhancementProvider) {
-			Settings::IMAGE_PROVIDER_XAI => $this->enhanceWithXai($client, $settings, $asset, $localPath, $apiKey),
-			Settings::IMAGE_PROVIDER_GOOGLE => $this->enhanceWithGoogle($client, $settings, $asset, $localPath, $apiKey),
-			default => $this->enhanceWithOpenAi($client, $settings, $asset, $localPath, $apiKey),
+		return match ($provider) {
+			Settings::IMAGE_PROVIDER_XAI => $this->enhanceWithXai($client, $settings, $asset, $localPath, $apiKey, $model),
+			Settings::IMAGE_PROVIDER_GOOGLE => $this->enhanceWithGoogle($client, $settings, $asset, $localPath, $apiKey, $model),
+			default => $this->enhanceWithOpenAi($client, $settings, $asset, $localPath, $apiKey, $model),
 		};
 	}
 
-	private function enhanceWithOpenAi(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): string
+	private function resolveProvider(Settings $settings, array $providerOptions): string
+	{
+		$provider = (string) ($providerOptions['provider'] ?? $settings->imageEnhancementProvider);
+
+		if ($provider === Settings::IMAGE_PROVIDER_FRONTEND) {
+			return Settings::IMAGE_PROVIDER_OPENAI;
+		}
+
+		return in_array($provider, [
+			Settings::IMAGE_PROVIDER_OPENAI,
+			Settings::IMAGE_PROVIDER_XAI,
+			Settings::IMAGE_PROVIDER_GOOGLE,
+		], true) ? $provider : Settings::IMAGE_PROVIDER_OPENAI;
+	}
+
+	private function enhanceWithOpenAi(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey, string $model): string
 	{
 		$handle = fopen($localPath, 'rb');
 		if ($handle === false) {
@@ -65,7 +82,7 @@ class AiImageEnhancementService extends Component
 				'multipart' => [
 					[
 						'name' => 'model',
-						'contents' => $settings->imageEnhancementModel,
+						'contents' => $model,
 					],
 					[
 						'name' => 'image',
@@ -106,7 +123,7 @@ class AiImageEnhancementService extends Component
 		return $this->writeBase64ImageToTempFile($asset, $imageData);
 	}
 
-	private function enhanceWithXai(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): string
+	private function enhanceWithXai(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey, string $model): string
 	{
 		$mimeType = $asset->mimeType ?: 'image/jpeg';
 		$imageDataUri = 'data:' . $mimeType . ';base64,' . $this->getBase64LocalImage($localPath);
@@ -117,7 +134,7 @@ class AiImageEnhancementService extends Component
 				'Content-Type' => 'application/json',
 			],
 			'json' => [
-				'model' => $settings->xAiImageEnhancementModel,
+				'model' => $model,
 				'prompt' => $settings->getCreativeEnhancementPromptForRequest(),
 				'image' => [
 					'type' => 'image_url',
@@ -130,11 +147,11 @@ class AiImageEnhancementService extends Component
 		return $this->writeProviderImageResponseToTempFile($client, $asset, $data, 'xAI');
 	}
 
-	private function enhanceWithGoogle(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): string
+	private function enhanceWithGoogle(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey, string $model): string
 	{
 		$mimeType = $asset->mimeType ?: 'image/jpeg';
-		$model = rawurlencode($settings->googleImageEnhancementModel);
-		$response = $client->post("https://generativelanguage.googleapis.com/v1/models/{$model}:generateContent", [
+		$encodedModel = rawurlencode($model);
+		$response = $client->post("https://generativelanguage.googleapis.com/v1/models/{$encodedModel}:generateContent", [
 			'headers' => [
 				'x-goog-api-key' => $apiKey,
 				'Content-Type' => 'application/json',

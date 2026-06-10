@@ -23,6 +23,7 @@ class Settings extends Model
 	public const IMAGE_PROVIDER_OPENAI = 'openai';
 	public const IMAGE_PROVIDER_XAI = 'xai';
 	public const IMAGE_PROVIDER_GOOGLE = 'google';
+	public const IMAGE_PROVIDER_FRONTEND = 'frontend';
 	public const XAI_IMAGE_MODEL_GROK_IMAGINE_QUALITY = 'grok-imagine-image-quality';
 	public const GOOGLE_IMAGE_MODEL_GEMINI_3_1_FLASH_IMAGE = 'gemini-3.1-flash-image';
 	public const GOOGLE_IMAGE_MODEL_GEMINI_3_PRO_IMAGE = 'gemini-3-pro-image';
@@ -217,6 +218,7 @@ PROMPT;
 			['label' => 'OpenAI', 'value' => self::IMAGE_PROVIDER_OPENAI],
 			['label' => 'Grok Imagine (xAI)', 'value' => self::IMAGE_PROVIDER_XAI],
 			['label' => 'Google Nano Banana', 'value' => self::IMAGE_PROVIDER_GOOGLE],
+			['label' => 'Choose in frontend', 'value' => self::IMAGE_PROVIDER_FRONTEND],
 		];
 	}
 

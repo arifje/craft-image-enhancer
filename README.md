@@ -44,7 +44,7 @@ Enhancement runs only when an image score is below the notification threshold.
 - **Disabled**: Analyze and notify only.
 - **Imagick safe optimization**: Creates a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
 - **AI enhancement**: Creates a provider-generated edit using OpenAI, Grok Imagine, or Google Nano Banana. The AI face handling setting controls whether AI enhancement is allowed for images with visible faces, or whether those images fall back to Imagick safe optimization.
-- **AI image provider**: Choose the provider used for AI enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Grok Imagine and Google Nano Banana use their own API key fields.
+- **AI image provider**: Choose the provider used for AI enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Grok Imagine and Google Nano Banana use their own API key fields. **Choose in frontend** lets editors choose the provider and model in the frontend enhancement component.
 - **AI tuning levels**: Use simple 1-10 settings for clarity/detail, contrast/depth, color intensity, and noise/artifact cleanup. The selected levels are added to the image prompt so editors can choose a more colorful/contrasty result or a softer, more restrained result.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 - **Enhanced image handling**: Choose whether the enhanced file replaces the original asset, or is added next to the original asset for manual review.
@@ -83,6 +83,14 @@ Grok Imagine enhancement uses xAI's image editing API with the source image sent
    - `gemini-2.5-flash-image` for the original Nano Banana model.
 
 Google enhancement uses the Gemini `generateContent` image API with the source image sent inline as base64 data.
+
+#### Frontend provider choice
+
+1. Add API keys for every provider editors should be allowed to use.
+2. In **Enhancement**, set **AI image provider** to **Choose in frontend**.
+3. Configure the frontend enhancement component to send `imageEnhancementProvider` and `imageEnhancementModel` when queueing enhancement.
+
+When this mode is enabled, the settings page shows all provider API key and model fields. Frontend requests are validated against the known provider/model options before a queue job is created.
 
 ### Asset Volumes
 

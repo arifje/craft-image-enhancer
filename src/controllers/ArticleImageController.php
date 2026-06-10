@@ -4,6 +4,7 @@ namespace arjanbrinkman\craftimagequalitychecker\controllers;
 
 use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
 use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageEnhancementJob;
+use arjanbrinkman\craftimagequalitychecker\models\Settings;
 use Craft;
 use craft\elements\Asset;
 use craft\helpers\UrlHelper;
@@ -28,8 +29,12 @@ class ArticleImageController extends Controller
 
 		$settings = ImageQualityChecker::getInstance()->getSettings();
 		$enhancementService = ImageQualityChecker::getInstance()->aiImageEnhancement;
-		if ($enhancementService->getConfiguredApiKey($settings) === '') {
-			return $this->asJsonFailure($enhancementService->getProviderLabel($settings) . ' API key is missing.');
+		$providerOptions = $this->getProviderOptionsForRequest($settings);
+		if ($providerOptions === false) {
+			return $this->asJsonFailure('Invalid AI image provider or model.');
+		}
+		if ($enhancementService->getConfiguredApiKey($settings, $providerOptions) === '') {
+			return $this->asJsonFailure($enhancementService->getProviderLabel($settings, $providerOptions) . ' API key is missing.');
 		}
 
 		$localPath = $this->getFullAssetPath($asset);
@@ -49,6 +54,8 @@ class ArticleImageController extends Controller
 				'assetId' => $asset->id,
 				'userId' => Craft::$app->getUser()->getId(),
 				'token' => $token,
+				'imageEnhancementProvider' => $providerOptions['provider'] ?? null,
+				'imageEnhancementModel' => $providerOptions['model'] ?? null,
 			]));
 			$this->setEnhancementStatus($token, [
 				'status' => 'queued',
@@ -65,11 +72,42 @@ class ArticleImageController extends Controller
 				'jobId' => $jobId,
 				'token' => $token,
 				'statusUrl' => UrlHelper::actionUrl('_image-quality-checker/article-image/status'),
+				'imageEnhancementProvider' => $providerOptions['provider'] ?? $settings->imageEnhancementProvider,
+				'imageEnhancementModel' => $providerOptions['model'] ?? $enhancementService->getProviderModel($settings, $providerOptions),
 			]);
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not queue enhancement: ' . $e->getMessage());
 		}
+	}
+
+	private function getProviderOptionsForRequest(Settings $settings): array|false
+	{
+		if ($settings->imageEnhancementProvider !== Settings::IMAGE_PROVIDER_FRONTEND) {
+			return [];
+		}
+
+		$request = Craft::$app->getRequest();
+		$provider = (string) $request->getBodyParam('imageEnhancementProvider');
+		$model = (string) $request->getBodyParam('imageEnhancementModel');
+		$modelsByProvider = [
+			Settings::IMAGE_PROVIDER_OPENAI => array_column(Settings::imageEnhancementModelOptions(), 'value'),
+			Settings::IMAGE_PROVIDER_XAI => array_column(Settings::xAiImageEnhancementModelOptions(), 'value'),
+			Settings::IMAGE_PROVIDER_GOOGLE => array_column(Settings::googleImageEnhancementModelOptions(), 'value'),
+		];
+
+		if (!isset($modelsByProvider[$provider])) {
+			return false;
+		}
+
+		if (!in_array($model, $modelsByProvider[$provider], true)) {
+			return false;
+		}
+
+		return [
+			'provider' => $provider,
+			'model' => $model,
+		];
 	}
 
 	public function actionStatus(): Response
