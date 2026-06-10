@@ -278,7 +278,7 @@
 
 	{% js %}
 		(() => {
-			const providerSelect = document.getElementById('imageEnhancementProvider');
+			const providerSelect = document.querySelector('select[name="imageEnhancementProvider"], select[name$="[imageEnhancementProvider]"]');
 			const providerFields = document.querySelectorAll('[data-image-enhancement-provider-fields]');
 
 			if (!providerSelect || !providerFields.length) {
@@ -287,11 +287,14 @@
 
 			const updateProviderFields = () => {
 				providerFields.forEach((field) => {
-					field.classList.toggle('hidden', field.dataset.imageEnhancementProviderFields !== providerSelect.value);
+					const isActive = field.dataset.imageEnhancementProviderFields === providerSelect.value;
+					field.hidden = !isActive;
+					field.classList.toggle('hidden', !isActive);
 				});
 			};
 
 			providerSelect.addEventListener('change', updateProviderFields);
+			providerSelect.addEventListener('input', updateProviderFields);
 			updateProviderFields();
 		})();
 	{% endjs %}
