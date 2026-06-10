@@ -225,50 +225,76 @@
 		options: imageEnhancementProviderOptions,
 	}) }}
 
-	{{ forms.selectField({
-		label: 'OpenAI image enhancement model',
-		name: 'imageEnhancementModel',
-		id: 'imageEnhancementModel',
-		instructions: 'Used when the AI image provider is OpenAI.',
-		value: settings.imageEnhancementModel,
-		options: imageEnhancementModelOptions,
-	}) }}
+	<div data-image-enhancement-provider-fields="openai">
+		{{ forms.selectField({
+			label: 'OpenAI image enhancement model',
+			name: 'imageEnhancementModel',
+			id: 'imageEnhancementModel',
+			instructions: 'Used when the AI image provider is OpenAI.',
+			value: settings.imageEnhancementModel,
+			options: imageEnhancementModelOptions,
+		}) }}
+	</div>
 
-	{{ forms.textField({
-		label: 'xAI API key',
-		name: 'xAiApiKey',
-		id: 'xAiApiKey',
-		instructions: 'Used when the AI image provider is Grok Imagine.',
-		value: settings.xAiApiKey,
-		placeholder: 'xai-...',
-	}) }}
+	<div data-image-enhancement-provider-fields="xai">
+		{{ forms.textField({
+			label: 'xAI API key',
+			name: 'xAiApiKey',
+			id: 'xAiApiKey',
+			instructions: 'Used when the AI image provider is Grok Imagine.',
+			value: settings.xAiApiKey,
+			placeholder: 'xai-...',
+		}) }}
 
-	{{ forms.selectField({
-		label: 'Grok Imagine image model',
-		name: 'xAiImageEnhancementModel',
-		id: 'xAiImageEnhancementModel',
-		instructions: 'Used when the AI image provider is Grok Imagine.',
-		value: settings.xAiImageEnhancementModel,
-		options: xAiImageEnhancementModelOptions,
-	}) }}
+		{{ forms.selectField({
+			label: 'Grok Imagine image model',
+			name: 'xAiImageEnhancementModel',
+			id: 'xAiImageEnhancementModel',
+			instructions: 'Used when the AI image provider is Grok Imagine.',
+			value: settings.xAiImageEnhancementModel,
+			options: xAiImageEnhancementModelOptions,
+		}) }}
+	</div>
 
-	{{ forms.textField({
-		label: 'Google AI API key',
-		name: 'googleAiApiKey',
-		id: 'googleAiApiKey',
-		instructions: 'Used when the AI image provider is Google Nano Banana.',
-		value: settings.googleAiApiKey,
-		placeholder: 'AIza...',
-	}) }}
+	<div data-image-enhancement-provider-fields="google">
+		{{ forms.textField({
+			label: 'Google AI API key',
+			name: 'googleAiApiKey',
+			id: 'googleAiApiKey',
+			instructions: 'Used when the AI image provider is Google Nano Banana.',
+			value: settings.googleAiApiKey,
+			placeholder: 'AIza...',
+		}) }}
 
-	{{ forms.selectField({
-		label: 'Google Nano Banana image model',
-		name: 'googleImageEnhancementModel',
-		id: 'googleImageEnhancementModel',
-		instructions: 'Used when the AI image provider is Google Nano Banana.',
-		value: settings.googleImageEnhancementModel,
-		options: googleImageEnhancementModelOptions,
-	}) }}
+		{{ forms.selectField({
+			label: 'Google Nano Banana image model',
+			name: 'googleImageEnhancementModel',
+			id: 'googleImageEnhancementModel',
+			instructions: 'Used when the AI image provider is Google Nano Banana.',
+			value: settings.googleImageEnhancementModel,
+			options: googleImageEnhancementModelOptions,
+		}) }}
+	</div>
+
+	{% js %}
+		(() => {
+			const providerSelect = document.getElementById('imageEnhancementProvider');
+			const providerFields = document.querySelectorAll('[data-image-enhancement-provider-fields]');
+
+			if (!providerSelect || !providerFields.length) {
+				return;
+			}
+
+			const updateProviderFields = () => {
+				providerFields.forEach((field) => {
+					field.classList.toggle('hidden', field.dataset.imageEnhancementProviderFields !== providerSelect.value);
+				});
+			};
+
+			providerSelect.addEventListener('change', updateProviderFields);
+			updateProviderFields();
+		})();
+	{% endjs %}
 
 	{{ forms.selectField({
 		label: 'AI face handling',
