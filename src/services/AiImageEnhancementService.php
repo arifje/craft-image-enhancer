@@ -169,9 +169,6 @@ class AiImageEnhancementService extends Component
 						],
 					],
 				]],
-				'generationConfig' => [
-					'responseModalities' => ['TEXT', 'IMAGE'],
-				],
 			],
 		]);
 		$data = json_decode((string) $response->getBody(), true);
