@@ -127,16 +127,26 @@
 				</button>
 			</template>
 
-			<button
-				v-else-if="!hasPendingPreview"
-				type="button"
-				class="uk-button uk-button-small uk-button-primary article-image-button article-image-button-primary"
-				:disabled="isBusy"
-				@click.prevent="enhanceImage()"
-			>
-				<span v-if="isEnhancing" class="article-image-spinner" aria-hidden="true"></span>
-				<span>{{ isEnhancing ? enhancingLabel : enhanceLabel }}</span>
-			</button>
+			<div v-else-if="!hasPendingPreview" class="article-image-action-buttons">
+				<button
+					type="button"
+					class="uk-button uk-button-small uk-button-primary article-image-button article-image-button-primary"
+					:disabled="isBusy"
+					@click.prevent="enhanceImage()"
+				>
+					<span v-if="isEnhancing" class="article-image-spinner" aria-hidden="true"></span>
+					<span>{{ isEnhancing ? enhancingLabel : enhanceLabel }}</span>
+				</button>
+				<button
+					type="button"
+					class="uk-button uk-button-small uk-button-default article-image-button article-image-button-secondary"
+					:disabled="isBusy"
+					@click.prevent="blurFaces"
+				>
+					<span v-if="isBlurringFaces" class="article-image-spinner" aria-hidden="true"></span>
+					<span>{{ isBlurringFaces ? blurringFacesLabel : blurFacesLabel }}</span>
+				</button>
+			</div>
 
 			<template v-else>
 				<button
@@ -206,6 +216,7 @@ import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } 
 
 const actionRoutes = {
 	enhance: '_image-quality-checker/article-image/enhance',
+	blurFaces: '_image-quality-checker/article-image/blur-faces',
 	status: '_image-quality-checker/article-image/status',
 	cancel: '_image-quality-checker/article-image/cancel',
 	reset: '_image-quality-checker/article-image/reset',
@@ -373,6 +384,14 @@ const props = defineProps({
 		type: String,
 		default: 'Enhancing...',
 	},
+	blurFacesLabel: {
+		type: String,
+		default: 'Blur faces',
+	},
+	blurringFacesLabel: {
+		type: String,
+		default: 'Blurring...',
+	},
 	queuedLabel: {
 		type: String,
 		default: 'Queued...',
@@ -470,11 +489,13 @@ const isImageLoaded = ref(false);
 const isCompareOriginalLoaded = ref(false);
 const isCompareEnhancedLoaded = ref(false);
 const isEnhancing = ref(false);
+const isBlurringFaces = ref(false);
 const isKeeping = ref(false);
 const isDiscarding = ref(false);
 const isCanceling = ref(false);
 const isResetting = ref(false);
 const isUiVisible = ref(props.uiInitiallyVisible);
+const lastOperation = ref('enhance');
 const comparisonPosition = ref(50);
 const pollTimer = ref(null);
 const pollStartedAt = ref(0);
@@ -483,7 +504,7 @@ const selectedProvider = ref(getInitialProvider());
 const selectedModel = ref(getInitialModel(selectedProvider.value));
 
 const apiTransport = computed(() => (props.apiTransport === 'graphql' ? 'graphql' : 'actions'));
-const isBusy = computed(() => isEnhancing.value || isKeeping.value || isDiscarding.value || isCanceling.value || isResetting.value);
+const isBusy = computed(() => isEnhancing.value || isBlurringFaces.value || isKeeping.value || isDiscarding.value || isCanceling.value || isResetting.value);
 const hasPendingPreview = computed(() => preview.value !== null);
 const isDisplayLoaded = computed(() => {
 	if (hasPendingPreview.value) {
@@ -495,7 +516,7 @@ const isDisplayLoaded = computed(() => {
 const canShowActions = computed(() => Boolean(props.showEnhancementOptions && props.enhanceable && props.assetId));
 const canChooseProvider = computed(() => Boolean(canShowActions.value && props.providerChoiceEnabled));
 const canToggleUi = computed(() => Boolean(canShowActions.value && props.uiToggleEnabled));
-const canCancelEnhancement = computed(() => Boolean(isEnhancing.value && activeJob.value && !hasPendingPreview.value));
+const canCancelEnhancement = computed(() => Boolean((isEnhancing.value || isBlurringFaces.value) && activeJob.value && !hasPendingPreview.value));
 const modelOptionsByProvider = computed(() => ({
 	openai: normalizeModelOptions(props.openAiImageEnhancementModels, defaultModelOptions.openai),
 	xai: normalizeModelOptions(props.xAiImageEnhancementModels, defaultModelOptions.xai),
@@ -527,7 +548,7 @@ const statusLabel = computed(() => {
 	if (isCanceling.value) {
 		return props.cancelingLabel;
 	}
-	if (isEnhancing.value) {
+	if (isEnhancing.value || isBlurringFaces.value) {
 		if (enhancementJobStatus.value === 'running') {
 			return `${props.runningLabel} (${runningSeconds.value}s)`;
 		}
@@ -539,7 +560,7 @@ const statusLabel = computed(() => {
 			return remoteStatusLabel.value;
 		}
 
-		return props.enhancingLabel;
+		return isBlurringFaces.value ? props.blurringFacesLabel : props.enhancingLabel;
 	}
 	if (isKeeping.value) {
 		return props.keepingLabel;
@@ -602,11 +623,13 @@ async function enhanceImage(statusText = props.queuedLabel) {
 	}
 
 	log('function/enhanceImage/start');
+	lastOperation.value = 'enhance';
 	errorMessage.value = '';
 	activeJob.value = null;
 	preview.value = null;
 	clearPersistedEnhancementStatus();
 	isEnhancing.value = true;
+	isBlurringFaces.value = false;
 	remoteStatusLabel.value = statusText;
 	setEnhancementStatus('queued');
 
@@ -618,36 +641,109 @@ async function enhanceImage(statusText = props.queuedLabel) {
 		});
 
 		if (response.queued || response.token || response.jobId) {
-			startPolling(response);
+			startPolling({
+				...response,
+				operation: 'enhance',
+			});
 			log('function/enhanceImage/queued');
 			return;
 		}
 
 		applyEnhancedPreview(response);
 		clearStatusTimer();
-		isEnhancing.value = false;
+		clearOperationState();
 		remoteStatusLabel.value = '';
 		log('function/enhanceImage/direct-complete');
 	} catch (error) {
 		handleError(error);
 		clearStatusTimer();
-		isEnhancing.value = false;
+		clearOperationState();
 		remoteStatusLabel.value = '';
 	} finally {
 		if (!activeJob.value) {
-			isEnhancing.value = false;
+			clearOperationState();
+		}
+	}
+}
+
+async function blurFaces(statusText = props.queuedLabel) {
+	if (typeof statusText !== 'string') {
+		statusText = props.queuedLabel;
+	}
+
+	log('function/blurFaces/start');
+	lastOperation.value = 'blurFaces';
+	errorMessage.value = '';
+	activeJob.value = null;
+	preview.value = null;
+	clearPersistedEnhancementStatus();
+	isEnhancing.value = false;
+	isBlurringFaces.value = true;
+	remoteStatusLabel.value = statusText;
+	setEnhancementStatus('queued');
+
+	try {
+		const response = await requestApi('blurFaces', {
+			assetId: props.assetId,
+		});
+
+		if (response.queued || response.token || response.jobId) {
+			startPolling({
+				...response,
+				operation: 'blurFaces',
+			});
+			log('function/blurFaces/queued');
+			return;
+		}
+
+		applyEnhancedPreview({
+			...response,
+			operation: 'blurFaces',
+		});
+		clearStatusTimer();
+		clearOperationState();
+		remoteStatusLabel.value = '';
+		log('function/blurFaces/direct-complete');
+	} catch (error) {
+		handleError(error);
+		clearStatusTimer();
+		clearOperationState();
+		remoteStatusLabel.value = '';
+	} finally {
+		if (!activeJob.value) {
+			clearOperationState();
 		}
 	}
 }
 
 async function retryEnhancement() {
 	log('function/retryEnhancement/start');
+
+	if (lastOperation.value === 'blurFaces') {
+		await blurFaces(props.retryingLabel);
+		return;
+	}
+
 	await enhanceImage(props.retryingLabel);
 }
 
 function toggleUi() {
 	isUiVisible.value = !isUiVisible.value;
 	log(`function/toggleUi/${isUiVisible.value ? 'visible' : 'hidden'}`);
+}
+
+function setOperationState(operation) {
+	isEnhancing.value = operation !== 'blurFaces';
+	isBlurringFaces.value = operation === 'blurFaces';
+}
+
+function clearOperationState() {
+	isEnhancing.value = false;
+	isBlurringFaces.value = false;
+}
+
+function getOperationProgressLabel(operation) {
+	return operation === 'blurFaces' ? props.blurringFacesLabel : props.enhancingLabel;
 }
 
 async function resetEnhancementStatus() {
@@ -670,7 +766,7 @@ async function resetEnhancementStatus() {
 		log(`function/resetEnhancementStatus/local-reset/${error instanceof Error ? error.message : 'unknown'}`);
 	} finally {
 		isResetting.value = false;
-		isEnhancing.value = false;
+		clearOperationState();
 	}
 }
 
@@ -741,7 +837,7 @@ async function cancelEnhancement() {
 		handleError(error);
 	} finally {
 		isCanceling.value = false;
-		isEnhancing.value = false;
+		clearOperationState();
 		remoteStatusLabel.value = '';
 	}
 }
@@ -889,12 +985,18 @@ function startPolling(response) {
 	}
 
 	clearPolling();
+	const operation = response.operation || activeJob.value?.operation || 'enhance';
+	lastOperation.value = operation;
 	activeJob.value = {
 		token: response.token,
 		jobId: response.jobId || null,
 		statusUrl: response.statusUrl || null,
+		operation,
 	};
-	persistEnhancementStatus(response);
+	persistEnhancementStatus({
+		...response,
+		operation,
+	});
 	pollStartedAt.value = Date.now();
 	remoteStatusLabel.value = '';
 	setEnhancementStatus(response.status === 'running' ? 'running' : 'queued');
@@ -926,10 +1028,11 @@ async function pollEnhancementStatus() {
 			applyEnhancedPreview({
 				...response,
 				token: activeJob.value.token,
+				operation: activeJob.value.operation,
 			});
 			clearPolling();
 			clearStatusTimer();
-			isEnhancing.value = false;
+			clearOperationState();
 			remoteStatusLabel.value = '';
 			log('function/pollEnhancementStatus/complete');
 			return;
@@ -937,7 +1040,7 @@ async function pollEnhancementStatus() {
 
 		if (response.status === 'canceled') {
 			resetToOriginalImage();
-			isEnhancing.value = false;
+			clearOperationState();
 			remoteStatusLabel.value = '';
 			emit('canceled', response);
 			log('function/pollEnhancementStatus/canceled');
@@ -959,7 +1062,7 @@ async function pollEnhancementStatus() {
 	} catch (error) {
 		clearPolling();
 		clearStatusTimer();
-		isEnhancing.value = false;
+		clearOperationState();
 		remoteStatusLabel.value = '';
 		handleError(error);
 	}
@@ -989,6 +1092,10 @@ async function restoreExistingEnhancementStatus() {
 					token: persistedStatus.token,
 					jobId: persistedStatus.jobId,
 				});
+				response = {
+					...response,
+					operation: response.operation || persistedStatus.operation,
+				};
 				log(`function/restoreExistingEnhancementStatus/fallback-status/${response.status || 'unknown'}/asset/${props.assetId}`);
 			}
 		}
@@ -1008,8 +1115,9 @@ function handleRestoredEnhancementStatus(response) {
 			return true;
 		}
 
-		isEnhancing.value = true;
-		remoteStatusLabel.value = response.progressLabel || props.enhancingLabel;
+		lastOperation.value = response.operation || 'enhance';
+		setOperationState(lastOperation.value);
+		remoteStatusLabel.value = response.progressLabel || getOperationProgressLabel(lastOperation.value);
 		startPolling({
 			...response,
 		});
@@ -1019,7 +1127,7 @@ function handleRestoredEnhancementStatus(response) {
 
 	if (response.status === 'complete' && (response.enhancedUrl || response.imageUrl || response.assetUrl || response.url)) {
 		applyEnhancedPreview(response);
-		isEnhancing.value = false;
+		clearOperationState();
 		remoteStatusLabel.value = '';
 		log('function/restoreExistingEnhancementStatus/preview-restored');
 		return true;
@@ -1028,8 +1136,9 @@ function handleRestoredEnhancementStatus(response) {
 	if (response.status === 'failed') {
 		persistEnhancementStatus(response);
 		errorMessage.value = response.message || response.previousError || 'Enhancement failed.';
+		lastOperation.value = response.operation || lastOperation.value;
 		activeJob.value = null;
-		isEnhancing.value = false;
+		clearOperationState();
 		remoteStatusLabel.value = '';
 		log('function/restoreExistingEnhancementStatus/failed');
 		return true;
@@ -1105,6 +1214,7 @@ function clearStatusTimer() {
 function resetToOriginalImage() {
 	clearPolling();
 	clearStatusTimer();
+	clearOperationState();
 	currentSrc.value = originalSrc.value;
 	currentSrcset.value = originalSrcset.value;
 	preview.value = null;
@@ -1179,6 +1289,7 @@ function persistEnhancementStatus(response = {}) {
 		token,
 		jobId: response.jobId || activeJob.value?.jobId || null,
 		statusUrl: response.statusUrl || activeJob.value?.statusUrl || (apiTransport.value === 'actions' ? getActionUrl('status') : ''),
+		operation: response.operation || activeJob.value?.operation || 'enhance',
 		savedAt: Date.now(),
 	};
 
@@ -1551,7 +1662,7 @@ function log(message) {
 .article-image-action-bar.has-provider-controls {
 	flex-direction: column;
 	align-items: flex-end;
-	width: min(286px, calc(100% - 24px));
+	width: min(316px, calc(100% - 24px));
 }
 
 .article-image-provider-controls {
@@ -1585,6 +1696,13 @@ function log(message) {
 	line-height: 1.2;
 }
 
+.article-image-action-buttons {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+	width: 100%;
+}
+
 .article-image-button {
 	display: inline-flex;
 	align-items: center;
@@ -1596,10 +1714,6 @@ function log(message) {
 	line-height: 28px;
 	white-space: nowrap;
 	text-shadow: none;
-}
-
-.article-image-action-bar.has-provider-controls .article-image-button {
-	min-width: 96px;
 }
 
 .article-image-button-primary,
@@ -1747,7 +1861,14 @@ function log(message) {
 	}
 
 	.article-image-action-bar.has-provider-controls,
-	.article-image-provider-controls,
+	.article-image-provider-controls {
+		width: 100%;
+	}
+
+	.article-image-provider-controls {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
 	.article-image-provider-field {
 		width: 100%;
 	}

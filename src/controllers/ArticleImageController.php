@@ -4,6 +4,7 @@ namespace arjanbrinkman\craftimagequalitychecker\controllers;
 
 use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
 use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageEnhancementJob;
+use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageFaceBlurJob;
 use arjanbrinkman\craftimagequalitychecker\models\Settings;
 use Craft;
 use craft\elements\Asset;
@@ -78,6 +79,71 @@ class ArticleImageController extends Controller
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not queue enhancement: ' . $e->getMessage());
+		}
+	}
+
+	public function actionBlurFaces(): Response
+	{
+		$this->requireLogin();
+		$this->requirePostRequest();
+		$this->requireAcceptsJson();
+
+		$asset = $this->getPostedAsset();
+		if (!$asset instanceof Asset) {
+			return $this->asJsonFailure('Asset not found or unsupported.');
+		}
+		if (!$this->canSaveAsset($asset)) {
+			return $this->asJsonFailure('You do not have permission to blur faces in this asset.');
+		}
+		if (!class_exists(\Imagick::class)) {
+			return $this->asJsonFailure('Imagick is required to blur faces.');
+		}
+
+		$settings = ImageQualityChecker::getInstance()->getSettings();
+		if (trim($settings->chatGptApiKey) === '') {
+			return $this->asJsonFailure('ChatGPT API key is missing.');
+		}
+
+		$localPath = $this->getFullAssetPath($asset);
+		if (!$localPath || !file_exists($localPath)) {
+			return $this->asJsonFailure('Could not find the original asset file.');
+		}
+
+		try {
+			$token = bin2hex(random_bytes(16));
+			$this->setEnhancementStatus($token, [
+				'status' => 'queued',
+				'assetId' => $asset->id,
+				'operation' => 'blurFaces',
+				'progress' => 0,
+				'progressLabel' => 'Queued',
+			]);
+			$jobId = Craft::$app->queue->push(new ArticleImageFaceBlurJob([
+				'assetId' => $asset->id,
+				'userId' => Craft::$app->getUser()->getId(),
+				'token' => $token,
+			]));
+			$this->setEnhancementStatus($token, [
+				'status' => 'queued',
+				'assetId' => $asset->id,
+				'operation' => 'blurFaces',
+				'jobId' => $jobId,
+				'progress' => 0,
+				'progressLabel' => 'Queued',
+			]);
+
+			return $this->asJson([
+				'success' => true,
+				'queued' => true,
+				'assetId' => $asset->id,
+				'operation' => 'blurFaces',
+				'jobId' => $jobId,
+				'token' => $token,
+				'statusUrl' => UrlHelper::actionUrl('_image-quality-checker/article-image/status'),
+			]);
+		} catch (\Throwable $e) {
+			Craft::error('ImageQualityChecker: Article image face blur queueing failed: ' . $e->getMessage(), __METHOD__);
+			return $this->asJsonFailure('Could not queue face blur: ' . $e->getMessage());
 		}
 	}
 
@@ -410,15 +476,20 @@ class ArticleImageController extends Controller
 
 		$originalBaseName = preg_replace('/[^A-Za-z0-9._-]+/', '-', pathinfo($originalAsset->filename, PATHINFO_FILENAME)) ?: 'image';
 
+		$previewFilename = $previewAsset->filename;
+		$hasPreviewMarker = str_contains($previewFilename, '-enhancement-preview-') ||
+			str_contains($previewFilename, '-face-blur-preview-');
+
 		return $previewAsset->id !== $originalAsset->id &&
 			$previewAsset->volumeId === $originalAsset->volumeId &&
 			(
 				$previewAsset->folderId === $originalAsset->folderId ||
-				str_contains($previewAsset->filename, '-enhancement-preview-')
+				$hasPreviewMarker
 			) &&
 			(
-				str_starts_with($previewAsset->filename, $originalBaseName . '-enhancement-preview-') ||
-				str_contains($previewAsset->filename, '-enhancement-preview-')
+				str_starts_with($previewFilename, $originalBaseName . '-enhancement-preview-') ||
+				str_starts_with($previewFilename, $originalBaseName . '-face-blur-preview-') ||
+				$hasPreviewMarker
 			);
 	}
 
