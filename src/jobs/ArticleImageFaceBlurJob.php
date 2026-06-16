@@ -12,6 +12,8 @@ use craft\elements\Entry;
 use craft\queue\BaseJob;
 use GuzzleHttp\ClientInterface;
 use Imagick;
+use ImagickDraw;
+use ImagickPixel;
 
 class ArticleImageFaceBlurJob extends BaseJob
 {
@@ -124,7 +126,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 							'content' => [
 								[
 									'type' => 'text',
-									'text' => 'Detect every visible human face that should be anonymized. Include blurry, motion-blurred, low-resolution, side-view, profile, background, partially occluded, and cropped faces. Do not identify anyone. Return only valid JSON with this exact shape: {"faces":[{"x":0,"y":0,"width":100,"height":100,"confidence":"high"}]}. Coordinates must be normalized integers from 0 to 1000 relative to the full image. The rectangle should cover the visible face area with enough margin to anonymize identity, but should not cover the whole person unless necessary.',
+									'text' => 'Detect every visible human face/head area that should be anonymized. Include blurry, motion-blurred, low-resolution, side-view, profile, background, partially occluded, and cropped faces. Do not identify anyone. Return only valid JSON with this exact shape: {"faces":[{"x":0,"y":0,"width":100,"height":100,"confidence":"high"}]}. Coordinates must be normalized integers from 0 to 1000 relative to the full image. The rectangle should cover the visible head/face silhouette including forehead, cheeks, chin, hairline, ears, and enough margin to anonymize identity, but should not cover the whole person unless necessary.',
 								],
 								[
 									'type' => 'image_url',
@@ -174,15 +176,23 @@ class ArticleImageFaceBlurJob extends BaseJob
 				continue;
 			}
 
-			$region = clone $image;
-			$region->cropImage($box['width'], $box['height'], $box['x'], $box['y']);
-			$region->setImagePage(0, 0, 0, 0);
-			$sigma = max(8, min($box['width'], $box['height']) * 0.12);
-			$region->gaussianBlurImage(0, $sigma);
-			$region->gaussianBlurImage(0, $sigma);
-			$image->compositeImage($region, Imagick::COMPOSITE_OVER, $box['x'], $box['y']);
-			$region->clear();
-			$region->destroy();
+			$sourceRegion = clone $image;
+			$sourceRegion->cropImage($box['width'], $box['height'], $box['x'], $box['y']);
+			$sourceRegion->setImagePage(0, 0, 0, 0);
+
+			$fragmentedRegion = $this->createFragmentedFaceRegion($sourceRegion);
+			$mask = $this->createHeadShapeMask($box['width'], $box['height']);
+
+			$fragmentedRegion->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+			$fragmentedRegion->compositeImage($mask, Imagick::COMPOSITE_DSTIN, 0, 0);
+			$image->compositeImage($fragmentedRegion, Imagick::COMPOSITE_OVER, $box['x'], $box['y']);
+
+			$sourceRegion->clear();
+			$sourceRegion->destroy();
+			$fragmentedRegion->clear();
+			$fragmentedRegion->destroy();
+			$mask->clear();
+			$mask->destroy();
 		}
 
 		if (in_array($asset->mimeType, ['image/jpeg', 'image/jpg'], true)) {
@@ -200,14 +210,54 @@ class ArticleImageFaceBlurJob extends BaseJob
 		return $tempPath;
 	}
 
+	private function createFragmentedFaceRegion(Imagick $sourceRegion): Imagick
+	{
+		$width = $sourceRegion->getImageWidth();
+		$height = $sourceRegion->getImageHeight();
+		$fragmentedRegion = clone $sourceRegion;
+		$blockSize = max(5, (int) round(min($width, $height) / 10));
+		$smallWidth = max(1, (int) ceil($width / $blockSize));
+		$smallHeight = max(1, (int) ceil($height / $blockSize));
+
+		$fragmentedRegion->resizeImage($smallWidth, $smallHeight, Imagick::FILTER_POINT, 1);
+		$fragmentedRegion->resizeImage($width, $height, Imagick::FILTER_POINT, 1);
+		$fragmentedRegion->gaussianBlurImage(0, max(1.2, min($width, $height) * 0.025));
+
+		return $fragmentedRegion;
+	}
+
+	private function createHeadShapeMask(int $width, int $height): Imagick
+	{
+		$mask = new Imagick();
+		$mask->newImage($width, $height, new ImagickPixel('transparent'), 'png');
+
+		$draw = new ImagickDraw();
+		$draw->setFillColor(new ImagickPixel('white'));
+		$draw->ellipse(
+			$width / 2,
+			$height * 0.5,
+			max(1, $width * 0.47),
+			max(1, $height * 0.48),
+			0,
+			360
+		);
+
+		$mask->drawImage($draw);
+		$mask->blurImage(0, max(0.6, min($width, $height) * 0.015));
+		$draw->clear();
+		$draw->destroy();
+
+		return $mask;
+	}
+
 	private function normalizedFaceBoxToPixels(array $face, int $imageWidth, int $imageHeight): array
 	{
 		$x = (float) $face['x'] / 1000 * $imageWidth;
 		$y = (float) $face['y'] / 1000 * $imageHeight;
 		$width = (float) $face['width'] / 1000 * $imageWidth;
 		$height = (float) $face['height'] / 1000 * $imageHeight;
-		$paddingX = $width * 0.18;
-		$paddingY = $height * 0.22;
+		$paddingX = $width * 0.24;
+		$paddingY = $height * 0.3;
 
 		$x = max(0, (int) floor($x - $paddingX));
 		$y = max(0, (int) floor($y - $paddingY));
