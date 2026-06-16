@@ -92,6 +92,44 @@ Google enhancement uses the Gemini `generateContent` image API with the source i
 
 When this mode is enabled, the settings page shows all provider API key and model fields. Frontend requests are validated against the known provider/model options before a queue job is created.
 
+### Frontend Image Enhancer Component
+
+The repository includes `imageEnhancer.vue` as a copyable Vue component for article preview pages or headless frontend projects. It displays the image, lets permitted editors queue an enhancement, polls the queue status, shows a before/after comparison slider, and lets the editor keep, discard, cancel, retry, reset, or hide the enhancement UI.
+
+By default the component uses the existing Craft action endpoints, so it works with the current plugin controllers:
+
+```twig
+<image-enhancer
+	:asset-id="{{ articleThumbnail ? articleThumbnail.id : 'null' }}"
+	:show-enhancement-options="{{ isRedactie ? 'true' : 'false' }}"
+	:provider-choice-enabled="{{ craft.app.plugins.plugin('_image-quality-checker').settings.imageEnhancementProvider == 'frontend' ? 'true' : 'false' }}"
+	src="{{ articleThumbnail and articleThumbnail.url ? articleThumbnail.url ~ '?v=' ~ cachebuster : '' }}"
+	alt="{{ entry.title ?? '' }}"
+	category="{{ articleCategory ?? '' }}"
+	credits="{{ imageCredits|striptags }}"
+	csrf-token-name="{{ craft.app.config.general.csrfTokenName }}"
+	csrf-token-value="{{ craft.app.request.csrfToken }}"
+></image-enhancer>
+```
+
+Current action endpoint mode assumes a logged-in Craft user, same-origin requests, CSRF, and asset save permissions. This is the right mode for Craft preview pages.
+
+The component is also prepared for a future GraphQL transport. Keep `api-transport` unset for now. Once GraphQL mutations/queries are added to the backend, the same component can switch transports:
+
+```vue
+<image-enhancer
+	:asset-id="assetId"
+	:show-enhancement-options="canEnhance"
+	api-transport="graphql"
+	graphql-endpoint="/api"
+	graphql-token="..."
+	:graphql-operations="imageEnhancerGraphqlOperations"
+	:src="imageUrl"
+/>
+```
+
+GraphQL operations can be provided for `enhance`, `status`, `cancel`, `reset`, `keep`, and `discard`. Each operation may be a query/mutation string or an object with `query`, `operationName`, `variables`, and `dataPath`.
+
 ### Asset Volumes
 
 Select the asset volumes that should be analyzed. Images uploaded to other volumes are skipped.
@@ -123,4 +161,5 @@ Debug output includes the PHP process user, original asset ownership, temporary 
 - Only newly uploaded image assets are analyzed.
 - The current file lookup supports local JPEG and PNG files.
 - Remote filesystems may need additional handling before their assets can be analyzed.
+- The Vue component is GraphQL-ready, but the plugin currently ships Craft action endpoints only; GraphQL schema/resolvers still need to be added before `api-transport="graphql"` can be used.
 - AI enhancement can alter image details more than Imagick safe optimization, depending on the selected provider, configured prompt, and model output.
