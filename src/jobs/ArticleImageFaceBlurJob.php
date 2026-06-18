@@ -126,7 +126,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 							'content' => [
 								[
 									'type' => 'text',
-									'text' => 'Detect every visible human face/head area that should be anonymized. Include blurry, motion-blurred, low-resolution, side-view, profile, background, partially occluded, and cropped faces. Do not identify anyone. Return only valid JSON with this exact shape: {"faces":[{"x":0,"y":0,"width":100,"height":100,"confidence":"high"}]}. Coordinates must be normalized integers from 0 to 1000 relative to the full image. The rectangle should cover the visible head/face silhouette including forehead, cheeks, chin, hairline, ears, and enough margin to anonymize identity, but should not cover the whole person unless necessary.',
+									'text' => 'Detect every visible human face/head area that should be anonymized. Include blurry, motion-blurred, low-resolution, side-view, profile, background, partially occluded, and cropped faces. Do not identify anyone. Return only valid JSON with this exact shape: {"faces":[{"x":0,"y":0,"width":100,"height":100,"confidence":"high"}]}. Coordinates must be normalized integers from 0 to 1000 relative to the full image. The rectangle must tightly cover only the visible face/head oval plus a small margin: forehead, eyes, nose, mouth, cheeks, chin, hairline, ears, and facial hair if present. Exclude neck, shoulders, torso, clothing, hands, microphones, signs, background, and sky. If the person is close to the camera, still return only the head/face area, not the upper body. If uncertain, prefer a smaller head-centered box over a large body box.',
 								],
 								[
 									'type' => 'image_url',
@@ -256,8 +256,9 @@ class ArticleImageFaceBlurJob extends BaseJob
 		$y = (float) $face['y'] / 1000 * $imageHeight;
 		$width = (float) $face['width'] / 1000 * $imageWidth;
 		$height = (float) $face['height'] / 1000 * $imageHeight;
-		$paddingX = $width * 0.24;
-		$paddingY = $height * 0.3;
+		[$x, $y, $width, $height] = $this->coerceFaceBoxToHeadShape($x, $y, $width, $height, $imageWidth, $imageHeight);
+		$paddingX = $width * 0.14;
+		$paddingY = $height * 0.18;
 
 		$x = max(0, (int) floor($x - $paddingX));
 		$y = max(0, (int) floor($y - $paddingY));
@@ -270,6 +271,49 @@ class ArticleImageFaceBlurJob extends BaseJob
 			'width' => max(0, $right - $x),
 			'height' => max(0, $bottom - $y),
 		];
+	}
+
+	private function coerceFaceBoxToHeadShape(float $x, float $y, float $width, float $height, int $imageWidth, int $imageHeight): array
+	{
+		$centerX = $x + ($width / 2);
+		$centerY = $y + ($height / 2);
+		$ratio = $width / max(1, $height);
+		$relativeArea = ($width * $height) / max(1, $imageWidth * $imageHeight);
+		$bottom = $y + $height;
+
+		if ($ratio < 0.5) {
+			$width = $height * 0.68;
+		} elseif ($ratio > 1.35) {
+			$height = $width / 1.05;
+		}
+
+		if ($height > $width * 1.65) {
+			$height = $width * 1.35;
+			$centerY = $y + ($height / 2);
+		}
+
+		if ($relativeArea > 0.42 && $bottom > $imageHeight * 0.72 && $height > $width * 1.05) {
+			$height = min($height, $width * 1.25);
+			$centerY = $y + ($height / 2);
+		}
+
+		$x = $centerX - ($width / 2);
+		$y = $centerY - ($height / 2);
+
+		if ($x < 0) {
+			$x = 0;
+		}
+		if ($y < 0) {
+			$y = 0;
+		}
+		if ($x + $width > $imageWidth) {
+			$x = max(0, $imageWidth - $width);
+		}
+		if ($y + $height > $imageHeight) {
+			$y = max(0, $imageHeight - $height);
+		}
+
+		return [$x, $y, min($width, $imageWidth), min($height, $imageHeight)];
 	}
 
 	private function normalizeFaceBoxes(?array $data): array
