@@ -4,7 +4,7 @@
 {% import '_includes/forms' as forms %}
 
 <div id="tab-chatgpt">
-		
+
 	<h1>ChatGPT</h1>
 	
 	{{ forms.textField({
@@ -26,13 +26,13 @@
 		placeholder: '',
 	}) }}
 	
-	{{ forms.textField({
+	{{ forms.selectField({
 		label: 'ChatGPT Model',
 		name: 'chatGptModel',
 		id: 'chatGptModel',
-		instructions: 'The chatGPT model that should be used. Default is gpt-4-turbo',
+		instructions: 'Choose a fixed OpenAI model, or use the latest available model for this API key.',
 		value: settings.chatGptModel,
-		placeholder: '',
+		options: chatGptModelOptions,
 	}) }}
 	
 	{{ forms.selectField({
@@ -68,12 +68,20 @@
 		on: settings.slackNotification,
 		instructions: "Also fill in the Slack variables below.",
 	}) }}
+
+	{{ forms.lightswitchField({
+		label: "Send errors to Slack"|t,
+		id: 'slackErrorNotification',
+		name: 'slackErrorNotification',
+		on: settings.slackErrorNotification,
+		instructions: "Send failed image enhancement queue jobs to Slack using the same Slack variables below.",
+	}) }}
 	
 	{{ forms.textField({
 		label: 'Slack Bot Token',
 		name: 'slackBotToken',
 		id: 'slackBotToken',
-		instructions: 'Enter your bot Token (see https://api.slack.com/apps, Oauth & permissions).',
+		instructions: 'Enter your bot Token (see https://api.slack.com/apps, Oauth & permissions). Used when no webhook URL is configured.',
 		value: settings.slackBotToken,
 		placeholder: 'xoxb-xxx',
 	}) }}
@@ -82,7 +90,7 @@
 		label: 'Slack Webhook URL',
 		name: 'slackWebhookUrl',
 		id: 'slackWebhookUrl',
-		instructions: 'A Slack Webhook URL to receive notifications about image quality.',
+		instructions: 'A Slack Webhook URL to receive notifications about image quality. If set, this is used before the bot token method.',
 		value: settings.slackWebhookUrl,
 		placeholder: 'https://hooks.slack.com/services/...',
 	}) }}
@@ -95,6 +103,19 @@
 		value: settings.slackChannel,
 		placeholder: '#media'
 	}) }}
+
+	{{ forms.textField({
+		label: 'Slack Error Channel',
+		name: 'slackErrorChannel',
+		id: 'slackErrorChannel',
+		instructions: 'Optional channel for error notifications. Leave empty to use the normal Slack channel. For webhook delivery, the webhook may still control the destination channel.',
+		value: settings.slackErrorChannel,
+		placeholder: '#image-errors'
+	}) }}
+
+	<button type="button" class="btn" data-image-quality-test-action="_image-quality-checker/notifications/test-slack">
+		Send Slack test notifications
+	</button>
 	
 	<hr />
 	
@@ -117,22 +138,313 @@
 		placeholder: 'user@email.com'
 	}) }}
 
+	<button type="button" class="btn" data-image-quality-test-action="_image-quality-checker/notifications/test-email">
+		Send email test notification
+	</button>
+
+	<hr />
+
+	<h1>Debug</h1>
+
+	{{ forms.lightswitchField({
+		label: "Enable debug logging"|t,
+		id: 'debugLogging',
+		name: 'debugLogging',
+		on: settings.debugLogging,
+		instructions: "Writes ImageQualityChecker DEBUG lines to Craft's web.log for troubleshooting queue jobs.",
+	}) }}
+
+</div>
+
+{% js %}
+	(() => {
+		const buttons = document.querySelectorAll('[data-image-quality-test-action]');
+		buttons.forEach((button) => {
+			button.addEventListener('click', async () => {
+				const originalText = button.textContent;
+				button.disabled = true;
+				button.textContent = 'Sending...';
+
+				try {
+					const response = await Craft.sendActionRequest('POST', button.dataset.imageQualityTestAction);
+					const message = response.data?.message || 'Test notification sent.';
+
+					if (response.data?.success) {
+						Craft.cp.displayNotice(message);
+					} else {
+						Craft.cp.displayError(message);
+					}
+				} catch (error) {
+					Craft.cp.displayError(error?.response?.data?.message || error?.message || 'Test notification failed.');
+				} finally {
+					button.disabled = false;
+					button.textContent = originalText;
+				}
+			});
+		});
+	})();
+{% endjs %}
+
+<div id="tab-enhancement" class="hidden">
+
+	<h1>Enhancement</h1>
+
+	{{ forms.selectField({
+		label: 'Enhancement mode',
+		name: 'imageEnhancementMode',
+		id: 'imageEnhancementMode',
+		instructions: 'When an image score is below the notification threshold, choose whether replacement is handled by Imagick or an AI image provider.',
+		value: settings.imageEnhancementMode,
+		options: imageEnhancementModeOptions,
+	}) }}
+
+	{{ forms.selectField({
+		label: 'Enhancement trigger',
+		name: 'imageEnhancementTrigger',
+		id: 'imageEnhancementTrigger',
+		instructions: 'Choose whether enhancement only runs after the quality score reaches the threshold, or always runs immediately without the quality check.',
+		value: settings.imageEnhancementTrigger,
+		options: imageEnhancementTriggerOptions,
+	}) }}
+
+	{{ forms.selectField({
+		label: 'Enhanced image handling',
+		name: 'imageEnhancementAction',
+		id: 'imageEnhancementAction',
+		instructions: 'Choose whether the enhanced file replaces the original asset or is added next to the original asset for manual review.',
+		value: settings.imageEnhancementAction,
+		options: imageEnhancementActionOptions,
+	}) }}
+
+	{{ forms.selectField({
+		label: 'AI image provider',
+		name: 'imageEnhancementProvider',
+		id: 'imageEnhancementProvider',
+		instructions: 'Choose the platform used for AI image enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Choose in frontend lets editors pick the provider and model in the frontend enhancement component.',
+		value: settings.imageEnhancementProvider,
+		options: imageEnhancementProviderOptions,
+	}) }}
+
+	<div data-image-enhancement-provider-fields="openai">
+		{{ forms.selectField({
+			label: 'OpenAI image enhancement model',
+			name: 'imageEnhancementModel',
+			id: 'imageEnhancementModel',
+			instructions: 'Used when the AI image provider is OpenAI.',
+			value: settings.imageEnhancementModel,
+			options: imageEnhancementModelOptions,
+		}) }}
+	</div>
+
+	<div data-image-enhancement-provider-fields="xai">
+		{{ forms.textField({
+			label: 'xAI API key',
+			name: 'xAiApiKey',
+			id: 'xAiApiKey',
+			instructions: 'Used when the AI image provider is Grok Imagine.',
+			value: settings.xAiApiKey,
+			placeholder: 'xai-...',
+		}) }}
+
+		{{ forms.selectField({
+			label: 'Grok Imagine image model',
+			name: 'xAiImageEnhancementModel',
+			id: 'xAiImageEnhancementModel',
+			instructions: 'Used when the AI image provider is Grok Imagine.',
+			value: settings.xAiImageEnhancementModel,
+			options: xAiImageEnhancementModelOptions,
+		}) }}
+	</div>
+
+	<div data-image-enhancement-provider-fields="google">
+		{{ forms.textField({
+			label: 'Google AI API key',
+			name: 'googleAiApiKey',
+			id: 'googleAiApiKey',
+			instructions: 'Used when the AI image provider is Google Nano Banana.',
+			value: settings.googleAiApiKey,
+			placeholder: 'AIza...',
+		}) }}
+
+		{{ forms.selectField({
+			label: 'Google Nano Banana image model',
+			name: 'googleImageEnhancementModel',
+			id: 'googleImageEnhancementModel',
+			instructions: 'Used when the AI image provider is Google Nano Banana.',
+			value: settings.googleImageEnhancementModel,
+			options: googleImageEnhancementModelOptions,
+		}) }}
+	</div>
+
+	{% js %}
+		(() => {
+			const providerSelect = document.querySelector('select[name="imageEnhancementProvider"], select[name$="[imageEnhancementProvider]"]');
+			const providerFields = document.querySelectorAll('[data-image-enhancement-provider-fields]');
+
+			if (!providerSelect || !providerFields.length) {
+				return;
+			}
+
+			const updateProviderFields = () => {
+				providerFields.forEach((field) => {
+					const isActive = providerSelect.value === 'frontend' || field.dataset.imageEnhancementProviderFields === providerSelect.value;
+					field.hidden = !isActive;
+					field.classList.toggle('hidden', !isActive);
+				});
+			};
+
+			providerSelect.addEventListener('change', updateProviderFields);
+			providerSelect.addEventListener('input', updateProviderFields);
+			updateProviderFields();
+		})();
+	{% endjs %}
+
+	{{ forms.selectField({
+		label: 'AI face handling',
+		name: 'imageEnhancementFaceHandling',
+		id: 'imageEnhancementFaceHandling',
+		instructions: 'Choose whether AI enhancement can run when visible human faces are detected.',
+		value: settings.imageEnhancementFaceHandling,
+		options: imageEnhancementFaceHandlingOptions,
+	}) }}
+
+	{{ forms.textareaField({
+		label: 'Face blur detection prompt',
+		name: 'faceBlurDetectionPrompt',
+		id: 'faceBlurDetectionPrompt',
+		rows: 8,
+		instructions: 'Used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally.',
+		value: settings.effectiveFaceBlurDetectionPrompt,
+	}) }}
+
+	<hr>
+
+	<h2>Failed job retry</h2>
+
+	{{ forms.lightswitchField({
+		label: 'Retry failed enhancement jobs',
+		id: 'retryFailedEnhancementJobs',
+		name: 'retryFailedEnhancementJobs',
+		on: settings.retryFailedEnhancementJobs,
+		instructions: 'When enabled, a failed article image enhancement queue job gets one delayed retry before the error is reported.',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Retry delay',
+		name: 'failedEnhancementRetryDelay',
+		id: 'failedEnhancementRetryDelay',
+		type: 'number',
+		min: 0,
+		max: 86400,
+		step: 1,
+		size: 6,
+		unit: 'seconds',
+		instructions: 'How many seconds to wait before retrying a failed enhancement job.',
+		value: settings.failedEnhancementRetryDelay,
+		placeholder: '60',
+	}) }}
+
+	<hr>
+
+	<h2>AI tuning levels</h2>
+
+	{{ forms.textField({
+		label: 'Clarity / detail',
+		name: 'creativeEnhancementClarityLevel',
+		id: 'creativeEnhancementClarityLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is very subtle, 5 is balanced, 10 is strong but still natural. Controls sharpness, deblurring, edge definition, and visible texture detail.',
+		value: settings.creativeEnhancementClarityLevel,
+		placeholder: '5',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Contrast / depth',
+		name: 'creativeEnhancementContrastLevel',
+		id: 'creativeEnhancementContrastLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is very subtle, 5 is balanced, 10 is strong but still natural. Controls contrast, dynamic range, and perceived depth.',
+		value: settings.creativeEnhancementContrastLevel,
+		placeholder: '5',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Color intensity',
+		name: 'creativeEnhancementColorLevel',
+		id: 'creativeEnhancementColorLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is muted, 5 is balanced, 10 is vivid but still natural. Controls saturation, vibrance, and color richness.',
+		value: settings.creativeEnhancementColorLevel,
+		placeholder: '5',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Noise / artifact cleanup',
+		name: 'creativeEnhancementNoiseReductionLevel',
+		id: 'creativeEnhancementNoiseReductionLevel',
+		type: 'number',
+		min: 1,
+		max: 10,
+		step: 1,
+		size: 4,
+		instructions: '1 is very light cleanup, 5 is balanced, 10 is aggressive but should still preserve real skin texture and natural grain.',
+		value: settings.creativeEnhancementNoiseReductionLevel,
+		placeholder: '5',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Imagick safe optimization max width',
+		name: 'safeEnhancementMaxWidth',
+		id: 'safeEnhancementMaxWidth',
+		instructions: 'Imagick safe optimization can upscale smaller images up to this width while preserving the original aspect ratio.',
+		value: settings.safeEnhancementMaxWidth,
+		placeholder: '2400',
+	}) }}
+
+	{{ forms.textField({
+		label: 'Imagick JPEG quality',
+		name: 'safeEnhancementJpegQuality',
+		id: 'safeEnhancementJpegQuality',
+		instructions: 'JPEG compression quality used when Imagick rewrites a JPEG file.',
+		value: settings.safeEnhancementJpegQuality,
+		placeholder: '90',
+	}) }}
+
+	{{ forms.textareaField({
+		label: 'AI enhancement prompt',
+		name: 'creativeEnhancementPrompt',
+		id: 'creativeEnhancementPrompt',
+		rows: 16,
+		instructions: 'Used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details.',
+		value: settings.effectiveCreativeEnhancementPrompt,
+	}) }}
+
 </div>
 
 <div id="tab-volumes"  class="hidden">
 	
 	<h1>Asset Volumes</h1>
 	
-	{% set allAssetFields = craft.app.fields.allFields
-		|filter(field => field.className == 'craft\\fields\\Assets')
-	%}
+	{% set allVolumes = craft.app.volumes.allVolumes %}
 	
-	{% set fieldOptions = [] %}
-	{% for field in allAssetFields %}
-		{% set fieldOptions = fieldOptions|merge([{
-			label: field.name ~ ' (' ~ field.handle ~ ')',
-			value: field.handle,
-			checked: field.handle in settings.allowedAssetFieldHandles
+	{% set volumeOptions = [] %}
+	{% for volume in allVolumes %}
+		{% set volumeOptions = volumeOptions|merge([{
+			label: volume.name ~ ' (' ~ volume.handle ~ ')',
+			value: volume.handle,
+			checked: volume.handle in settings.allowedAssetFieldHandles
 		}]) %}
 	{% endfor %}
 	
@@ -140,6 +452,6 @@
 		label: 'Only run the analyses on these asset volumes',
 		instructions: 'Select your volumes that should be analysed.',
 		name: 'allowedAssetFieldHandles',
-		options: fieldOptions
+		options: volumeOptions
 	}) }}
 </div>
