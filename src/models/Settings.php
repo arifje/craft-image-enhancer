@@ -112,6 +112,9 @@ Correct color balance to restore natural skin tones and accurate colors while ma
 
 Preserve the original crop, dimensions, framing, composition, camera angle, perspective, pose, facial expression, background elements, text, objects, clothing, hands, and overall mood. Do not add, remove, replace, reposition, uncrop, extend, stylize, beautify, smooth into a plastic look, or create artificial sharpening halos. The output should look like the same image, technically cleaned up and clearer, not a creative reinterpretation.
 PROMPT;
+	public const DEFAULT_FACE_BLUR_DETECTION_PROMPT = <<<'PROMPT'
+Detect every visible human face/head area that should be anonymized. Include blurry, motion-blurred, low-resolution, side-view, profile, background, partially occluded, and cropped faces. Do not identify anyone. Return only valid JSON with this exact shape: {"faces":[{"x":0,"y":0,"width":100,"height":100,"confidence":"high"}]}. Coordinates must be normalized integers from 0 to 1000 relative to the full image. The rectangle must tightly cover only the visible face/head oval plus a small margin: forehead, eyes, nose, mouth, cheeks, chin, hairline, ears, and facial hair if present. Exclude neck, shoulders, torso, clothing, hands, microphones, signs, background, and sky. If the person is close to the camera, still return only the head/face area, not the upper body. If uncertain, prefer a smaller head-centered box over a large body box.
+PROMPT;
 
 	// ChatGPT
 	public string $chatGptApiKey = '';
@@ -159,11 +162,12 @@ PROMPT;
 	public int $safeEnhancementMaxWidth = 2400;
 	public int $safeEnhancementJpegQuality = 90;
 	public string $creativeEnhancementPrompt = self::DEFAULT_CREATIVE_ENHANCEMENT_PROMPT;
+	public string $faceBlurDetectionPrompt = self::DEFAULT_FACE_BLUR_DETECTION_PROMPT;
 
 	public function rules(): array
 	{
 		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementProvider', 'imageEnhancementModel', 'xAiApiKey', 'xAiImageEnhancementModel', 'googleAiApiKey', 'googleImageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt'], 'string'],
+			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementProvider', 'imageEnhancementModel', 'xAiApiKey', 'xAiImageEnhancementModel', 'googleAiApiKey', 'googleImageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt', 'faceBlurDetectionPrompt'], 'string'],
 			[['slackNotification', 'slackErrorNotification', 'emailNotification', 'retryFailedEnhancementJobs', 'debugLogging'], 'boolean'],
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['failedEnhancementRetryDelay'], 'integer', 'min' => 0, 'max' => 86400],
@@ -287,6 +291,18 @@ PROMPT;
 	public function getCreativeEnhancementPromptForRequest(): string
 	{
 		return trim($this->getEffectiveCreativeEnhancementPrompt()) . "\n\n" . $this->getCreativeEnhancementTuningPrompt();
+	}
+
+	public function getEffectiveFaceBlurDetectionPrompt(): string
+	{
+		$prompt = trim($this->faceBlurDetectionPrompt);
+
+		return $prompt !== '' ? $this->faceBlurDetectionPrompt : self::DEFAULT_FACE_BLUR_DETECTION_PROMPT;
+	}
+
+	public function getFaceBlurDetectionPromptForRequest(): string
+	{
+		return trim($this->getEffectiveFaceBlurDetectionPrompt());
 	}
 
 	public function getCreativeEnhancementTuningPrompt(): string

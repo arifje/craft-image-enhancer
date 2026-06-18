@@ -308,6 +308,15 @@
 		options: imageEnhancementFaceHandlingOptions,
 	}) }}
 
+	{{ forms.textareaField({
+		label: 'Face blur detection prompt',
+		name: 'faceBlurDetectionPrompt',
+		id: 'faceBlurDetectionPrompt',
+		rows: 8,
+		instructions: 'Used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally.',
+		value: settings.effectiveFaceBlurDetectionPrompt,
+	}) }}
+
 	<hr>
 
 	<h2>Failed job retry</h2>

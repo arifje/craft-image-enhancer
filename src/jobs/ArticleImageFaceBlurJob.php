@@ -105,6 +105,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 	{
 		$mime = $asset->mimeType ?: 'image/jpeg';
 		$imageBase64 = base64_encode(file_get_contents($localPath));
+		$prompt = $settings->getFaceBlurDetectionPromptForRequest();
 		$models = array_values(array_unique([
 			$this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey),
 			'gpt-4o-mini',
@@ -126,7 +127,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 							'content' => [
 								[
 									'type' => 'text',
-									'text' => 'Detect every visible human face/head area that should be anonymized. Include blurry, motion-blurred, low-resolution, side-view, profile, background, partially occluded, and cropped faces. Do not identify anyone. Return only valid JSON with this exact shape: {"faces":[{"x":0,"y":0,"width":100,"height":100,"confidence":"high"}]}. Coordinates must be normalized integers from 0 to 1000 relative to the full image. The rectangle must tightly cover only the visible face/head oval plus a small margin: forehead, eyes, nose, mouth, cheeks, chin, hairline, ears, and facial hair if present. Exclude neck, shoulders, torso, clothing, hands, microphones, signs, background, and sky. If the person is close to the camera, still return only the head/face area, not the upper body. If uncertain, prefer a smaller head-centered box over a large body box.',
+									'text' => $prompt,
 								],
 								[
 									'type' => 'image_url',
