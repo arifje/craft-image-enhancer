@@ -2,6 +2,7 @@
 
 namespace arjanbrinkman\craftimagequalitychecker\services;
 
+use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
 use arjanbrinkman\craftimagequalitychecker\models\Settings;
 use craft\base\Component;
 use craft\elements\Asset;
@@ -45,10 +46,12 @@ class AiImageEnhancementService extends Component
 			throw new \RuntimeException($this->getProviderLabel($settings, $providerOptions) . ' API key is missing.');
 		}
 
+		$prompt = ImageQualityChecker::getInstance()->runtimeSettings->getCreativeEnhancementPromptForRequest($settings);
+
 		return match ($provider) {
-			Settings::IMAGE_PROVIDER_XAI => $this->enhanceWithXai($client, $settings, $asset, $localPath, $apiKey, $model),
-			Settings::IMAGE_PROVIDER_GOOGLE => $this->enhanceWithGoogle($client, $settings, $asset, $localPath, $apiKey, $model),
-			default => $this->enhanceWithOpenAi($client, $settings, $asset, $localPath, $apiKey, $model),
+			Settings::IMAGE_PROVIDER_XAI => $this->enhanceWithXai($client, $asset, $localPath, $apiKey, $model, $prompt),
+			Settings::IMAGE_PROVIDER_GOOGLE => $this->enhanceWithGoogle($client, $asset, $localPath, $apiKey, $model, $prompt),
+			default => $this->enhanceWithOpenAi($client, $asset, $localPath, $apiKey, $model, $prompt),
 		};
 	}
 
@@ -67,7 +70,7 @@ class AiImageEnhancementService extends Component
 		], true) ? $provider : Settings::IMAGE_PROVIDER_OPENAI;
 	}
 
-	private function enhanceWithOpenAi(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey, string $model): string
+	private function enhanceWithOpenAi(ClientInterface $client, Asset $asset, string $localPath, string $apiKey, string $model, string $prompt): string
 	{
 		$handle = fopen($localPath, 'rb');
 		if ($handle === false) {
@@ -91,7 +94,7 @@ class AiImageEnhancementService extends Component
 					],
 					[
 						'name' => 'prompt',
-						'contents' => $settings->getCreativeEnhancementPromptForRequest(),
+						'contents' => $prompt,
 					],
 					[
 						'name' => 'size',
@@ -123,7 +126,7 @@ class AiImageEnhancementService extends Component
 		return $this->writeBase64ImageToTempFile($asset, $imageData);
 	}
 
-	private function enhanceWithXai(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey, string $model): string
+	private function enhanceWithXai(ClientInterface $client, Asset $asset, string $localPath, string $apiKey, string $model, string $prompt): string
 	{
 		$mimeType = $asset->mimeType ?: 'image/jpeg';
 		$imageDataUri = 'data:' . $mimeType . ';base64,' . $this->getBase64LocalImage($localPath);
@@ -135,7 +138,7 @@ class AiImageEnhancementService extends Component
 			],
 			'json' => [
 				'model' => $model,
-				'prompt' => $settings->getCreativeEnhancementPromptForRequest(),
+				'prompt' => $prompt,
 				'image' => [
 					'type' => 'image_url',
 					'url' => $imageDataUri,
@@ -147,7 +150,7 @@ class AiImageEnhancementService extends Component
 		return $this->writeProviderImageResponseToTempFile($client, $asset, $data, 'xAI');
 	}
 
-	private function enhanceWithGoogle(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey, string $model): string
+	private function enhanceWithGoogle(ClientInterface $client, Asset $asset, string $localPath, string $apiKey, string $model, string $prompt): string
 	{
 		$mimeType = $asset->mimeType ?: 'image/jpeg';
 		$encodedModel = rawurlencode($model);
@@ -160,7 +163,7 @@ class AiImageEnhancementService extends Component
 				'contents' => [[
 					'role' => 'user',
 					'parts' => [
-						['text' => $settings->getCreativeEnhancementPromptForRequest()],
+						['text' => $prompt],
 						[
 							'inline_data' => [
 								'mime_type' => $mimeType,

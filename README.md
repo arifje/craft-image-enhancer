@@ -15,6 +15,7 @@ Configure the plugin from the Craft control panel plugin settings.
 ### General
 
 - **Run quality check on upload**: Admins can turn upload analysis on or off from **Utilities → Image Quality Checker**. This runtime toggle is stored in the database instead of project config, so it can be changed directly on production without a code deploy.
+- **Runtime prompt overrides**: Admins can override the AI enhancement prompt and face blur detection prompt from **Utilities → Image Quality Checker**. Leave an override empty to use the plugin settings/default prompt. These overrides are stored in the database and take effect immediately on production.
 
 ### ChatGPT
 
@@ -46,7 +47,8 @@ Enhancement runs only when an image score is below the notification threshold.
 - **AI enhancement**: Creates a provider-generated edit using OpenAI, Grok Imagine, or Google Nano Banana. The AI face handling setting controls whether AI enhancement is allowed for images with visible faces, or whether those images fall back to Imagick safe optimization.
 - **AI image provider**: Choose the provider used for AI enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Grok Imagine and Google Nano Banana use their own API key fields. **Choose in frontend** lets editors choose the provider and model in the frontend enhancement component.
 - **AI tuning levels**: Use simple 1-10 settings for clarity/detail, contrast/depth, color intensity, and noise/artifact cleanup. The selected levels are added to the image prompt so editors can choose a more colorful/contrasty result or a softer, more restrained result.
-- **Face blur detection prompt**: Controls the prompt used by the frontend **Blur faces** action to detect face/head boxes. The API only returns boxes; Imagick applies the anonymization locally.
+- **AI enhancement prompt**: Controls the default prompt used by all AI enhancement providers. This is stored in project config and can be overridden at runtime from the Utility screen.
+- **Face blur detection prompt**: Controls the default prompt used by the frontend **Blur faces** action to detect face/head boxes. The API only returns boxes; Imagick applies the anonymization locally. This is stored in project config and can be overridden at runtime from the Utility screen.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 - **Enhanced image handling**: Choose whether the enhanced file replaces the original asset, or is added next to the original asset for manual review.
 
@@ -149,7 +151,7 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 8. Upload a JPEG or PNG image asset to a selected volume.
 
 The plugin queues an analysis job immediately after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
-The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications.
+The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications. If runtime prompt overrides are set in **Utilities → Image Quality Checker**, queued enhancement and face-blur jobs use those prompts instead of the project-config defaults.
 
 To troubleshoot a queue run, enable debug logging and watch Craft's web log:
 

@@ -30,8 +30,16 @@ class QualityCheckUtility extends Utility
 
 	public static function contentHtml(): string
 	{
+		$plugin = ImageQualityChecker::getInstance();
+		$runtimeSettings = $plugin->runtimeSettings;
+		$settings = $plugin->getSettings();
+
 		return Craft::$app->getView()->renderTemplate('_image-quality-checker/_utility.twig', [
-			'enabled' => ImageQualityChecker::getInstance()->runtimeSettings->isQualityCheckEnabled(),
+			'enabled' => $runtimeSettings->isQualityCheckEnabled(),
+			'creativeEnhancementPromptOverride' => $runtimeSettings->getCreativeEnhancementPromptOverride(),
+			'faceBlurDetectionPromptOverride' => $runtimeSettings->getFaceBlurDetectionPromptOverride(),
+			'creativeEnhancementPromptDefault' => $settings->getEffectiveCreativeEnhancementPrompt(),
+			'faceBlurDetectionPromptDefault' => $settings->getEffectiveFaceBlurDetectionPrompt(),
 		]);
 	}
 }

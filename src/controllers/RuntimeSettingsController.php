@@ -19,10 +19,17 @@ class RuntimeSettingsController extends Controller
 			throw new ForbiddenHttpException('Only admins can change Image Quality Checker runtime settings.');
 		}
 
-		$enabled = (bool) Craft::$app->getRequest()->getBodyParam('enabled');
+		$request = Craft::$app->getRequest();
+		$enabled = (bool) $request->getBodyParam('enabled');
+		$creativeEnhancementPromptOverride = (string) $request->getBodyParam('creativeEnhancementPromptOverride', '');
+		$faceBlurDetectionPromptOverride = (string) $request->getBodyParam('faceBlurDetectionPromptOverride', '');
 
 		try {
-			ImageQualityChecker::getInstance()->runtimeSettings->setQualityCheckEnabled($enabled);
+			ImageQualityChecker::getInstance()->runtimeSettings->setRuntimeSettings(
+				$enabled,
+				$creativeEnhancementPromptOverride,
+				$faceBlurDetectionPromptOverride
+			);
 			Craft::$app->getSession()->setNotice('Image Quality Checker runtime settings saved.');
 		} catch (\Throwable $e) {
 			Craft::error('ImageQualityChecker: Could not save runtime settings: ' . $e->getMessage(), __METHOD__);

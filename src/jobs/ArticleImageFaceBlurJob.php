@@ -105,7 +105,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 	{
 		$mime = $asset->mimeType ?: 'image/jpeg';
 		$imageBase64 = base64_encode(file_get_contents($localPath));
-		$prompt = $settings->getFaceBlurDetectionPromptForRequest();
+		$prompt = ImageQualityChecker::getInstance()->runtimeSettings->getFaceBlurDetectionPromptForRequest($settings);
 		$models = array_values(array_unique([
 			$this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey),
 			'gpt-4o-mini',

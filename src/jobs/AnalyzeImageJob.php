@@ -386,7 +386,8 @@ class AnalyzeImageJob extends BaseJob
 
 		try {
 			[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
-			$creativeEnhancementPrompt = $settings->getCreativeEnhancementPromptForRequest();
+			$runtimeSettings = ImageQualityChecker::getInstance()->runtimeSettings;
+			$creativeEnhancementPrompt = $runtimeSettings->getCreativeEnhancementPromptForRequest($settings);
 			$enhancementService = ImageQualityChecker::getInstance()->aiImageEnhancement;
 			$providerLabel = $enhancementService->getProviderLabel($settings);
 			$this->debugLog($settings, 'Starting AI image enhancement', [
@@ -397,6 +398,7 @@ class AnalyzeImageJob extends BaseJob
 				'imageEnhancementModel' => $enhancementService->getProviderModel($settings),
 				'imageEnhancementFaceHandling' => $settings->imageEnhancementFaceHandling,
 				'creativeEnhancementTuningLevels' => $settings->getCreativeEnhancementTuningLevels(),
+				'creativeEnhancementPromptSource' => $runtimeSettings->hasCreativeEnhancementPromptOverride() ? 'runtime' : 'plugin-settings',
 				'creativeEnhancementPromptLength' => strlen($creativeEnhancementPrompt),
 				'creativeEnhancementPromptHash' => hash('sha256', $creativeEnhancementPrompt),
 				'creativeEnhancementTuningPrompt' => $settings->getCreativeEnhancementTuningPrompt(),

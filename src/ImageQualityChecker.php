@@ -37,7 +37,7 @@ use craft\events\TemplateEvent;
  */
 class ImageQualityChecker extends Plugin
 {
-	public string $schemaVersion = '1.1.0';
+	public string $schemaVersion = '1.2.0';
 	public bool $hasCpSettings = true;
 	public static bool $skipAssetQueue = false;
 

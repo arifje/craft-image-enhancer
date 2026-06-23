@@ -313,7 +313,7 @@
 		name: 'faceBlurDetectionPrompt',
 		id: 'faceBlurDetectionPrompt',
 		rows: 8,
-		instructions: 'Used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally.',
+		instructions: 'Default prompt used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally. Production can override this from Utilities > Image Quality Checker.',
 		value: settings.effectiveFaceBlurDetectionPrompt,
 	}) }}
 
@@ -427,7 +427,7 @@
 		name: 'creativeEnhancementPrompt',
 		id: 'creativeEnhancementPrompt',
 		rows: 16,
-		instructions: 'Used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details.',
+		instructions: 'Default prompt used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details. Production can override this from Utilities > Image Quality Checker.',
 		value: settings.effectiveCreativeEnhancementPrompt,
 	}) }}
 
