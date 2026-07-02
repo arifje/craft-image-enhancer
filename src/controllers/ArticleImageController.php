@@ -99,8 +99,14 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('Imagick is required to blur faces.');
 		}
 
+		$manualFaces = $this->getManualBlurFacesForRequest();
+		if ($manualFaces === false) {
+			return $this->asJsonFailure('Manual blur areas are invalid.');
+		}
+		$useManualFaces = is_array($manualFaces) && !empty($manualFaces);
+
 		$settings = ImageQualityChecker::getInstance()->getSettings();
-		if (trim($settings->chatGptApiKey) === '') {
+		if (!$useManualFaces && trim($settings->chatGptApiKey) === '') {
 			return $this->asJsonFailure('ChatGPT API key is missing.');
 		}
 
@@ -115,6 +121,8 @@ class ArticleImageController extends Controller
 				'status' => 'queued',
 				'assetId' => $asset->id,
 				'operation' => 'blurFaces',
+				'blurMode' => $useManualFaces ? 'manual' : 'auto',
+				'manualFaceCount' => $useManualFaces ? count($manualFaces) : 0,
 				'progress' => 0,
 				'progressLabel' => 'Queued',
 			]);
@@ -122,11 +130,15 @@ class ArticleImageController extends Controller
 				'assetId' => $asset->id,
 				'userId' => Craft::$app->getUser()->getId(),
 				'token' => $token,
+				'useManualFaces' => $useManualFaces,
+				'manualFaces' => $manualFaces ?: [],
 			]));
 			$this->setEnhancementStatus($token, [
 				'status' => 'queued',
 				'assetId' => $asset->id,
 				'operation' => 'blurFaces',
+				'blurMode' => $useManualFaces ? 'manual' : 'auto',
+				'manualFaceCount' => $useManualFaces ? count($manualFaces) : 0,
 				'jobId' => $jobId,
 				'progress' => 0,
 				'progressLabel' => 'Queued',
@@ -145,6 +157,73 @@ class ArticleImageController extends Controller
 			Craft::error('ImageQualityChecker: Article image face blur queueing failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not queue face blur: ' . $e->getMessage());
 		}
+	}
+
+	private function getManualBlurFacesForRequest(): array|false|null
+	{
+		$value = Craft::$app->getRequest()->getBodyParam('manualFaces');
+
+		if ($value === null || $value === '') {
+			return null;
+		}
+
+		if (is_string($value)) {
+			$value = json_decode($value, true);
+			if (!is_array($value)) {
+				return false;
+			}
+		}
+
+		if (isset($value['faces']) && is_array($value['faces'])) {
+			$value = $value['faces'];
+		}
+
+		if (!is_array($value)) {
+			return false;
+		}
+
+		$faces = [];
+		foreach ($value as $face) {
+			if (!is_array($face)) {
+				return false;
+			}
+
+			$x = $this->normalizeBlurCoordinate($face['x'] ?? null);
+			$y = $this->normalizeBlurCoordinate($face['y'] ?? null);
+			$width = $this->normalizeBlurCoordinate($face['width'] ?? null);
+			$height = $this->normalizeBlurCoordinate($face['height'] ?? null);
+
+			if ($x === null || $y === null || $width === null || $height === null) {
+				return false;
+			}
+
+			$width = min(1000 - $x, $width);
+			$height = min(1000 - $y, $height);
+
+			if ($width < 5 || $height < 5) {
+				return false;
+			}
+
+			$faces[] = [
+				'x' => $x,
+				'y' => $y,
+				'width' => $width,
+				'height' => $height,
+				'confidence' => 'manual',
+				'source' => 'manual',
+			];
+		}
+
+		return !empty($faces) ? $faces : false;
+	}
+
+	private function normalizeBlurCoordinate(mixed $value): ?int
+	{
+		if (!is_numeric($value)) {
+			return null;
+		}
+
+		return max(0, min(1000, (int) round((float) $value)));
 	}
 
 	private function getProviderOptionsForRequest(Settings $settings): array|false

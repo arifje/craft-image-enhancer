@@ -20,6 +20,8 @@ class ArticleImageFaceBlurJob extends BaseJob
 	public int $assetId;
 	public ?int $userId = null;
 	public string $token;
+	public bool $useManualFaces = false;
+	public array $manualFaces = [];
 
 	public function execute($queue): void
 	{
@@ -46,14 +48,24 @@ class ArticleImageFaceBlurJob extends BaseJob
 				throw new \RuntimeException('Could not find the original asset file.');
 			}
 
-			$apiKey = trim($settings->chatGptApiKey);
-			if ($apiKey === '') {
-				throw new \RuntimeException('ChatGPT API key is missing.');
-			}
+			if ($this->useManualFaces) {
+				$this->updateStatus('running', 0.2, 'Preparing manual blur areas', [
+					'blurMode' => 'manual',
+				]);
+				$this->setProgress($queue, 0.2, 'Preparing manual blur areas');
+				$faces = $this->normalizeManualFaceBoxes($this->manualFaces);
+			} else {
+				$apiKey = trim($settings->chatGptApiKey);
+				if ($apiKey === '') {
+					throw new \RuntimeException('ChatGPT API key is missing.');
+				}
 
-			$this->updateStatus('running', 0.2, 'Detecting faces');
-			$this->setProgress($queue, 0.2, 'Detecting faces');
-			$faces = $this->detectFaces(Craft::createGuzzleClient(), $settings, $asset, $localPath, $apiKey);
+				$this->updateStatus('running', 0.2, 'Detecting faces', [
+					'blurMode' => 'auto',
+				]);
+				$this->setProgress($queue, 0.2, 'Detecting faces');
+				$faces = $this->detectFaces(Craft::createGuzzleClient(), $settings, $asset, $localPath, $apiKey);
+			}
 			if (empty($faces)) {
 				throw new \RuntimeException('No faces found to blur.');
 			}
@@ -85,6 +97,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 				'previewId' => $previewAsset->id,
 				'enhancedUrl' => $this->appendCacheBuster($previewAsset->getUrl()),
 				'faceCount' => count($faces),
+				'blurMode' => $this->useManualFaces ? 'manual' : 'auto',
 			]);
 			$this->setProgress($queue, 1, 'Blurred preview ready');
 		} catch (\Throwable $e) {
@@ -160,6 +173,16 @@ class ArticleImageFaceBlurJob extends BaseJob
 		}
 
 		throw new \RuntimeException('Could not detect face positions.');
+	}
+
+	private function normalizeManualFaceBoxes(array $faces): array
+	{
+		$normalizedFaces = $this->normalizeFaceBoxes(['faces' => $faces]);
+
+		return array_map(static fn(array $face): array => array_merge($face, [
+			'confidence' => 'manual',
+			'source' => 'manual',
+		]), $normalizedFaces);
 	}
 
 	private function blurFacesToTempFile(Asset $asset, string $localPath, array $faces): string
@@ -257,6 +280,21 @@ class ArticleImageFaceBlurJob extends BaseJob
 		$y = (float) $face['y'] / 1000 * $imageHeight;
 		$width = (float) $face['width'] / 1000 * $imageWidth;
 		$height = (float) $face['height'] / 1000 * $imageHeight;
+
+		if (($face['source'] ?? '') === 'manual') {
+			$x = max(0, (int) floor($x));
+			$y = max(0, (int) floor($y));
+			$right = min($imageWidth, (int) ceil($x + $width));
+			$bottom = min($imageHeight, (int) ceil($y + $height));
+
+			return [
+				'x' => $x,
+				'y' => $y,
+				'width' => max(0, $right - $x),
+				'height' => max(0, $bottom - $y),
+			];
+		}
+
 		[$x, $y, $width, $height] = $this->coerceFaceBoxToHeadShape($x, $y, $width, $height, $imageWidth, $imageHeight);
 		$paddingX = $width * 0.14;
 		$paddingY = $height * 0.18;
@@ -344,6 +382,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 				'width' => min(1000 - $x, $width),
 				'height' => min(1000 - $y, $height),
 				'confidence' => (string) ($face['confidence'] ?? ''),
+				'source' => (string) ($face['source'] ?? ''),
 			];
 		}
 
