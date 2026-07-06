@@ -24,6 +24,7 @@ use craft\events\RegisterComponentTypesEvent;
 use craft\services\Elements;
 use craft\services\Utilities;
 use craft\events\ElementEvent;
+use craft\helpers\Json;
 use craft\web\View;
 use craft\events\TemplateEvent;
 
@@ -63,6 +64,7 @@ class ImageEnhancer extends Plugin
 			Craft::$app->getView()->registerJs("window.imageEnhancerModalMessage = " . $flash . ";", \yii\web\View::POS_HEAD);
 		}
 
+		$this->registerCpFieldEnhancer();
 		$this->attachEventHandlers();
 		$this->registerUtilities();
 
@@ -163,6 +165,48 @@ class ImageEnhancer extends Plugin
 				$event->types[] = QualityCheckUtility::class;
 			}
 		);
+	}
+
+	private function registerCpFieldEnhancer(): void
+	{
+		$request = Craft::$app->getRequest();
+		if (!$request->getIsCpRequest()) {
+			return;
+		}
+
+		if (method_exists($request, 'getIsActionRequest') && $request->getIsActionRequest()) {
+			return;
+		}
+
+		$user = Craft::$app->getUser()->getIdentity();
+		if (!$user) {
+			return;
+		}
+
+		$settings = $this->getSettings();
+		$config = [
+			'providerChoiceEnabled' => $settings->imageEnhancementProvider === Settings::IMAGE_PROVIDER_FRONTEND,
+			'imageEnhancementProvider' => $settings->imageEnhancementProvider,
+			'imageEnhancementModel' => $settings->imageEnhancementModel,
+			'xAiImageEnhancementModel' => $settings->xAiImageEnhancementModel,
+			'googleImageEnhancementModel' => $settings->googleImageEnhancementModel,
+			'providerOptions' => Settings::imageEnhancementProviderOptions(),
+			'modelOptions' => [
+				Settings::IMAGE_PROVIDER_OPENAI => Settings::imageEnhancementModelOptions(),
+				Settings::IMAGE_PROVIDER_XAI => Settings::xAiImageEnhancementModelOptions(),
+				Settings::IMAGE_PROVIDER_GOOGLE => Settings::googleImageEnhancementModelOptions(),
+			],
+			'routes' => [
+				'enhance' => 'craft-image-enhancer/article-image/enhance',
+				'status' => 'craft-image-enhancer/article-image/status',
+				'cancel' => 'craft-image-enhancer/article-image/cancel',
+				'keep' => 'craft-image-enhancer/article-image/keep',
+				'discard' => 'craft-image-enhancer/article-image/discard',
+			],
+		];
+
+		Craft::$app->getView()->registerAssetBundle(ImageEnhancerAsset::class);
+		Craft::$app->getView()->registerJs('window.ImageEnhancerCp = ' . Json::htmlEncode($config) . ';', View::POS_HEAD);
 	}
 	
 	private function attachEventHandlers(): void

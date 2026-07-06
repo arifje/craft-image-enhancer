@@ -136,6 +136,12 @@ The component is also prepared for a future GraphQL transport. Keep `api-transpo
 GraphQL operations can be provided for `enhance`, `blurFaces`, `status`, `cancel`, `reset`, `keep`, and `discard`. Each operation may be a query/mutation string or an object with `query`, `operationName`, `variables`, and `dataPath`.
 When manual blur is used, the `blurFaces` payload includes `manualFaces`, an array of normalized face/head boxes with `x`, `y`, `width`, and `height` values from 0 to 1000.
 
+### Control Panel Asset Fields
+
+The plugin also adds a small **Enhance** action below image assets inside Craft asset fields. Clicking it opens a control-panel modal that queues the same enhancement job, polls the queue status, shows a before/after slider, and lets the editor save the enhanced preview as the replacement file for the existing asset. Saving does not change the relation field value; it replaces the file behind the selected asset.
+
+If **AI image provider** is set to **Choose in frontend**, the modal also shows provider and model selectors and remembers the last selected combination in the browser.
+
 ### Asset Volumes
 
 Select the asset volumes that should be analyzed. Images uploaded to other volumes are skipped.
