@@ -1,5 +1,5 @@
-{# @var plugin \arjanbrinkman\craftimagequalitychecker\ImageQualityChecker #}
-{# @var settings \arjanbrinkman\craftimagequalitychecker\models\Settings #}
+{# @var plugin \arjanbrinkman\craftimageenhancer\ImageEnhancer #}
+{# @var settings \arjanbrinkman\craftimageenhancer\models\Settings #}
 
 {% import '_includes/forms' as forms %}
 
@@ -113,7 +113,7 @@
 		placeholder: '#image-errors'
 	}) }}
 
-	<button type="button" class="btn" data-image-quality-test-action="_image-quality-checker/notifications/test-slack">
+	<button type="button" class="btn" data-image-enhancer-test-action="craft-image-enhancer/notifications/test-slack">
 		Send Slack test notifications
 	</button>
 	
@@ -138,7 +138,7 @@
 		placeholder: 'user@email.com'
 	}) }}
 
-	<button type="button" class="btn" data-image-quality-test-action="_image-quality-checker/notifications/test-email">
+	<button type="button" class="btn" data-image-enhancer-test-action="craft-image-enhancer/notifications/test-email">
 		Send email test notification
 	</button>
 
@@ -151,14 +151,14 @@
 		id: 'debugLogging',
 		name: 'debugLogging',
 		on: settings.debugLogging,
-		instructions: "Writes ImageQualityChecker DEBUG lines to Craft's web.log for troubleshooting queue jobs.",
+		instructions: "Writes ImageEnhancer DEBUG lines to Craft's web.log for troubleshooting queue jobs.",
 	}) }}
 
 </div>
 
 {% js %}
 	(() => {
-		const buttons = document.querySelectorAll('[data-image-quality-test-action]');
+		const buttons = document.querySelectorAll('[data-image-enhancer-test-action]');
 		buttons.forEach((button) => {
 			button.addEventListener('click', async () => {
 				const originalText = button.textContent;
@@ -166,7 +166,7 @@
 				button.textContent = 'Sending...';
 
 				try {
-					const response = await Craft.sendActionRequest('POST', button.dataset.imageQualityTestAction);
+					const response = await Craft.sendActionRequest('POST', button.dataset.imageEnhancerTestAction);
 					const message = response.data?.message || 'Test notification sent.';
 
 					if (response.data?.success) {
@@ -313,7 +313,7 @@
 		name: 'faceBlurDetectionPrompt',
 		id: 'faceBlurDetectionPrompt',
 		rows: 8,
-		instructions: 'Default prompt used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally. Production can override this from Utilities > Image Quality Checker.',
+		instructions: 'Default prompt used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally. Production can override this from Utilities > Image Enhancer.',
 		value: settings.effectiveFaceBlurDetectionPrompt,
 	}) }}
 
@@ -427,7 +427,7 @@
 		name: 'creativeEnhancementPrompt',
 		id: 'creativeEnhancementPrompt',
 		rows: 16,
-		instructions: 'Default prompt used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details. Production can override this from Utilities > Image Quality Checker.',
+		instructions: 'Default prompt used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details. Production can override this from Utilities > Image Enhancer.',
 		value: settings.effectiveCreativeEnhancementPrompt,
 	}) }}
 

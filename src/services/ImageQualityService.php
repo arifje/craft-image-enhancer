@@ -1,6 +1,6 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\services;
+namespace arjanbrinkman\craftimageenhancer\services;
 
 use Craft;
 use yii\base\Component;

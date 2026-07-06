@@ -4,8 +4,8 @@
 <p>These values are stored in the database, not project config, so admins can update them directly on production.</p>
 
 <form method="post" accept-charset="UTF-8">
-	{{ actionInput('_image-quality-checker/runtime-settings/save') }}
-	{{ redirectInput('utilities/image-quality-checker') }}
+	{{ actionInput('craft-image-enhancer/runtime-settings/save') }}
+	{{ redirectInput('utilities/image-enhancer') }}
 	{{ csrfInput() }}
 
 	{{ forms.lightswitchField({

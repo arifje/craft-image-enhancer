@@ -1,4 +1,4 @@
-# Image Quality Checker
+# Image Enhancer
 
 Checks newly uploaded image assets for quality issues such as blur, noise, motion blur, and poor sharpness. The plugin sends the image to OpenAI for analysis and can notify users when the returned quality score is below the configured threshold. Enhanced replacement images can be generated with OpenAI, Grok Imagine, or Google Nano Banana.
 
@@ -14,8 +14,8 @@ Configure the plugin from the Craft control panel plugin settings.
 
 ### General
 
-- **Run quality check on upload**: Admins can turn upload analysis on or off from **Utilities → Image Quality Checker**. This runtime toggle is stored in the database instead of project config, so it can be changed directly on production without a code deploy.
-- **Runtime prompt overrides**: Admins can override the AI enhancement prompt and face blur detection prompt from **Utilities → Image Quality Checker**. Leave an override empty to use the plugin settings/default prompt. These overrides are stored in the database and take effect immediately on production.
+- **Run quality check on upload**: Admins can turn upload analysis on or off from **Utilities → Image Enhancer**. This runtime toggle is stored in the database instead of project config, so it can be changed directly on production without a code deploy.
+- **Runtime prompt overrides**: Admins can override the AI enhancement prompt and face blur detection prompt from **Utilities → Image Enhancer**. Leave an override empty to use the plugin settings/default prompt. These overrides are stored in the database and take effect immediately on production.
 
 ### ChatGPT
 
@@ -31,7 +31,7 @@ When **Latest available model** is selected, the plugin fetches the available Op
 - **Threshold**: Notifications are sent when the returned score is below this value.
 - **Slack**: Enable Slack notifications and configure a Slack bot token and channel.
 - **Email**: Enable email notifications to send the result to the author, with an optional CC recipient.
-- **Debug logging**: Writes `ImageQualityChecker DEBUG` lines to Craft's `web.log` while queue jobs run.
+- **Debug logging**: Writes `ImageEnhancer DEBUG` lines to Craft's `web.log` while queue jobs run.
 - **Test notifications**: Send a Slack or email test notification directly from the settings page.
 
 Only the OpenAI API key is required to run the analysis. Slack and email can be configured independently.
@@ -107,7 +107,7 @@ By default the component uses the existing Craft action endpoints, so it works w
 <image-enhancer
 	:asset-id="{{ articleThumbnail ? articleThumbnail.id : 'null' }}"
 	:show-enhancement-options="{{ isRedactie ? 'true' : 'false' }}"
-	:provider-choice-enabled="{{ craft.app.plugins.plugin('_image-quality-checker').settings.imageEnhancementProvider == 'frontend' ? 'true' : 'false' }}"
+	:provider-choice-enabled="{{ craft.app.plugins.plugin('craft-image-enhancer').settings.imageEnhancementProvider == 'frontend' ? 'true' : 'false' }}"
 	src="{{ articleThumbnail and articleThumbnail.url ? articleThumbnail.url ~ '?v=' ~ cachebuster : '' }}"
 	alt="{{ entry.title ?? '' }}"
 	category="{{ articleCategory ?? '' }}"
@@ -143,7 +143,7 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 ## Usage
 
 1. Enter an OpenAI API key for analysis.
-2. Make sure **Run quality check on upload** is turned on under **Utilities → Image Quality Checker**.
+2. Make sure **Run quality check on upload** is turned on under **Utilities → Image Enhancer**.
 3. Choose a model or keep **Latest available model** selected.
 4. Select the asset volumes that should be checked.
 5. Choose whether low-scoring images should be enhanced and replaced, or whether every uploaded image should always be enhanced.
@@ -152,12 +152,12 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 8. Upload a JPEG or PNG image asset to a selected volume.
 
 The plugin queues an analysis job immediately after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
-The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications. If runtime prompt overrides are set in **Utilities → Image Quality Checker**, queued enhancement and face-blur jobs use those prompts instead of the project-config defaults.
+The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications. If runtime prompt overrides are set in **Utilities → Image Enhancer**, queued enhancement and face-blur jobs use those prompts instead of the project-config defaults.
 
 To troubleshoot a queue run, enable debug logging and watch Craft's web log:
 
 ```bash
-tail -f storage/logs/web.log | grep 'ImageQualityChecker DEBUG'
+tail -f storage/logs/web.log | grep 'ImageEnhancer DEBUG'
 ```
 
 Debug output includes the PHP process user, original asset ownership, temporary replacement ownership, and final replaced file ownership so server permission issues can be traced.

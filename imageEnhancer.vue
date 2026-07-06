@@ -273,16 +273,16 @@
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const actionRoutes = {
-	enhance: '_image-quality-checker/article-image/enhance',
-	blurFaces: '_image-quality-checker/article-image/blur-faces',
-	status: '_image-quality-checker/article-image/status',
-	cancel: '_image-quality-checker/article-image/cancel',
-	reset: '_image-quality-checker/article-image/reset',
-	keep: '_image-quality-checker/article-image/keep',
-	discard: '_image-quality-checker/article-image/discard',
+	enhance: 'craft-image-enhancer/article-image/enhance',
+	blurFaces: 'craft-image-enhancer/article-image/blur-faces',
+	status: 'craft-image-enhancer/article-image/status',
+	cancel: 'craft-image-enhancer/article-image/cancel',
+	reset: 'craft-image-enhancer/article-image/reset',
+	keep: 'craft-image-enhancer/article-image/keep',
+	discard: 'craft-image-enhancer/article-image/discard',
 };
 const persistedStatusTtlMs = 6 * 60 * 60 * 1000;
-const providerPreferenceStorageKey = 'image-quality-checker:image-enhancer:provider-preference';
+const providerPreferenceStorageKey = 'craft-image-enhancer:image-enhancer:provider-preference';
 const providerOptions = [
 	{ label: 'OpenAI', value: 'openai' },
 	{ label: 'Grok Imagine', value: 'xai' },
@@ -1615,7 +1615,7 @@ function getPersistedStatusKey() {
 		return '';
 	}
 
-	return `image-quality-checker:image-enhancer:${props.assetId}`;
+	return `craft-image-enhancer:image-enhancer:${props.assetId}`;
 }
 
 function getPersistedEnhancementStatus() {

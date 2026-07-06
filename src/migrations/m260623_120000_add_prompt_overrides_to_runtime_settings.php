@@ -1,12 +1,12 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\migrations;
+namespace arjanbrinkman\craftimageenhancer\migrations;
 
 use craft\db\Migration;
 
 class m260623_120000_add_prompt_overrides_to_runtime_settings extends Migration
 {
-	private const TABLE = '{{%imagequalitychecker_runtime_settings}}';
+	private const TABLE = '{{%imageenhancer_runtime_settings}}';
 
 	public function safeUp(): bool
 	{

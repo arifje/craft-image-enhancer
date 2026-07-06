@@ -1,6 +1,6 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\migrations;
+namespace arjanbrinkman\craftimageenhancer\migrations;
 
 use craft\db\Query;
 use craft\db\Migration;
@@ -9,7 +9,7 @@ use craft\helpers\StringHelper;
 
 class m260519_091500_create_runtime_settings_table extends Migration
 {
-	private const TABLE = '{{%imagequalitychecker_runtime_settings}}';
+	private const TABLE = '{{%imageenhancer_runtime_settings}}';
 
 	public function safeUp(): bool
 	{

@@ -1,9 +1,9 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\jobs;
+namespace arjanbrinkman\craftimageenhancer\jobs;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
+use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
 use craft\db\Query;
 use craft\db\Table;
@@ -25,7 +25,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 
 	public function execute($queue): void
 	{
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 		$this->updateStatus('running', 0.05, 'Loading asset');
 		$this->setProgress($queue, 0.05, 'Loading asset');
 
@@ -109,7 +109,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 			$this->updateStatus('failed', 1, 'Face blur failed', [
 				'message' => $e->getMessage(),
 			]);
-			Craft::error('ImageQualityChecker: Article image face blur queue job failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Article image face blur queue job failed: ' . $e->getMessage(), __METHOD__);
 			throw $e;
 		}
 	}
@@ -118,7 +118,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 	{
 		$mime = $asset->mimeType ?: 'image/jpeg';
 		$imageBase64 = base64_encode(file_get_contents($localPath));
-		$prompt = ImageQualityChecker::getInstance()->runtimeSettings->getFaceBlurDetectionPromptForRequest($settings);
+		$prompt = ImageEnhancer::getInstance()->runtimeSettings->getFaceBlurDetectionPromptForRequest($settings);
 		$models = array_values(array_unique([
 			$this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey),
 			'gpt-4o-mini',
@@ -152,7 +152,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 					],
 				]);
 			} catch (\Throwable $e) {
-				Craft::warning('ImageQualityChecker: Face blur detection attempt failed: ' . $e->getMessage(), __METHOD__);
+				Craft::warning('ImageEnhancer: Face blur detection attempt failed: ' . $e->getMessage(), __METHOD__);
 				continue;
 			}
 
@@ -169,7 +169,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 				return [];
 			}
 
-			Craft::warning('ImageQualityChecker: Face blur detection returned an invalid response for model ' . $model, __METHOD__);
+			Craft::warning('ImageEnhancer: Face blur detection returned an invalid response for model ' . $model, __METHOD__);
 		}
 
 		throw new \RuntimeException('Could not detect face positions.');
@@ -422,11 +422,11 @@ class ArticleImageFaceBlurJob extends BaseJob
 		$previewAsset->avoidFilenameConflicts = true;
 		$previewAsset->setScenario(Asset::SCENARIO_CREATE);
 
-		ImageQualityChecker::$skipAssetQueue = true;
+		ImageEnhancer::$skipAssetQueue = true;
 		try {
 			$saved = Craft::$app->elements->saveElement($previewAsset);
 		} finally {
-			ImageQualityChecker::$skipAssetQueue = false;
+			ImageEnhancer::$skipAssetQueue = false;
 		}
 
 		return $saved ? $previewAsset : null;
@@ -442,7 +442,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 	private function getTempReplacementPath(Asset $asset): string
 	{
 		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-quality-checker-');
+		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
 
 		if (!$extension) {
 			return $tempPath;
@@ -519,12 +519,12 @@ class ArticleImageFaceBlurJob extends BaseJob
 
 	private function getStatusCacheKey(): string
 	{
-		return 'image-quality-checker:article-image-enhancement:' . $this->token;
+		return 'image-enhancer:article-image-enhancement:' . $this->token;
 	}
 
 	private function getAssetStatusCacheKey(): string
 	{
-		return 'image-quality-checker:article-image-enhancement-asset:' . $this->assetId;
+		return 'image-enhancer:article-image-enhancement-asset:' . $this->assetId;
 	}
 
 	private function resolveChatGptModel(ClientInterface $client, string $configuredModel, string $apiKey): string
@@ -551,7 +551,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 				return $models[0];
 			}
 		} catch (\Throwable $e) {
-			Craft::warning('ImageQualityChecker: Could not resolve latest OpenAI model for face blur: ' . $e->getMessage(), __METHOD__);
+			Craft::warning('ImageEnhancer: Could not resolve latest OpenAI model for face blur: ' . $e->getMessage(), __METHOD__);
 		}
 
 		return 'gpt-4o';

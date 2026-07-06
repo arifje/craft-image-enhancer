@@ -1,9 +1,9 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\services;
+namespace arjanbrinkman\craftimageenhancer\services;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
+use arjanbrinkman\craftimageenhancer\models\Settings;
 use craft\base\Component;
 use craft\elements\Asset;
 use GuzzleHttp\ClientInterface;
@@ -46,7 +46,7 @@ class AiImageEnhancementService extends Component
 			throw new \RuntimeException($this->getProviderLabel($settings, $providerOptions) . ' API key is missing.');
 		}
 
-		$prompt = ImageQualityChecker::getInstance()->runtimeSettings->getCreativeEnhancementPromptForRequest($settings);
+		$prompt = ImageEnhancer::getInstance()->runtimeSettings->getCreativeEnhancementPromptForRequest($settings);
 
 		return match ($provider) {
 			Settings::IMAGE_PROVIDER_XAI => $this->enhanceWithXai($client, $asset, $localPath, $apiKey, $model, $prompt),
@@ -254,7 +254,7 @@ class AiImageEnhancementService extends Component
 	private function getTempReplacementPath(Asset $asset): string
 	{
 		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-quality-checker-');
+		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
 
 		if (!$extension) {
 			return $tempPath;

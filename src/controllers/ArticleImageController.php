@@ -1,11 +1,11 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\controllers;
+namespace arjanbrinkman\craftimageenhancer\controllers;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
-use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageEnhancementJob;
-use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageFaceBlurJob;
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
+use arjanbrinkman\craftimageenhancer\jobs\ArticleImageEnhancementJob;
+use arjanbrinkman\craftimageenhancer\jobs\ArticleImageFaceBlurJob;
+use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
 use craft\elements\Asset;
 use craft\helpers\UrlHelper;
@@ -28,8 +28,8 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('You do not have permission to enhance this asset.');
 		}
 
-		$settings = ImageQualityChecker::getInstance()->getSettings();
-		$enhancementService = ImageQualityChecker::getInstance()->aiImageEnhancement;
+		$settings = ImageEnhancer::getInstance()->getSettings();
+		$enhancementService = ImageEnhancer::getInstance()->aiImageEnhancement;
 		$providerOptions = $this->getProviderOptionsForRequest($settings);
 		if ($providerOptions === false) {
 			return $this->asJsonFailure('Invalid AI image provider or model.');
@@ -72,12 +72,12 @@ class ArticleImageController extends Controller
 				'assetId' => $asset->id,
 				'jobId' => $jobId,
 				'token' => $token,
-				'statusUrl' => UrlHelper::actionUrl('_image-quality-checker/article-image/status'),
+				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
 				'imageEnhancementProvider' => $providerOptions['provider'] ?? $settings->imageEnhancementProvider,
 				'imageEnhancementModel' => $providerOptions['model'] ?? $enhancementService->getProviderModel($settings, $providerOptions),
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not queue enhancement: ' . $e->getMessage());
 		}
 	}
@@ -105,7 +105,7 @@ class ArticleImageController extends Controller
 		}
 		$useManualFaces = is_array($manualFaces) && !empty($manualFaces);
 
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 		if (!$useManualFaces && trim($settings->chatGptApiKey) === '') {
 			return $this->asJsonFailure('ChatGPT API key is missing.');
 		}
@@ -151,10 +151,10 @@ class ArticleImageController extends Controller
 				'operation' => 'blurFaces',
 				'jobId' => $jobId,
 				'token' => $token,
-				'statusUrl' => UrlHelper::actionUrl('_image-quality-checker/article-image/status'),
+				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Article image face blur queueing failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Article image face blur queueing failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not queue face blur: ' . $e->getMessage());
 		}
 	}
@@ -340,7 +340,7 @@ class ArticleImageController extends Controller
 				Craft::$app->queue->release($jobId);
 				$released = true;
 			} catch (\Throwable $e) {
-				Craft::warning('ImageQualityChecker: Could not release canceled article image enhancement job: ' . $e->getMessage(), __METHOD__);
+				Craft::warning('ImageEnhancer: Could not release canceled article image enhancement job: ' . $e->getMessage(), __METHOD__);
 			}
 		}
 
@@ -416,11 +416,11 @@ class ArticleImageController extends Controller
 				return $this->asJsonFailure('Could not prepare the enhanced file for replacement.');
 			}
 
-			ImageQualityChecker::$skipAssetQueue = true;
+			ImageEnhancer::$skipAssetQueue = true;
 			try {
 				Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			} finally {
-				ImageQualityChecker::$skipAssetQueue = false;
+				ImageEnhancer::$skipAssetQueue = false;
 			}
 
 			$this->deleteElement($previewAsset);
@@ -432,7 +432,7 @@ class ArticleImageController extends Controller
 				'imageUrl' => $this->appendCacheBuster($asset->getUrl()),
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Keeping enhanced article image failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Keeping enhanced article image failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not keep enhanced image: ' . $e->getMessage());
 		} finally {
 			if (isset($tempPath) && file_exists($tempPath)) {
@@ -467,7 +467,7 @@ class ArticleImageController extends Controller
 				'assetId' => $asset->id,
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Discarding enhanced article image failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Discarding enhanced article image failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not discard enhanced image: ' . $e->getMessage());
 		}
 	}
@@ -518,18 +518,18 @@ class ArticleImageController extends Controller
 
 	private function deleteElement(Asset $asset): void
 	{
-		ImageQualityChecker::$skipAssetQueue = true;
+		ImageEnhancer::$skipAssetQueue = true;
 		try {
 			Craft::$app->elements->deleteElement($asset);
 		} finally {
-			ImageQualityChecker::$skipAssetQueue = false;
+			ImageEnhancer::$skipAssetQueue = false;
 		}
 	}
 
 	private function getTempReplacementPath(Asset $asset): string
 	{
 		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-quality-checker-');
+		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
 
 		if (!$extension) {
 			return $tempPath;
@@ -623,12 +623,12 @@ class ArticleImageController extends Controller
 
 	private function getEnhancementStatusCacheKey(string $token): string
 	{
-		return 'image-quality-checker:article-image-enhancement:' . $token;
+		return 'image-enhancer:article-image-enhancement:' . $token;
 	}
 
 	private function getEnhancementAssetStatusCacheKey(int $assetId): string
 	{
-		return 'image-quality-checker:article-image-enhancement-asset:' . $assetId;
+		return 'image-enhancer:article-image-enhancement-asset:' . $assetId;
 	}
 
 	private function asJsonFailure(string $message): Response

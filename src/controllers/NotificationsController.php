@@ -1,8 +1,8 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\controllers;
+namespace arjanbrinkman\craftimageenhancer\controllers;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use Craft;
 use craft\web\Controller;
 use yii\web\Response;
@@ -12,7 +12,7 @@ class NotificationsController extends Controller
 	public function actionTestSlack(): Response
 	{
 		$this->requirePostRequest();
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 
 		$primaryChannel = trim($settings->slackChannel);
 		$errorChannel = trim($settings->slackErrorChannel) ?: $primaryChannel;
@@ -70,7 +70,7 @@ class NotificationsController extends Controller
 
 			return $this->asTestSuccess($sent === 1 ? 'Slack test notification sent via bot token.' : 'Slack test notifications sent via bot token.');
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Slack test notification failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Slack test notification failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asTestFailure('Slack test notification failed: ' . $e->getMessage());
 		}
 	}
@@ -78,7 +78,7 @@ class NotificationsController extends Controller
 	public function actionTestEmail(): Response
 	{
 		$this->requirePostRequest();
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 		$currentUser = Craft::$app->getUser()->getIdentity();
 		$recipient = $settings->emailNotificationRecipient ?: $currentUser?->email;
 
@@ -90,7 +90,7 @@ class NotificationsController extends Controller
 			$sent = Craft::$app->getMailer()->compose()
 				->setTo($recipient)
 				->setSubject('Beeldkwaliteit test')
-				->setHtmlBody('<p><strong>Beeldkwaliteit test</strong></p><p>This test email was sent from Image Quality Checker settings.</p>')
+				->setHtmlBody('<p><strong>Beeldkwaliteit test</strong></p><p>This test email was sent from Image Enhancer settings.</p>')
 				->send();
 
 			if (!$sent) {
@@ -99,7 +99,7 @@ class NotificationsController extends Controller
 
 			return $this->asTestSuccess('Email test notification sent to ' . $recipient . '.');
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Email test notification failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Email test notification failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asTestFailure('Email test notification failed: ' . $e->getMessage());
 		}
 	}
@@ -118,7 +118,7 @@ class NotificationsController extends Controller
 				'type' => 'context',
 				'elements' => [[
 					'type' => 'mrkdwn',
-					'text' => 'Sent from Image Quality Checker settings.',
+					'text' => 'Sent from Image Enhancer settings.',
 				]],
 			],
 		];

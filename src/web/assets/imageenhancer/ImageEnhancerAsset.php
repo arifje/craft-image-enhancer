@@ -1,14 +1,14 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\web\assets\imagequalitychecker;
+namespace arjanbrinkman\craftimageenhancer\web\assets\imageenhancer;
 
 use craft\web\AssetBundle;
 use craft\web\assets\cp\CpAsset;
 
 /**
- * Image Quality Checker asset bundle
+ * Image Enhancer asset bundle
  */
-class ImageQualityCheckerAsset extends AssetBundle
+class ImageEnhancerAsset extends AssetBundle
 {
    public function init(): void
    {

@@ -1,8 +1,8 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\services;
+namespace arjanbrinkman\craftimageenhancer\services;
 
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
 use craft\db\Query;
 use craft\helpers\Db;
@@ -11,7 +11,7 @@ use yii\base\Component;
 
 class RuntimeSettingsService extends Component
 {
-	private const TABLE = '{{%imagequalitychecker_runtime_settings}}';
+	private const TABLE = '{{%imageenhancer_runtime_settings}}';
 
 	public function isQualityCheckEnabled(): bool
 	{
@@ -106,7 +106,7 @@ class RuntimeSettingsService extends Component
 				->from(self::TABLE)
 				->one();
 		} catch (\Throwable $e) {
-			Craft::warning('ImageQualityChecker: Could not read runtime settings: ' . $e->getMessage(), __METHOD__);
+			Craft::warning('ImageEnhancer: Could not read runtime settings: ' . $e->getMessage(), __METHOD__);
 			return [];
 		}
 
