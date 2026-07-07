@@ -466,7 +466,7 @@
 					previewUrl: this.enhancedUrl,
 				});
 				const imageUrl = response.imageUrl || this.enhancedUrl;
-				updateCardImage(this.card, withCacheBuster(imageUrl));
+				refreshAssetFieldImage(this.assetId, withCacheBuster(imageUrl), this.card);
 				if (window.Craft?.cp) {
 					Craft.cp.displayNotice('Enhanced image saved.');
 				}
@@ -663,17 +663,72 @@
 		}
 	}
 
+	function refreshAssetFieldImage(assetId, imageUrl, sourceCard) {
+		if (!assetId || !imageUrl) {
+			return;
+		}
+
+		const cards = getAssetCardsForId(assetId);
+		if (sourceCard) {
+			cards.add(sourceCard);
+		}
+
+		cards.forEach((card) => updateCardImage(card, imageUrl));
+		markAssetFieldsUpdated(cards, assetId, imageUrl);
+		preloadImage(imageUrl);
+	}
+
+	function getAssetCardsForId(assetId) {
+		const cards = new Set();
+		const selector = [
+			`.element[data-id="${assetId}"]`,
+			`.element-card[data-id="${assetId}"]`,
+			`[data-asset-id="${assetId}"]`,
+			`[data-id="${assetId}"][data-type*="Asset"]`,
+		].join(',');
+
+		document.querySelectorAll(selector).forEach((card) => {
+			cards.add(getAssetCard(card));
+		});
+
+		document.querySelectorAll(`input[type="hidden"][value="${assetId}"]`).forEach((input) => {
+			const card = input.closest('.element[data-id], .element-card[data-id], [data-asset-id]');
+			if (card) {
+				cards.add(card);
+			}
+		});
+
+		return cards;
+	}
+
 	function updateCardImage(card, imageUrl) {
 		if (!card || !imageUrl) {
 			return;
 		}
 
+		const oldUrl = getImageUrl(card);
+
 		card.querySelectorAll('img').forEach((image) => {
 			image.removeAttribute('srcset');
+			image.removeAttribute('data-srcset');
+			image.removeAttribute('data-src');
+			image.removeAttribute('data-lazy-src');
+			image.removeAttribute('data-lazy-srcset');
+			image.dataset.src = imageUrl;
 			image.src = imageUrl;
 		});
 
+		card.querySelectorAll('source').forEach((source) => {
+			source.srcset = imageUrl;
+			source.removeAttribute('data-srcset');
+		});
+
 		Array.from(card.querySelectorAll('*')).forEach((node) => {
+			replaceUrlAttributes(node, oldUrl, imageUrl);
+		});
+		replaceUrlAttributes(card, oldUrl, imageUrl);
+
+		[card, ...Array.from(card.querySelectorAll('*'))].forEach((node) => {
 			const style = window.getComputedStyle(node);
 			if (style.backgroundImage && style.backgroundImage !== 'none') {
 				node.style.backgroundImage = `url("${imageUrl}")`;
@@ -684,6 +739,60 @@
 		if (button) {
 			button.dataset.imageEnhancerCpOriginalUrl = imageUrl;
 		}
+	}
+
+	function replaceUrlAttributes(node, oldUrl, imageUrl) {
+		if (!node || !oldUrl) {
+			return;
+		}
+
+		[
+			'src',
+			'srcset',
+			'data-src',
+			'data-srcset',
+			'data-url',
+			'data-image-url',
+			'data-thumb-url',
+			'data-thumbnail-url',
+			'style',
+		].forEach((attribute) => {
+			const value = node.getAttribute?.(attribute);
+			if (value && value.includes(oldUrl)) {
+				node.setAttribute(attribute, value.split(oldUrl).join(imageUrl));
+			}
+		});
+	}
+
+	function markAssetFieldsUpdated(cards, assetId, imageUrl) {
+		cards.forEach((card) => {
+			const field = card.closest('.field');
+			if (!field) {
+				return;
+			}
+
+			field.querySelectorAll(`input[type="hidden"][value="${assetId}"]`).forEach((input) => {
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+			});
+
+			field.dispatchEvent(new CustomEvent('imageenhancer:asset-updated', {
+				bubbles: true,
+				detail: {
+					assetId,
+					imageUrl,
+				},
+			}));
+		});
+
+		if (window.Craft?.cp?.setEdited) {
+			Craft.cp.setEdited(true);
+		}
+	}
+
+	function preloadImage(imageUrl) {
+		const image = new Image();
+		image.src = imageUrl;
 	}
 
 	function withCacheBuster(url) {
