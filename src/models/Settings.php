@@ -141,6 +141,7 @@ PROMPT;
 	
 	// Enabled volume handles
 	public array $allowedAssetFieldHandles = [];
+	public array $cpEnhancerAssetFieldHandles = [];
 
 	// Image enhancement
 	public string $imageEnhancementMode = self::ENHANCEMENT_DISABLED;
@@ -172,7 +173,7 @@ PROMPT;
 			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
 			[['failedEnhancementRetryDelay'], 'integer', 'min' => 0, 'max' => 86400],
 			[['creativeEnhancementClarityLevel', 'creativeEnhancementContrastLevel', 'creativeEnhancementColorLevel', 'creativeEnhancementNoiseReductionLevel'], 'integer', 'min' => self::ENHANCEMENT_LEVEL_MIN, 'max' => self::ENHANCEMENT_LEVEL_MAX],
-			[['allowedAssetFieldHandles'], 'safe'],
+			[['allowedAssetFieldHandles', 'cpEnhancerAssetFieldHandles'], 'safe'],
 		];
 	}
 

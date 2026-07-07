@@ -21,6 +21,7 @@ use craft\db\Table;
 use craft\elements\Asset;
 use craft\elements\Entry;
 use craft\events\RegisterComponentTypesEvent;
+use craft\fields\Assets as AssetsField;
 use craft\services\Elements;
 use craft\services\Utilities;
 use craft\events\ElementEvent;
@@ -95,6 +96,7 @@ class ImageEnhancer extends Plugin
 			'xAiImageEnhancementModelOptions' => Settings::xAiImageEnhancementModelOptions(),
 			'googleImageEnhancementModelOptions' => Settings::googleImageEnhancementModelOptions(),
 			'imageEnhancementFaceHandlingOptions' => Settings::imageEnhancementFaceHandlingOptions(),
+			'assetFieldOptions' => $this->getAssetFieldOptions(),
 		]);
 	}
 
@@ -190,6 +192,7 @@ class ImageEnhancer extends Plugin
 			'imageEnhancementModel' => $settings->imageEnhancementModel,
 			'xAiImageEnhancementModel' => $settings->xAiImageEnhancementModel,
 			'googleImageEnhancementModel' => $settings->googleImageEnhancementModel,
+			'allowedFieldHandles' => $settings->cpEnhancerAssetFieldHandles,
 			'providerOptions' => Settings::imageEnhancementProviderOptions(),
 			'modelOptions' => [
 				Settings::IMAGE_PROVIDER_OPENAI => Settings::imageEnhancementModelOptions(),
@@ -197,6 +200,7 @@ class ImageEnhancer extends Plugin
 				Settings::IMAGE_PROVIDER_GOOGLE => Settings::googleImageEnhancementModelOptions(),
 			],
 			'routes' => [
+				'assetInfo' => 'craft-image-enhancer/article-image/asset-info',
 				'enhance' => 'craft-image-enhancer/article-image/enhance',
 				'status' => 'craft-image-enhancer/article-image/status',
 				'cancel' => 'craft-image-enhancer/article-image/cancel',
@@ -207,6 +211,23 @@ class ImageEnhancer extends Plugin
 
 		Craft::$app->getView()->registerAssetBundle(ImageEnhancerAsset::class);
 		Craft::$app->getView()->registerJs('window.ImageEnhancerCp = ' . Json::htmlEncode($config) . ';', View::POS_HEAD);
+	}
+
+	private function getAssetFieldOptions(): array
+	{
+		$options = [];
+		foreach (Craft::$app->getFields()->getAllFields() as $field) {
+			if (!$field instanceof AssetsField) {
+				continue;
+			}
+
+			$options[] = [
+				'label' => $field->name . ' (' . $field->handle . ')',
+				'value' => $field->handle,
+			];
+		}
+
+		return $options;
 	}
 	
 	private function attachEventHandlers(): void

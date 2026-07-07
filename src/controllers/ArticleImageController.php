@@ -255,6 +255,30 @@ class ArticleImageController extends Controller
 		];
 	}
 
+	public function actionAssetInfo(): Response
+	{
+		$this->requireLogin();
+		$this->requirePostRequest();
+		$this->requireAcceptsJson();
+
+		$asset = $this->getPostedAsset();
+		if (!$asset instanceof Asset) {
+			return $this->asJsonFailure('Asset not found or unsupported.');
+		}
+		if (!$this->canSaveAsset($asset)) {
+			return $this->asJsonFailure('You do not have permission to enhance this asset.');
+		}
+
+		return $this->asJson([
+			'success' => true,
+			'assetId' => $asset->id,
+			'url' => $this->appendCacheBuster($asset->getUrl()),
+			'filename' => $asset->filename,
+			'width' => $asset->width,
+			'height' => $asset->height,
+		]);
+	}
+
 	public function actionStatus(): Response
 	{
 		$this->requireLogin();
@@ -423,13 +447,16 @@ class ArticleImageController extends Controller
 				ImageEnhancer::$skipAssetQueue = false;
 			}
 
+			clearstatcache(true, $this->getFullAssetPath($asset) ?: '');
+			$updatedAsset = Craft::$app->assets->getAssetById((int) $asset->id) ?: $asset;
+
 			$this->deleteElement($previewAsset);
 			$this->deleteEnhancementStatus($token);
 
 			return $this->asJson([
 				'success' => true,
-				'assetId' => $asset->id,
-				'imageUrl' => $this->appendCacheBuster($asset->getUrl()),
+				'assetId' => $updatedAsset->id,
+				'imageUrl' => $this->appendCacheBuster($updatedAsset->getUrl()),
 			]);
 		} catch (\Throwable $e) {
 			Craft::error('ImageEnhancer: Keeping enhanced article image failed: ' . $e->getMessage(), __METHOD__);

@@ -546,4 +546,20 @@
 		name: 'allowedAssetFieldHandles',
 		options: volumeOptions
 	}) }}
+
+	<hr>
+
+	{% set cpEnhancerAssetFieldOptions = [] %}
+	{% for option in assetFieldOptions %}
+		{% set cpEnhancerAssetFieldOptions = cpEnhancerAssetFieldOptions|merge([option|merge({
+			checked: option.value in settings.cpEnhancerAssetFieldHandles
+		})]) %}
+	{% endfor %}
+
+	{{ forms.checkboxGroupField({
+		label: 'Show the CP Enhance action in these asset fields',
+		instructions: 'Select the asset fields that should show the Enhance link in the control panel. If nothing is selected, the action is limited to top-level asset fields and hidden inside Matrix/nested fields.',
+		name: 'cpEnhancerAssetFieldHandles',
+		options: cpEnhancerAssetFieldOptions
+	}) }}
 </div>

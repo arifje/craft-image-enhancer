@@ -7,7 +7,9 @@
 		imageEnhancementModel: 'gpt-image-2',
 		xAiImageEnhancementModel: 'grok-imagine-image-quality',
 		googleImageEnhancementModel: 'gemini-3.1-flash-image',
+		allowedFieldHandles: [],
 		routes: {
+			assetInfo: 'craft-image-enhancer/article-image/asset-info',
 			enhance: 'craft-image-enhancer/article-image/enhance',
 			status: 'craft-image-enhancer/article-image/status',
 			cancel: 'craft-image-enhancer/article-image/cancel',
@@ -91,7 +93,7 @@
 
 		const assetId = getAssetId(card);
 		const originalUrl = getImageUrl(card);
-		if (!assetId || !originalUrl || !isAssetElement(card)) {
+		if (!assetId || !isAssetElement(card) || !isAllowedAssetField(card)) {
 			return;
 		}
 
@@ -134,6 +136,70 @@
 			Boolean(card.closest('[data-type*="Asset"]'));
 
 		return hasAssetHint && Boolean(card.querySelector('img') || getBackgroundImageUrl(card));
+	}
+
+	function isAllowedAssetField(card) {
+		const field = getContainingField(card);
+		const handle = getFieldHandle(field);
+		const allowedHandles = Array.isArray(config.allowedFieldHandles)
+			? config.allowedFieldHandles.filter(Boolean)
+			: [];
+
+		if (allowedHandles.length > 0) {
+			return Boolean(handle && allowedHandles.includes(handle));
+		}
+
+		return Boolean(field && !isNestedField(field) && !isNestedAssetCard(card));
+	}
+
+	function getContainingField(card) {
+		const fields = [];
+		let node = card.closest?.('.field') || null;
+		while (node) {
+			fields.push(node);
+			node = node.parentElement?.closest?.('.field') || null;
+		}
+
+		return fields.find((field) => getFieldHandle(field)) || fields[0] || null;
+	}
+
+	function getFieldHandle(field) {
+		if (!field) {
+			return '';
+		}
+
+		const dataHandle = field.dataset.handle || field.dataset.attribute || field.getAttribute('data-handle') || '';
+		if (dataHandle) {
+			return normalizeFieldHandle(dataHandle);
+		}
+
+		const idMatches = [...String(field.id || '').matchAll(/fields-([A-Za-z0-9_]+)-field/g)];
+		if (idMatches.length > 0) {
+			return idMatches[idMatches.length - 1][1];
+		}
+
+		const input = field.querySelector('input[name], select[name], textarea[name]');
+		const name = input?.getAttribute('name') || '';
+		const nestedMatches = [...name.matchAll(/\[fields\]\[([^\]]+)\]/g)];
+		if (nestedMatches.length > 0) {
+			return nestedMatches[nestedMatches.length - 1][1];
+		}
+
+		const topLevelMatch = name.match(/^fields\[([^\]]+)\]/);
+
+		return topLevelMatch ? topLevelMatch[1] : '';
+	}
+
+	function normalizeFieldHandle(handle) {
+		return String(handle).replace(/^field:/, '').replace(/^fields\./, '');
+	}
+
+	function isNestedField(field) {
+		return Boolean(field.closest('.matrixblock, .matrix-block, .matrixblock-container, .matrix-field, [data-type*="Matrix"], [data-layout-element="matrix"]'));
+	}
+
+	function isNestedAssetCard(card) {
+		return Boolean(card.closest('.matrixblock, .matrix-block, .matrixblock-container, .matrix-field, [data-type*="Matrix"], [data-layout-element="matrix"]'));
 	}
 
 	function getImageUrl(card) {
@@ -179,7 +245,17 @@
 			originalUrl: button.dataset.imageEnhancerCpOriginalUrl || getImageUrl(card),
 			card,
 		});
-		modal.show();
+		button.disabled = true;
+		modal.show()
+			.catch((error) => {
+				const message = error instanceof Error ? error.message : 'Could not open image enhancer.';
+				if (window.Craft?.cp) {
+					Craft.cp.displayError(message);
+				}
+			})
+			.finally(() => {
+				button.disabled = false;
+			});
 	}
 
 	class CpEnhancerModal {
@@ -200,7 +276,8 @@
 			this.root = null;
 		}
 
-		show() {
+		async show() {
+			await this.resolveAssetInfo();
 			this.build();
 
 			if (window.Garnish && window.jQuery && Garnish.$bod) {
@@ -211,6 +288,26 @@
 			} else {
 				document.body.appendChild(this.root);
 				this.root.classList.add('is-visible');
+			}
+		}
+
+		async resolveAssetInfo() {
+			if (!this.assetId) {
+				return;
+			}
+
+			try {
+				const response = await this.request('assetInfo', {
+					assetId: this.assetId,
+				});
+				const assetUrl = response.url || response.assetUrl || response.imageUrl || '';
+				if (assetUrl) {
+					this.originalUrl = assetUrl;
+				}
+			} catch (error) {
+				if (!this.originalUrl) {
+					throw error;
+				}
 			}
 		}
 
