@@ -40,6 +40,7 @@
 		'.field [data-type*="Asset"][data-id]',
 	].join(',');
 	let observer = null;
+	let scanBurstTimer = null;
 
 	function ready(callback) {
 		if (document.readyState === 'loading') {
@@ -57,6 +58,9 @@
 
 		scanAssetFields(document);
 		document.addEventListener('click', onDocumentClick, true);
+		document.addEventListener('click', onPotentialTabChange, true);
+		document.addEventListener('keydown', onPotentialTabChange, true);
+		window.addEventListener('hashchange', scheduleScanBurst);
 		observer = new MutationObserver((mutations) => {
 			mutations.forEach((mutation) => {
 				mutation.addedNodes.forEach((node) => {
@@ -70,6 +74,37 @@
 			childList: true,
 			subtree: true,
 		});
+	}
+
+	function onPotentialTabChange(event) {
+		if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) {
+			return;
+		}
+
+		const target = event.target.closest?.([
+			'a[href^="#"]',
+			'button[role="tab"]',
+			'[role="tab"]',
+			'[data-tab]',
+			'.tabs a',
+			'.pane-tabs a',
+			'.fieldlayout-tabs a',
+		].join(','));
+
+		if (!target) {
+			return;
+		}
+
+		scheduleScanBurst();
+	}
+
+	function scheduleScanBurst() {
+		window.clearTimeout(scanBurstTimer);
+		scanBurstTimer = window.setTimeout(() => {
+			scanAssetFields(document);
+			window.setTimeout(() => scanAssetFields(document), 250);
+			window.setTimeout(() => scanAssetFields(document), 750);
+		}, 50);
 	}
 
 	function scanAssetFields(root) {
