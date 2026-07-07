@@ -72,6 +72,8 @@ class RuntimeSettingsService extends Component
 		?string $creativeEnhancementPromptOverride,
 		?string $faceBlurDetectionPromptOverride
 	): void {
+		$this->ensureRuntimeSettingsSchema();
+
 		$now = Db::prepareDateForDb(new \DateTime());
 		$db = Craft::$app->getDb();
 		$exists = (new Query())
@@ -102,6 +104,8 @@ class RuntimeSettingsService extends Component
 	private function getRuntimeSettingsRow(): array
 	{
 		try {
+			$this->ensureRuntimeSettingsSchema();
+
 			$row = (new Query())
 				->from(self::TABLE)
 				->one();
@@ -111,6 +115,40 @@ class RuntimeSettingsService extends Component
 		}
 
 		return is_array($row) ? $row : [];
+	}
+
+	private function ensureRuntimeSettingsSchema(): void
+	{
+		$db = Craft::$app->getDb();
+		$schema = $db->getSchema();
+		$table = $db->getTableSchema(self::TABLE);
+
+		if ($table === null) {
+			$db->createCommand()
+				->createTable(self::TABLE, [
+					'id' => $schema->createColumnSchemaBuilder('pk'),
+					'qualityCheckEnabled' => $schema->createColumnSchemaBuilder('boolean')->notNull()->defaultValue(true),
+					'creativeEnhancementPromptOverride' => $schema->createColumnSchemaBuilder('text')->null(),
+					'faceBlurDetectionPromptOverride' => $schema->createColumnSchemaBuilder('text')->null(),
+					'dateCreated' => $schema->createColumnSchemaBuilder('datetime')->notNull(),
+					'dateUpdated' => $schema->createColumnSchemaBuilder('datetime')->notNull(),
+					'uid' => $schema->createColumnSchemaBuilder('char', 36),
+				])
+				->execute();
+			return;
+		}
+
+		if ($table->getColumn('creativeEnhancementPromptOverride') === null) {
+			$db->createCommand()
+				->addColumn(self::TABLE, 'creativeEnhancementPromptOverride', $schema->createColumnSchemaBuilder('text')->null())
+				->execute();
+		}
+
+		if ($table->getColumn('faceBlurDetectionPromptOverride') === null) {
+			$db->createCommand()
+				->addColumn(self::TABLE, 'faceBlurDetectionPromptOverride', $schema->createColumnSchemaBuilder('text')->null())
+				->execute();
+		}
 	}
 
 	private function normalizePromptOverride(?string $prompt): ?string
