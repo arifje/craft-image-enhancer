@@ -225,69 +225,96 @@
 		options: imageEnhancementProviderOptions,
 	}) }}
 
-	<div data-image-enhancement-provider-fields="openai">
-		{{ forms.selectField({
-			label: 'OpenAI image enhancement model',
-			name: 'imageEnhancementModel',
-			id: 'imageEnhancementModel',
-			instructions: 'Used when the AI image provider is OpenAI.',
-			value: settings.imageEnhancementModel,
-			options: imageEnhancementModelOptions,
-		}) }}
-	</div>
+	<div class="image-enhancer-provider-settings">
+		<div class="image-enhancer-provider-settings__intro">
+			<h2>Provider credentials and models</h2>
+			<p>Only the selected provider is shown here. When editors can choose in the frontend, all configured providers are shown in this compact overview.</p>
+		</div>
 
-	<div data-image-enhancement-provider-fields="xai">
-		{{ forms.textField({
-			label: 'xAI API key',
-			name: 'xAiApiKey',
-			id: 'xAiApiKey',
-			instructions: 'Used when the AI image provider is Grok Imagine.',
-			value: settings.xAiApiKey,
-			placeholder: 'xai-...',
-		}) }}
+		<div class="image-enhancer-provider-grid">
+			<div class="image-enhancer-provider-card" data-image-enhancement-provider-fields="openai">
+				<div class="image-enhancer-provider-card__header">
+					<h3>OpenAI</h3>
+					<p>Uses the ChatGPT API key from the ChatGPT tab.</p>
+				</div>
 
-		{{ forms.selectField({
-			label: 'Grok Imagine image model',
-			name: 'xAiImageEnhancementModel',
-			id: 'xAiImageEnhancementModel',
-			instructions: 'Used when the AI image provider is Grok Imagine.',
-			value: settings.xAiImageEnhancementModel,
-			options: xAiImageEnhancementModelOptions,
-		}) }}
-	</div>
+				{{ forms.selectField({
+					label: 'Image model',
+					name: 'imageEnhancementModel',
+					id: 'imageEnhancementModel',
+					instructions: 'Used for OpenAI image enhancement.',
+					value: settings.imageEnhancementModel,
+					options: imageEnhancementModelOptions,
+				}) }}
+			</div>
 
-	<div data-image-enhancement-provider-fields="google">
-		{{ forms.textField({
-			label: 'Google AI API key',
-			name: 'googleAiApiKey',
-			id: 'googleAiApiKey',
-			instructions: 'Used when the AI image provider is Google Nano Banana.',
-			value: settings.googleAiApiKey,
-			placeholder: 'AIza...',
-		}) }}
+			<div class="image-enhancer-provider-card" data-image-enhancement-provider-fields="xai">
+				<div class="image-enhancer-provider-card__header">
+					<h3>Grok Imagine</h3>
+					<p>Requires an xAI API key.</p>
+				</div>
 
-		{{ forms.selectField({
-			label: 'Google Nano Banana image model',
-			name: 'googleImageEnhancementModel',
-			id: 'googleImageEnhancementModel',
-			instructions: 'Used when the AI image provider is Google Nano Banana.',
-			value: settings.googleImageEnhancementModel,
-			options: googleImageEnhancementModelOptions,
-		}) }}
+				{{ forms.textField({
+					label: 'API key',
+					name: 'xAiApiKey',
+					id: 'xAiApiKey',
+					instructions: 'Stored in project config and used for Grok Imagine requests.',
+					value: settings.xAiApiKey,
+					placeholder: 'xai-...',
+				}) }}
+
+				{{ forms.selectField({
+					label: 'Image model',
+					name: 'xAiImageEnhancementModel',
+					id: 'xAiImageEnhancementModel',
+					instructions: 'Used for Grok Imagine image enhancement.',
+					value: settings.xAiImageEnhancementModel,
+					options: xAiImageEnhancementModelOptions,
+				}) }}
+			</div>
+
+			<div class="image-enhancer-provider-card" data-image-enhancement-provider-fields="google">
+				<div class="image-enhancer-provider-card__header">
+					<h3>Google Nano Banana</h3>
+					<p>Requires a Google AI API key.</p>
+				</div>
+
+				{{ forms.textField({
+					label: 'API key',
+					name: 'googleAiApiKey',
+					id: 'googleAiApiKey',
+					instructions: 'Stored in project config and used for Google image requests.',
+					value: settings.googleAiApiKey,
+					placeholder: 'AIza...',
+				}) }}
+
+				{{ forms.selectField({
+					label: 'Image model',
+					name: 'googleImageEnhancementModel',
+					id: 'googleImageEnhancementModel',
+					instructions: 'Used for Google Nano Banana image enhancement.',
+					value: settings.googleImageEnhancementModel,
+					options: googleImageEnhancementModelOptions,
+				}) }}
+			</div>
+		</div>
 	</div>
 
 	{% js %}
 		(() => {
 			const providerSelect = document.querySelector('select[name="imageEnhancementProvider"], select[name$="[imageEnhancementProvider]"]');
 			const providerFields = document.querySelectorAll('[data-image-enhancement-provider-fields]');
+			const providerGrid = document.querySelector('.image-enhancer-provider-grid');
 
 			if (!providerSelect || !providerFields.length) {
 				return;
 			}
 
 			const updateProviderFields = () => {
+				const showAll = providerSelect.value === 'frontend';
+				providerGrid?.classList.toggle('image-enhancer-provider-grid--all', showAll);
 				providerFields.forEach((field) => {
-					const isActive = providerSelect.value === 'frontend' || field.dataset.imageEnhancementProviderFields === providerSelect.value;
+					const isActive = showAll || field.dataset.imageEnhancementProviderFields === providerSelect.value;
 					field.hidden = !isActive;
 					field.classList.toggle('hidden', !isActive);
 				});
@@ -298,6 +325,71 @@
 			updateProviderFields();
 		})();
 	{% endjs %}
+
+	{% css %}
+		.image-enhancer-provider-settings {
+			margin: 24px 0 32px;
+			max-width: 1180px;
+		}
+
+		.image-enhancer-provider-settings__intro {
+			margin-bottom: 12px;
+		}
+
+		.image-enhancer-provider-settings__intro h2 {
+			margin: 0 0 4px;
+		}
+
+		.image-enhancer-provider-settings__intro p,
+		.image-enhancer-provider-card__header p {
+			margin: 0;
+			color: #596673;
+		}
+
+		.image-enhancer-provider-grid {
+			display: grid;
+			grid-template-columns: minmax(280px, 520px);
+			gap: 16px;
+		}
+
+		.image-enhancer-provider-grid--all {
+			grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		}
+
+		.image-enhancer-provider-card {
+			padding: 16px;
+			border: 1px solid #dce3ea;
+			border-radius: 8px;
+			background: #f7f9fb;
+		}
+
+		.image-enhancer-provider-card[hidden] {
+			display: none !important;
+		}
+
+		.image-enhancer-provider-card__header {
+			margin-bottom: 14px;
+		}
+
+		.image-enhancer-provider-card__header h3 {
+			margin: 0 0 3px;
+			font-size: 16px;
+		}
+
+		.image-enhancer-provider-card .field {
+			margin: 0 0 14px;
+		}
+
+		.image-enhancer-provider-card .field:last-child {
+			margin-bottom: 0;
+		}
+
+		.image-enhancer-provider-card input.text,
+		.image-enhancer-provider-card select {
+			width: 100%;
+			max-width: 100%;
+		}
+	{% endcss %}
 
 	{{ forms.selectField({
 		label: 'AI face handling',
