@@ -50,6 +50,7 @@
 
 		<img
 			v-else
+			ref="singleImageRef"
 			:key="imageKey"
 			:src="currentSrc"
 			:srcset="currentSrcset || undefined"
@@ -64,11 +65,32 @@
 		>
 
 		<div
+			v-if="isManualBlurMode && !hasPendingPreview"
+			class="article-image-manual-blur-layer"
+			@pointerdown.prevent="startManualBlurDraw"
+			@pointermove.prevent="moveManualBlurDraw"
+			@pointerup.prevent="finishManualBlurDraw"
+			@pointercancel.prevent="cancelManualBlurDraw"
+			@pointerleave="handleManualBlurPointerLeave"
+		>
+			<span
+				v-for="(region, index) in manualBlurRegionsForDisplay"
+				:key="region.id || `manual-region-${index}`"
+				class="article-image-manual-blur-region"
+				:class="{ 'is-drawing': region.isDrawing }"
+				:style="getManualBlurRegionStyle(region)"
+			></span>
+		</div>
+
+		<div
 			v-if="isUiVisible && canShowActions && (!isEnhancing || hasPendingPreview || canCancelEnhancement)"
 			class="article-image-action-bar"
-			:class="{ 'has-provider-controls': canChooseProvider && !hasPendingPreview && !isEnhancing }"
+			:class="{
+				'has-provider-controls': canChooseProvider && !hasPendingPreview && !isEnhancing && !isManualBlurMode,
+				'is-manual-blur': isManualBlurMode,
+			}"
 		>
-			<div v-if="canChooseProvider && !hasPendingPreview && !isEnhancing" class="article-image-provider-controls">
+			<div v-if="canChooseProvider && !hasPendingPreview && !isEnhancing && !isManualBlurMode" class="article-image-provider-controls">
 				<label class="article-image-provider-field">
 					<span>{{ providerLabel }}</span>
 					<select v-model="selectedProvider" class="article-image-provider-select">
@@ -127,6 +149,34 @@
 				</button>
 			</template>
 
+			<div v-else-if="isManualBlurMode" class="article-image-action-buttons article-image-manual-blur-actions">
+				<button
+					type="button"
+					class="uk-button uk-button-small uk-button-primary article-image-button article-image-button-primary"
+					:disabled="isBusy || manualBlurRegions.length === 0"
+					@click.prevent="applyManualBlur"
+				>
+					<span v-if="isBlurringFaces" class="article-image-spinner" aria-hidden="true"></span>
+					<span>{{ isBlurringFaces ? blurringFacesLabel : manualBlurApplyLabel }}</span>
+				</button>
+				<button
+					type="button"
+					class="uk-button uk-button-small uk-button-default article-image-button article-image-button-secondary"
+					:disabled="isBusy || manualBlurRegions.length === 0"
+					@click.prevent="undoManualBlurRegion"
+				>
+					<span>{{ manualBlurUndoLabel }}</span>
+				</button>
+				<button
+					type="button"
+					class="uk-button uk-button-small uk-button-default article-image-button article-image-button-secondary"
+					:disabled="isBusy"
+					@click.prevent="cancelManualBlurMode"
+				>
+					<span>{{ manualBlurCancelLabel }}</span>
+				</button>
+			</div>
+
 			<div v-else-if="!hasPendingPreview" class="article-image-action-buttons">
 				<button
 					type="button"
@@ -145,6 +195,14 @@
 				>
 					<span v-if="isBlurringFaces" class="article-image-spinner" aria-hidden="true"></span>
 					<span>{{ isBlurringFaces ? blurringFacesLabel : blurFacesLabel }}</span>
+				</button>
+				<button
+					type="button"
+					class="uk-button uk-button-small uk-button-default article-image-button article-image-button-secondary"
+					:disabled="isBusy"
+					@click.prevent="startManualBlurMode"
+				>
+					<span>{{ manualBlurLabel }}</span>
 				</button>
 			</div>
 
@@ -215,16 +273,16 @@
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const actionRoutes = {
-	enhance: '_image-quality-checker/article-image/enhance',
-	blurFaces: '_image-quality-checker/article-image/blur-faces',
-	status: '_image-quality-checker/article-image/status',
-	cancel: '_image-quality-checker/article-image/cancel',
-	reset: '_image-quality-checker/article-image/reset',
-	keep: '_image-quality-checker/article-image/keep',
-	discard: '_image-quality-checker/article-image/discard',
+	enhance: 'craft-image-enhancer/article-image/enhance',
+	blurFaces: 'craft-image-enhancer/article-image/blur-faces',
+	status: 'craft-image-enhancer/article-image/status',
+	cancel: 'craft-image-enhancer/article-image/cancel',
+	reset: 'craft-image-enhancer/article-image/reset',
+	keep: 'craft-image-enhancer/article-image/keep',
+	discard: 'craft-image-enhancer/article-image/discard',
 };
 const persistedStatusTtlMs = 6 * 60 * 60 * 1000;
-const providerPreferenceStorageKey = 'image-quality-checker:image-enhancer:provider-preference';
+const providerPreferenceStorageKey = 'craft-image-enhancer:image-enhancer:provider-preference';
 const providerOptions = [
 	{ label: 'OpenAI', value: 'openai' },
 	{ label: 'Grok Imagine', value: 'xai' },
@@ -392,6 +450,22 @@ const props = defineProps({
 		type: String,
 		default: 'Blurring...',
 	},
+	manualBlurLabel: {
+		type: String,
+		default: 'Manual blur',
+	},
+	manualBlurApplyLabel: {
+		type: String,
+		default: 'Apply blur',
+	},
+	manualBlurUndoLabel: {
+		type: String,
+		default: 'Undo',
+	},
+	manualBlurCancelLabel: {
+		type: String,
+		default: 'Cancel',
+	},
 	queuedLabel: {
 		type: String,
 		default: 'Queued...',
@@ -502,6 +576,12 @@ const pollStartedAt = ref(0);
 const component = getCurrentInstance()?.proxy;
 const selectedProvider = ref(getInitialProvider());
 const selectedModel = ref(getInitialModel(selectedProvider.value));
+const singleImageRef = ref(null);
+const isManualBlurMode = ref(false);
+const manualBlurRegions = ref([]);
+const currentManualBlurRegion = ref(null);
+const manualBlurDrawStart = ref(null);
+const manualLayoutTick = ref(0);
 
 const apiTransport = computed(() => (props.apiTransport === 'graphql' ? 'graphql' : 'actions'));
 const isBusy = computed(() => isEnhancing.value || isBlurringFaces.value || isKeeping.value || isDiscarding.value || isCanceling.value || isResetting.value);
@@ -523,6 +603,10 @@ const modelOptionsByProvider = computed(() => ({
 	google: normalizeModelOptions(props.googleImageEnhancementModels, defaultModelOptions.google),
 }));
 const currentProviderModelOptions = computed(() => modelOptionsByProvider.value[selectedProvider.value] || modelOptionsByProvider.value.openai);
+const manualBlurRegionsForDisplay = computed(() => [
+	...manualBlurRegions.value,
+	...(currentManualBlurRegion.value ? [currentManualBlurRegion.value] : []),
+]);
 const imageAspectRatio = computed(() => {
 	const width = Number.parseFloat(props.width) || 1200;
 	const height = Number.parseFloat(props.height) || 675;
@@ -586,6 +670,8 @@ watch(
 		isImageLoaded.value = false;
 		isCompareOriginalLoaded.value = false;
 		isCompareEnhancedLoaded.value = false;
+		isManualBlurMode.value = false;
+		resetManualBlurDrawing();
 		imageKey.value += 1;
 	}
 );
@@ -610,11 +696,17 @@ watch(selectedModel, () => {
 
 onMounted(() => {
 	restoreExistingEnhancementStatus();
+	if (typeof window !== 'undefined') {
+		window.addEventListener('resize', updateManualBlurLayout);
+	}
 });
 
 onBeforeUnmount(() => {
 	clearPolling();
 	clearStatusTimer();
+	if (typeof window !== 'undefined') {
+		window.removeEventListener('resize', updateManualBlurLayout);
+	}
 });
 
 async function enhanceImage(statusText = props.queuedLabel) {
@@ -672,6 +764,7 @@ async function blurFaces(statusText = props.queuedLabel) {
 	}
 
 	log('function/blurFaces/start');
+	cancelManualBlurMode();
 	lastOperation.value = 'blurFaces';
 	errorMessage.value = '';
 	activeJob.value = null;
@@ -716,8 +809,107 @@ async function blurFaces(statusText = props.queuedLabel) {
 	}
 }
 
+function startManualBlurMode() {
+	if (isBusy.value || hasPendingPreview.value) {
+		return;
+	}
+
+	log('function/startManualBlurMode/start');
+	errorMessage.value = '';
+	isManualBlurMode.value = true;
+	updateManualBlurLayout();
+}
+
+function cancelManualBlurMode() {
+	if (!isManualBlurMode.value && manualBlurRegions.value.length === 0 && !currentManualBlurRegion.value) {
+		return;
+	}
+
+	log('function/cancelManualBlurMode/start');
+	isManualBlurMode.value = false;
+	resetManualBlurDrawing();
+}
+
+function undoManualBlurRegion() {
+	if (manualBlurRegions.value.length === 0 || isBusy.value) {
+		return;
+	}
+
+	manualBlurRegions.value = manualBlurRegions.value.slice(0, -1);
+	log(`function/undoManualBlurRegion/count/${manualBlurRegions.value.length}`);
+}
+
+async function applyManualBlur(statusText = props.queuedLabel) {
+	if (typeof statusText !== 'string') {
+		statusText = props.queuedLabel;
+	}
+	if (manualBlurRegions.value.length === 0) {
+		return;
+	}
+
+	log(`function/applyManualBlur/start/${manualBlurRegions.value.length}`);
+	lastOperation.value = 'manualBlurFaces';
+	errorMessage.value = '';
+	activeJob.value = null;
+	preview.value = null;
+	clearPersistedEnhancementStatus();
+	isEnhancing.value = false;
+	isBlurringFaces.value = true;
+	remoteStatusLabel.value = statusText;
+	setEnhancementStatus('queued');
+
+	try {
+		const manualFaces = manualBlurRegions.value.map(({ x, y, width, height }) => ({
+			x,
+			y,
+			width,
+			height,
+			source: 'manual',
+		}));
+		const response = await requestApi('blurFaces', {
+			assetId: props.assetId,
+			manualFaces: apiTransport.value === 'actions' ? JSON.stringify(manualFaces) : manualFaces,
+		});
+
+		if (response.queued || response.token || response.jobId) {
+			startPolling({
+				...response,
+				operation: 'manualBlurFaces',
+			});
+			isManualBlurMode.value = false;
+			log('function/applyManualBlur/queued');
+			return;
+		}
+
+		applyEnhancedPreview({
+			...response,
+			operation: 'manualBlurFaces',
+		});
+		isManualBlurMode.value = false;
+		resetManualBlurDrawing();
+		clearStatusTimer();
+		clearOperationState();
+		remoteStatusLabel.value = '';
+		log('function/applyManualBlur/direct-complete');
+	} catch (error) {
+		handleError(error);
+		clearStatusTimer();
+		clearOperationState();
+		remoteStatusLabel.value = '';
+	} finally {
+		if (!activeJob.value) {
+			clearOperationState();
+		}
+	}
+}
+
 async function retryEnhancement() {
 	log('function/retryEnhancement/start');
+
+	if (lastOperation.value === 'manualBlurFaces' && manualBlurRegions.value.length > 0) {
+		await applyManualBlur(props.retryingLabel);
+		return;
+	}
 
 	if (lastOperation.value === 'blurFaces') {
 		await blurFaces(props.retryingLabel);
@@ -733,8 +925,8 @@ function toggleUi() {
 }
 
 function setOperationState(operation) {
-	isEnhancing.value = operation !== 'blurFaces';
-	isBlurringFaces.value = operation === 'blurFaces';
+	isEnhancing.value = !isBlurOperation(operation);
+	isBlurringFaces.value = isBlurOperation(operation);
 }
 
 function clearOperationState() {
@@ -743,7 +935,11 @@ function clearOperationState() {
 }
 
 function getOperationProgressLabel(operation) {
-	return operation === 'blurFaces' ? props.blurringFacesLabel : props.enhancingLabel;
+	return isBlurOperation(operation) ? props.blurringFacesLabel : props.enhancingLabel;
+}
+
+function isBlurOperation(operation) {
+	return operation === 'blurFaces' || operation === 'manualBlurFaces';
 }
 
 async function resetEnhancementStatus() {
@@ -1167,6 +1363,10 @@ function applyEnhancedPreview(response) {
 		url: enhancedUrl,
 		response,
 	};
+	if (response.operation === 'manualBlurFaces' || response.blurMode === 'manual') {
+		isManualBlurMode.value = false;
+		resetManualBlurDrawing();
+	}
 	persistEnhancementStatus(response);
 	currentSrc.value = enhancedUrl;
 	currentSrcset.value = '';
@@ -1224,7 +1424,183 @@ function resetToOriginalImage() {
 	isCompareOriginalLoaded.value = false;
 	isCompareEnhancedLoaded.value = false;
 	comparisonPosition.value = 50;
+	isManualBlurMode.value = false;
+	resetManualBlurDrawing();
 	imageKey.value += 1;
+}
+
+function startManualBlurDraw(event) {
+	if (!isManualBlurMode.value || isBusy.value || event.button !== 0) {
+		return;
+	}
+
+	const point = getManualBlurPoint(event);
+	if (!point) {
+		return;
+	}
+
+	manualBlurDrawStart.value = point;
+	currentManualBlurRegion.value = {
+		id: `drawing-${Date.now()}`,
+		x: point.x,
+		y: point.y,
+		width: 0,
+		height: 0,
+		isDrawing: true,
+	};
+
+	if (event.currentTarget?.setPointerCapture) {
+		event.currentTarget.setPointerCapture(event.pointerId);
+	}
+}
+
+function moveManualBlurDraw(event) {
+	if (!manualBlurDrawStart.value || !currentManualBlurRegion.value) {
+		return;
+	}
+
+	const point = getManualBlurPoint(event);
+	if (!point) {
+		return;
+	}
+
+	currentManualBlurRegion.value = createManualBlurRegion(manualBlurDrawStart.value, point, true);
+}
+
+function finishManualBlurDraw(event) {
+	if (!manualBlurDrawStart.value || !currentManualBlurRegion.value) {
+		return;
+	}
+
+	const point = getManualBlurPoint(event);
+	const region = point ? createManualBlurRegion(manualBlurDrawStart.value, point, false) : null;
+
+	if (region && region.width >= 8 && region.height >= 8) {
+		manualBlurRegions.value = [
+			...manualBlurRegions.value,
+			{
+				...region,
+				id: `manual-${Date.now()}-${manualBlurRegions.value.length}`,
+			},
+		];
+		log(`function/finishManualBlurDraw/count/${manualBlurRegions.value.length}`);
+	}
+
+	cancelManualBlurDraw(event);
+}
+
+function cancelManualBlurDraw(event) {
+	if (event?.currentTarget?.releasePointerCapture && event.pointerId !== undefined) {
+		try {
+			event.currentTarget.releasePointerCapture(event.pointerId);
+		} catch (error) {
+			log(`function/cancelManualBlurDraw/release-error/${error instanceof Error ? error.message : 'unknown'}`);
+		}
+	}
+
+	manualBlurDrawStart.value = null;
+	currentManualBlurRegion.value = null;
+}
+
+function handleManualBlurPointerLeave(event) {
+	if (!manualBlurDrawStart.value || event.currentTarget?.hasPointerCapture?.(event.pointerId)) {
+		return;
+	}
+
+	cancelManualBlurDraw(event);
+}
+
+function createManualBlurRegion(start, end, isDrawing) {
+	const x = Math.min(start.x, end.x);
+	const y = Math.min(start.y, end.y);
+	const width = Math.abs(end.x - start.x);
+	const height = Math.abs(end.y - start.y);
+
+	return {
+		id: isDrawing ? 'drawing' : '',
+		x,
+		y,
+		width,
+		height,
+		isDrawing,
+	};
+}
+
+function getManualBlurPoint(event) {
+	const metrics = getImageDisplayMetrics();
+	if (!metrics) {
+		return null;
+	}
+
+	const x = ((event.clientX - metrics.rect.left - metrics.offsetX) / metrics.displayWidth) * 1000;
+	const y = ((event.clientY - metrics.rect.top - metrics.offsetY) / metrics.displayHeight) * 1000;
+
+	return {
+		x: clampManualBlurCoordinate(x),
+		y: clampManualBlurCoordinate(y),
+	};
+}
+
+function getManualBlurRegionStyle(region) {
+	manualLayoutTick.value;
+	const metrics = getImageDisplayMetrics();
+
+	if (!metrics) {
+		return {
+			left: `${region.x / 10}%`,
+			top: `${region.y / 10}%`,
+			width: `${region.width / 10}%`,
+			height: `${region.height / 10}%`,
+		};
+	}
+
+	return {
+		left: `${metrics.offsetX + (region.x / 1000) * metrics.displayWidth}px`,
+		top: `${metrics.offsetY + (region.y / 1000) * metrics.displayHeight}px`,
+		width: `${(region.width / 1000) * metrics.displayWidth}px`,
+		height: `${(region.height / 1000) * metrics.displayHeight}px`,
+	};
+}
+
+function getImageDisplayMetrics() {
+	const image = singleImageRef.value;
+	if (!image) {
+		return null;
+	}
+
+	const rect = image.getBoundingClientRect();
+	const naturalWidth = image.naturalWidth || Number.parseFloat(props.width) || rect.width;
+	const naturalHeight = image.naturalHeight || Number.parseFloat(props.height) || rect.height;
+
+	if (!rect.width || !rect.height || !naturalWidth || !naturalHeight) {
+		return null;
+	}
+
+	const scale = Math.max(rect.width / naturalWidth, rect.height / naturalHeight);
+	const displayWidth = naturalWidth * scale;
+	const displayHeight = naturalHeight * scale;
+
+	return {
+		rect,
+		displayWidth,
+		displayHeight,
+		offsetX: (rect.width - displayWidth) / 2,
+		offsetY: (rect.height - displayHeight) / 2,
+	};
+}
+
+function clampManualBlurCoordinate(value) {
+	return Math.max(0, Math.min(1000, Math.round(value)));
+}
+
+function resetManualBlurDrawing() {
+	manualBlurRegions.value = [];
+	currentManualBlurRegion.value = null;
+	manualBlurDrawStart.value = null;
+}
+
+function updateManualBlurLayout() {
+	manualLayoutTick.value += 1;
 }
 
 function getActionUrl(action) {
@@ -1239,7 +1615,7 @@ function getPersistedStatusKey() {
 		return '';
 	}
 
-	return `image-quality-checker:image-enhancer:${props.assetId}`;
+	return `craft-image-enhancer:image-enhancer:${props.assetId}`;
 }
 
 function getPersistedEnhancementStatus() {
@@ -1641,6 +2017,37 @@ function log(message) {
 	opacity: 0;
 }
 
+.article-image-manual-blur-layer {
+	position: absolute;
+	inset: 0;
+	z-index: 6;
+	overflow: hidden;
+	cursor: crosshair;
+	touch-action: none;
+	background: rgba(0, 0, 0, 0.08);
+}
+
+.article-image-manual-blur-region {
+	position: absolute;
+	display: block;
+	min-width: 8px;
+	min-height: 8px;
+	border: 2px solid rgba(255, 255, 255, 0.96);
+	border-radius: 50%;
+	background: rgba(255, 90, 0, 0.24);
+	box-shadow:
+		0 0 0 2px rgba(255, 90, 0, 0.9),
+		0 2px 12px rgba(0, 0, 0, 0.28);
+	pointer-events: none;
+}
+
+.article-image-manual-blur-region.is-drawing {
+	background: rgba(255, 90, 0, 0.16);
+	box-shadow:
+		0 0 0 2px rgba(255, 90, 0, 0.72),
+		0 2px 12px rgba(0, 0, 0, 0.22);
+}
+
 .article-image-action-bar {
 	position: absolute;
 	top: 12px;
@@ -1662,6 +2069,10 @@ function log(message) {
 .article-image-action-bar.has-provider-controls {
 	flex-direction: column;
 	align-items: flex-end;
+	width: min(316px, calc(100% - 24px));
+}
+
+.article-image-action-bar.is-manual-blur {
 	width: min(316px, calc(100% - 24px));
 }
 
@@ -1698,7 +2109,7 @@ function log(message) {
 
 .article-image-action-buttons {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
 	gap: 6px;
 	width: 100%;
 }

@@ -1,9 +1,9 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\jobs;
+namespace arjanbrinkman\craftimageenhancer\jobs;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
+use arjanbrinkman\craftimageenhancer\models\Settings;
 
 use Craft;
 use craft\queue\BaseJob;
@@ -28,10 +28,10 @@ class AnalyzeImageJob extends BaseJob
 	 */
 	public function execute($queue): void
 	{
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 		$this->updateProgress($queue, 0.05, 'Loading asset');
 
-		if (!ImageQualityChecker::getInstance()->runtimeSettings->isQualityCheckEnabled()) {
+		if (!ImageEnhancer::getInstance()->runtimeSettings->isQualityCheckEnabled()) {
 			$this->debugLog($settings, 'Skipping analysis because the plugin is disabled', [
 				'assetId' => $this->assetId,
 			]);
@@ -58,7 +58,7 @@ class AnalyzeImageJob extends BaseJob
 			$this->debugLog($settings, 'Skipping asset because it was not found or is not an image', [
 				'assetId' => $this->assetId,
 			]);
-			Craft::info("ImageQualityChecker/AnalyzeImageJob: Asset not found or not an image.", __METHOD__);
+			Craft::info("ImageEnhancer/AnalyzeImageJob: Asset not found or not an image.", __METHOD__);
 			$this->updateProgress($queue, 1, 'Skipped: asset not found');
 			return;
 		}
@@ -77,7 +77,7 @@ class AnalyzeImageJob extends BaseJob
 			$this->debugLog($settings, 'Skipping asset because no volumes are selected', [
 				'volumeHandle' => $volumeHandle,
 			]);
-			Craft::info("ImageQualityChecker/AnalyzeImageJob: No asset fields selected in settings — skipping.", __METHOD__);
+			Craft::info("ImageEnhancer/AnalyzeImageJob: No asset fields selected in settings — skipping.", __METHOD__);
 			$this->updateProgress($queue, 1, 'Skipped: no volumes selected');
 			return;
 		} 
@@ -87,7 +87,7 @@ class AnalyzeImageJob extends BaseJob
 				'volumeHandle' => $volumeHandle,
 				'allowedHandles' => $allowedHandles,
 			]);
-			Craft::info("ImageQualityChecker/AnalyzeImageJob: Asset uploaded via non-selected volume '{$volumeHandle}' — skipping.", __METHOD__);
+			Craft::info("ImageEnhancer/AnalyzeImageJob: Asset uploaded via non-selected volume '{$volumeHandle}' — skipping.", __METHOD__);
 			$this->updateProgress($queue, 1, 'Skipped: volume not selected');
 			return;
 		} 
@@ -99,7 +99,7 @@ class AnalyzeImageJob extends BaseJob
 				'assetId' => $asset->id,
 				'localPath' => $localPath,
 			]);
-			Craft::warning("ImageQualityChecker/AnalyzeImageJob: File not found for asset ID {$asset->id}", __METHOD__);
+			Craft::warning("ImageEnhancer/AnalyzeImageJob: File not found for asset ID {$asset->id}", __METHOD__);
 			$this->updateProgress($queue, 1, 'Skipped: file not found');
 			return;
 		}
@@ -186,7 +186,7 @@ class AnalyzeImageJob extends BaseJob
 				'error' => $e->getMessage(),
 				'resolvedModel' => $model,
 			]);
-			Craft::error('ImageQualityChecker: OpenAI analysis request failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: OpenAI analysis request failed: ' . $e->getMessage(), __METHOD__);
 			$this->updateProgress($queue, 1, 'Failed: quality check request failed');
 			return;
 		}
@@ -301,7 +301,7 @@ class AnalyzeImageJob extends BaseJob
 	{
 		if (!class_exists(Imagick::class)) {
 			$this->debugLog($settings, 'Imagick enhancement skipped because Imagick is not available');
-			Craft::warning('ImageQualityChecker: Imagick is required for safe image enhancement.', __METHOD__);
+			Craft::warning('ImageEnhancer: Imagick is required for safe image enhancement.', __METHOD__);
 			return [
 				'label' => 'Niet vervangen',
 				'status' => 'Safe optimization mislukt: Imagick ontbreekt.',
@@ -359,7 +359,7 @@ class AnalyzeImageJob extends BaseJob
 			$this->debugLog($settings, 'Imagick enhancement failed', [
 				'error' => $e->getMessage(),
 			]);
-			Craft::error('ImageQualityChecker: Safe image enhancement failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Safe image enhancement failed: ' . $e->getMessage(), __METHOD__);
 
 			return [
 				'label' => 'Niet vervangen',
@@ -386,8 +386,9 @@ class AnalyzeImageJob extends BaseJob
 
 		try {
 			[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
-			$creativeEnhancementPrompt = $settings->getCreativeEnhancementPromptForRequest();
-			$enhancementService = ImageQualityChecker::getInstance()->aiImageEnhancement;
+			$runtimeSettings = ImageEnhancer::getInstance()->runtimeSettings;
+			$creativeEnhancementPrompt = $runtimeSettings->getCreativeEnhancementPromptForRequest($settings);
+			$enhancementService = ImageEnhancer::getInstance()->aiImageEnhancement;
 			$providerLabel = $enhancementService->getProviderLabel($settings);
 			$this->debugLog($settings, 'Starting AI image enhancement', [
 				'assetId' => $asset->id,
@@ -397,6 +398,7 @@ class AnalyzeImageJob extends BaseJob
 				'imageEnhancementModel' => $enhancementService->getProviderModel($settings),
 				'imageEnhancementFaceHandling' => $settings->imageEnhancementFaceHandling,
 				'creativeEnhancementTuningLevels' => $settings->getCreativeEnhancementTuningLevels(),
+				'creativeEnhancementPromptSource' => $runtimeSettings->hasCreativeEnhancementPromptOverride() ? 'runtime' : 'plugin-settings',
 				'creativeEnhancementPromptLength' => strlen($creativeEnhancementPrompt),
 				'creativeEnhancementPromptHash' => hash('sha256', $creativeEnhancementPrompt),
 				'creativeEnhancementTuningPrompt' => $settings->getCreativeEnhancementTuningPrompt(),
@@ -425,7 +427,7 @@ class AnalyzeImageJob extends BaseJob
 			$this->debugLog($settings, 'AI image enhancement failed', [
 				'error' => $e->getMessage(),
 			]);
-			Craft::error('ImageQualityChecker: AI image enhancement failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: AI image enhancement failed: ' . $e->getMessage(), __METHOD__);
 
 			return [
 				'label' => 'Niet vervangen',
@@ -574,7 +576,7 @@ class AnalyzeImageJob extends BaseJob
 				$this->debugLog($settings, 'Adding enhanced image failed', [
 					'error' => $e->getMessage(),
 				]);
-				Craft::error('ImageQualityChecker: Adding enhanced image failed: ' . $e->getMessage(), __METHOD__);
+				Craft::error('ImageEnhancer: Adding enhanced image failed: ' . $e->getMessage(), __METHOD__);
 
 				return [
 					'label' => 'Niet toegevoegd',
@@ -673,11 +675,11 @@ class AnalyzeImageJob extends BaseJob
 		$enhancedAsset->avoidFilenameConflicts = true;
 		$enhancedAsset->setScenario(Asset::SCENARIO_CREATE);
 
-		ImageQualityChecker::$skipAssetQueue = true;
+		ImageEnhancer::$skipAssetQueue = true;
 		try {
 			$saved = Craft::$app->elements->saveElement($enhancedAsset);
 		} finally {
-			ImageQualityChecker::$skipAssetQueue = false;
+			ImageEnhancer::$skipAssetQueue = false;
 		}
 
 		if (!$saved) {
@@ -735,14 +737,14 @@ class AnalyzeImageJob extends BaseJob
 				'targetWidth' => $targetWidth,
 				'targetHeight' => $targetHeight,
 			]);
-			Craft::warning('ImageQualityChecker: AI replacement dimension normalization failed: ' . $e->getMessage(), __METHOD__);
+			Craft::warning('ImageEnhancer: AI replacement dimension normalization failed: ' . $e->getMessage(), __METHOD__);
 		}
 	}
 
 	private function getTempReplacementPath(Asset $asset): string
 	{
 		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-quality-checker-');
+		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
 
 		if (!$extension) {
 			return $tempPath;
@@ -830,7 +832,7 @@ class AnalyzeImageJob extends BaseJob
 			return;
 		}
 
-		$line = 'ImageQualityChecker DEBUG: ' . $message;
+		$line = 'ImageEnhancer DEBUG: ' . $message;
 
 		if (!empty($context)) {
 			$line .= ' ' . json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -851,7 +853,7 @@ class AnalyzeImageJob extends BaseJob
 	 */
 	private function sendSlackNotification(array $data): void
 	{
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 	
 		if (!$settings->slackNotification) {
 			$this->debugLog($settings, 'Slack notification skipped because Slack notifications are disabled');
@@ -922,7 +924,7 @@ class AnalyzeImageJob extends BaseJob
 				$this->debugLog($settings, 'Slack bot API returned an error', [
 					'error' => $responseData['error'] ?? null,
 				]);
-				Craft::warning('ImageQualityChecker: Slack API error: ' . ($responseData['error'] ?? 'unknown'), __METHOD__);
+				Craft::warning('ImageEnhancer: Slack API error: ' . ($responseData['error'] ?? 'unknown'), __METHOD__);
 				return;
 			}
 			$this->debugLog($settings, 'Slack bot notification sent');
@@ -930,7 +932,7 @@ class AnalyzeImageJob extends BaseJob
 			$this->debugLog($settings, 'Slack notification failed', [
 				'error' => $e->getMessage(),
 			]);
-			Craft::error('ImageQualityChecker: Slack notification failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Slack notification failed: ' . $e->getMessage(), __METHOD__);
 		}
 	}
 
@@ -942,7 +944,7 @@ class AnalyzeImageJob extends BaseJob
 	 */
 	private function sendEmailNotification(array $data): void
 	{
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 	
 		if (!$settings->emailNotification) {
 			$this->debugLog($settings, 'Email notification skipped because email notifications are disabled');
@@ -957,7 +959,7 @@ class AnalyzeImageJob extends BaseJob
 			$this->debugLog($settings, 'Email notification skipped because no author email could be resolved', [
 				'author' => $author,
 			]);
-			Craft::warning("ImageQualityChecker: Auteur heeft geen geldig e-mailadres, e-mail wordt niet verzonden.", __METHOD__);
+			Craft::warning("ImageEnhancer: Auteur heeft geen geldig e-mailadres, e-mail wordt niet verzonden.", __METHOD__);
 			return;
 		}
 	
@@ -1075,7 +1077,7 @@ class AnalyzeImageJob extends BaseJob
 				return $models[0];
 			}
 		} catch (\Throwable $e) {
-			Craft::warning('ImageQualityChecker: Could not resolve latest OpenAI model: ' . $e->getMessage(), __METHOD__);
+			Craft::warning('ImageEnhancer: Could not resolve latest OpenAI model: ' . $e->getMessage(), __METHOD__);
 		}
 
 		return 'gpt-4o';

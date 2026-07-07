@@ -1,8 +1,8 @@
 (function () {
 	function checkAndShow() {
 		if (typeof Craft !== 'undefined' && Craft.cp) {
-			if (window.imageQualityModalMessage) {
-				showQualityModal(window.imageQualityModalMessage);
+			if (window.imageEnhancerModalMessage) {
+				showQualityModal(window.imageEnhancerModalMessage);
 			}
 		} else {
 			requestAnimationFrame(checkAndShow);

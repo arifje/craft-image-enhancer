@@ -1,12 +1,12 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\models;
+namespace arjanbrinkman\craftimageenhancer\models;
 
 use Craft;
 use craft\base\Model;
 
 /**
- * Image Quality Checker settings
+ * Image Enhancer settings
  */
 class Settings extends Model
 {

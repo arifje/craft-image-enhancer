@@ -1,8 +1,8 @@
 {
-  "name": "arjan-brinkman/craft-image-quality-checker",
-  "description": "Checks an image after upload on multiple quality criterias like blurriness, resolution, noise, and alerts user.",
+  "name": "arjan-brinkman/craft-image-enhancer",
+  "description": "Checks, enhances, and anonymizes image assets with AI and local image tooling.",
   "type": "craft-plugin",
-  "version": "1.13.7",
+  "version": "1.14.1",
   "require": {
     "php": ">=8.2",
     "craftcms/cms": "^4.0.0|^5.0.0"
@@ -13,15 +13,15 @@
   },
   "autoload": {
     "psr-4": {
-      "arjanbrinkman\\craftimagequalitychecker\\": "src/"
+      "arjanbrinkman\\craftimageenhancer\\": "src/"
     }
   },
   "extra": {
-    "handle": "_image-quality-checker",
-    "name": "Image Quality Checker",
+    "handle": "craft-image-enhancer",
+    "name": "Image Enhancer",
     "developer": "Arjan Brinkman",
     "documentationUrl": "",
-    "class": "arjanbrinkman\\craftimagequalitychecker\\ImageQualityChecker"
+    "class": "arjanbrinkman\\craftimageenhancer\\ImageEnhancer"
   },
   "scripts": {
     "check-cs": "ecs check --ansi",

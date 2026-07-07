@@ -1,16 +1,16 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker;
+namespace arjanbrinkman\craftimageenhancer;
 
 use Craft;
 
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
-use arjanbrinkman\craftimagequalitychecker\services\AiImageEnhancementService;
-use arjanbrinkman\craftimagequalitychecker\services\ImageQualityService;
-use arjanbrinkman\craftimagequalitychecker\services\RuntimeSettingsService;
-use arjanbrinkman\craftimagequalitychecker\jobs\AnalyzeImageJob;
-use arjanbrinkman\craftimagequalitychecker\utilities\QualityCheckUtility;
-use arjanbrinkman\craftimagequalitychecker\web\assets\imagequalitychecker\ImageQualityCheckerAsset;
+use arjanbrinkman\craftimageenhancer\models\Settings;
+use arjanbrinkman\craftimageenhancer\services\AiImageEnhancementService;
+use arjanbrinkman\craftimageenhancer\services\ImageQualityService;
+use arjanbrinkman\craftimageenhancer\services\RuntimeSettingsService;
+use arjanbrinkman\craftimageenhancer\jobs\AnalyzeImageJob;
+use arjanbrinkman\craftimageenhancer\utilities\QualityCheckUtility;
+use arjanbrinkman\craftimageenhancer\web\assets\imageenhancer\ImageEnhancerAsset;
 
 use yii\base\Event;
 
@@ -24,20 +24,21 @@ use craft\events\RegisterComponentTypesEvent;
 use craft\services\Elements;
 use craft\services\Utilities;
 use craft\events\ElementEvent;
+use craft\helpers\Json;
 use craft\web\View;
 use craft\events\TemplateEvent;
 
 /**
- * Image Quality Checker plugin
+ * Image Enhancer plugin
  *
- * @method static ImageQualityChecker getInstance()
+ * @method static ImageEnhancer getInstance()
  * @method Settings getSettings()
  * @property AiImageEnhancementService $aiImageEnhancement
  * @property RuntimeSettingsService $runtimeSettings
  */
-class ImageQualityChecker extends Plugin
+class ImageEnhancer extends Plugin
 {
-	public string $schemaVersion = '1.1.0';
+	public string $schemaVersion = '1.2.0';
 	public bool $hasCpSettings = true;
 	public static bool $skipAssetQueue = false;
 
@@ -57,12 +58,13 @@ class ImageQualityChecker extends Plugin
 		parent::init();
 
 		// Register HUD message if flash exists
-		if (Craft::$app->getRequest()->getIsCpRequest() && Craft::$app->getSession()->hasFlash('imageQualityModalWarning')) {
-			$flash = Craft::$app->getSession()->getFlash('imageQualityModalWarning');
-			Craft::$app->getView()->registerAssetBundle(ImageQualityCheckerAsset::class);
-			Craft::$app->getView()->registerJs("window.imageQualityModalMessage = " . $flash . ";", \yii\web\View::POS_HEAD);
+		if (Craft::$app->getRequest()->getIsCpRequest() && Craft::$app->getSession()->hasFlash('imageEnhancerModalWarning')) {
+			$flash = Craft::$app->getSession()->getFlash('imageEnhancerModalWarning');
+			Craft::$app->getView()->registerAssetBundle(ImageEnhancerAsset::class);
+			Craft::$app->getView()->registerJs("window.imageEnhancerModalMessage = " . $flash . ";", \yii\web\View::POS_HEAD);
 		}
 
+		$this->registerCpFieldEnhancer();
 		$this->attachEventHandlers();
 		$this->registerUtilities();
 
@@ -81,7 +83,7 @@ class ImageQualityChecker extends Plugin
 
 	protected function settingsHtml(): ?string
 	{
-		return Craft::$app->view->renderTemplate('_image-quality-checker/_settings.twig', [
+		return Craft::$app->view->renderTemplate('craft-image-enhancer/_settings.twig', [
 			'plugin' => $this,
 			'settings' => $this->getSettings(),
 			'chatGptModelOptions' => $this->getChatGptModelOptions(),
@@ -117,7 +119,7 @@ class ImageQualityChecker extends Plugin
 					}
 				}
 			} catch (\Throwable $e) {
-				Craft::warning('ImageQualityChecker: Could not fetch OpenAI models: ' . $e->getMessage(), __METHOD__);
+				Craft::warning('ImageEnhancer: Could not fetch OpenAI models: ' . $e->getMessage(), __METHOD__);
 			}
 		}
 
@@ -164,6 +166,48 @@ class ImageQualityChecker extends Plugin
 			}
 		);
 	}
+
+	private function registerCpFieldEnhancer(): void
+	{
+		$request = Craft::$app->getRequest();
+		if (!$request->getIsCpRequest()) {
+			return;
+		}
+
+		if (method_exists($request, 'getIsActionRequest') && $request->getIsActionRequest()) {
+			return;
+		}
+
+		$user = Craft::$app->getUser()->getIdentity();
+		if (!$user) {
+			return;
+		}
+
+		$settings = $this->getSettings();
+		$config = [
+			'providerChoiceEnabled' => $settings->imageEnhancementProvider === Settings::IMAGE_PROVIDER_FRONTEND,
+			'imageEnhancementProvider' => $settings->imageEnhancementProvider,
+			'imageEnhancementModel' => $settings->imageEnhancementModel,
+			'xAiImageEnhancementModel' => $settings->xAiImageEnhancementModel,
+			'googleImageEnhancementModel' => $settings->googleImageEnhancementModel,
+			'providerOptions' => Settings::imageEnhancementProviderOptions(),
+			'modelOptions' => [
+				Settings::IMAGE_PROVIDER_OPENAI => Settings::imageEnhancementModelOptions(),
+				Settings::IMAGE_PROVIDER_XAI => Settings::xAiImageEnhancementModelOptions(),
+				Settings::IMAGE_PROVIDER_GOOGLE => Settings::googleImageEnhancementModelOptions(),
+			],
+			'routes' => [
+				'enhance' => 'craft-image-enhancer/article-image/enhance',
+				'status' => 'craft-image-enhancer/article-image/status',
+				'cancel' => 'craft-image-enhancer/article-image/cancel',
+				'keep' => 'craft-image-enhancer/article-image/keep',
+				'discard' => 'craft-image-enhancer/article-image/discard',
+			],
+		];
+
+		Craft::$app->getView()->registerAssetBundle(ImageEnhancerAsset::class);
+		Craft::$app->getView()->registerJs('window.ImageEnhancerCp = ' . Json::htmlEncode($config) . ';', View::POS_HEAD);
+	}
 	
 	private function attachEventHandlers(): void
 	{
@@ -183,7 +227,7 @@ class ImageQualityChecker extends Plugin
 			}
 			
 			/*$user = Craft::$app->getUser()->getIdentity();		
-			Craft::info("ImageQualityChecker event, user id: " . $user->id);
+			Craft::info("ImageEnhancer event, user id: " . $user->id);
 			if($user->id != 1) {
 				return;
 			}*/

@@ -1,8 +1,8 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\utilities;
+namespace arjanbrinkman\craftimageenhancer\utilities;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use Craft;
 use craft\base\Utility;
 
@@ -10,12 +10,12 @@ class QualityCheckUtility extends Utility
 {
 	public static function displayName(): string
 	{
-		return Craft::t('_image-quality-checker', 'Image Quality Checker');
+		return Craft::t('craft-image-enhancer', 'Image Enhancer');
 	}
 
 	public static function id(): string
 	{
-		return 'image-quality-checker';
+		return 'image-enhancer';
 	}
 
 	public static function icon(): ?string
@@ -30,8 +30,16 @@ class QualityCheckUtility extends Utility
 
 	public static function contentHtml(): string
 	{
-		return Craft::$app->getView()->renderTemplate('_image-quality-checker/_utility.twig', [
-			'enabled' => ImageQualityChecker::getInstance()->runtimeSettings->isQualityCheckEnabled(),
+		$plugin = ImageEnhancer::getInstance();
+		$runtimeSettings = $plugin->runtimeSettings;
+		$settings = $plugin->getSettings();
+
+		return Craft::$app->getView()->renderTemplate('craft-image-enhancer/_utility.twig', [
+			'enabled' => $runtimeSettings->isQualityCheckEnabled(),
+			'creativeEnhancementPromptOverride' => $runtimeSettings->getCreativeEnhancementPromptOverride(),
+			'faceBlurDetectionPromptOverride' => $runtimeSettings->getFaceBlurDetectionPromptOverride(),
+			'creativeEnhancementPromptDefault' => $settings->getEffectiveCreativeEnhancementPrompt(),
+			'faceBlurDetectionPromptDefault' => $settings->getEffectiveFaceBlurDetectionPrompt(),
 		]);
 	}
 }

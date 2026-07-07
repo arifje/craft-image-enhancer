@@ -1,4 +1,4 @@
-# Image Quality Checker
+# Image Enhancer
 
 Checks newly uploaded image assets for quality issues such as blur, noise, motion blur, and poor sharpness. The plugin sends the image to OpenAI for analysis and can notify users when the returned quality score is below the configured threshold. Enhanced replacement images can be generated with OpenAI, Grok Imagine, or Google Nano Banana.
 
@@ -14,7 +14,8 @@ Configure the plugin from the Craft control panel plugin settings.
 
 ### General
 
-- **Run quality check on upload**: Admins can turn upload analysis on or off from **Utilities → Image Quality Checker**. This runtime toggle is stored in the database instead of project config, so it can be changed directly on production without a code deploy.
+- **Run quality check on upload**: Admins can turn upload analysis on or off from **Utilities → Image Enhancer**. This runtime toggle is stored in the database instead of project config, so it can be changed directly on production without a code deploy.
+- **Runtime prompt overrides**: Admins can override the AI enhancement prompt and face blur detection prompt from **Utilities → Image Enhancer**. Leave an override empty to use the plugin settings/default prompt. These overrides are stored in the database and take effect immediately on production.
 
 ### ChatGPT
 
@@ -30,7 +31,7 @@ When **Latest available model** is selected, the plugin fetches the available Op
 - **Threshold**: Notifications are sent when the returned score is below this value.
 - **Slack**: Enable Slack notifications and configure a Slack bot token and channel.
 - **Email**: Enable email notifications to send the result to the author, with an optional CC recipient.
-- **Debug logging**: Writes `ImageQualityChecker DEBUG` lines to Craft's `web.log` while queue jobs run.
+- **Debug logging**: Writes `ImageEnhancer DEBUG` lines to Craft's `web.log` while queue jobs run.
 - **Test notifications**: Send a Slack or email test notification directly from the settings page.
 
 Only the OpenAI API key is required to run the analysis. Slack and email can be configured independently.
@@ -46,7 +47,8 @@ Enhancement runs only when an image score is below the notification threshold.
 - **AI enhancement**: Creates a provider-generated edit using OpenAI, Grok Imagine, or Google Nano Banana. The AI face handling setting controls whether AI enhancement is allowed for images with visible faces, or whether those images fall back to Imagick safe optimization.
 - **AI image provider**: Choose the provider used for AI enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Grok Imagine and Google Nano Banana use their own API key fields. **Choose in frontend** lets editors choose the provider and model in the frontend enhancement component.
 - **AI tuning levels**: Use simple 1-10 settings for clarity/detail, contrast/depth, color intensity, and noise/artifact cleanup. The selected levels are added to the image prompt so editors can choose a more colorful/contrasty result or a softer, more restrained result.
-- **Face blur detection prompt**: Controls the prompt used by the frontend **Blur faces** action to detect face/head boxes. The API only returns boxes; Imagick applies the anonymization locally.
+- **AI enhancement prompt**: Controls the default prompt used by all AI enhancement providers. This is stored in project config and can be overridden at runtime from the Utility screen.
+- **Face blur detection prompt**: Controls the default prompt used by the frontend **Blur faces** action to detect face/head boxes. The API only returns boxes; Imagick applies the anonymization locally. This is stored in project config and can be overridden at runtime from the Utility screen.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 - **Enhanced image handling**: Choose whether the enhanced file replaces the original asset, or is added next to the original asset for manual review.
 
@@ -97,7 +99,7 @@ When this mode is enabled, the settings page shows all provider API key and mode
 
 The repository includes `imageEnhancer.vue` as a copyable Vue component for article preview pages or headless frontend projects. It displays the image, lets permitted editors queue an enhancement or face-blur preview, polls the queue status, shows a before/after comparison slider, and lets the editor keep, discard, cancel, retry, reset, or hide the enhancement UI.
 
-The **Blur faces** action uses the ChatGPT/OpenAI API key to detect face/head bounding boxes and then applies a fragmented oval anonymization mask locally with Imagick. It creates a preview asset first, so editors can compare and decide whether to keep or discard the blurred result.
+The **Blur faces** action uses the ChatGPT/OpenAI API key to detect face/head bounding boxes and then applies a fragmented oval anonymization mask locally with Imagick. The **Manual blur** action lets editors draw one or more oval regions on the image; those normalized coordinates are sent directly to the same Imagick blur job and skip AI detection entirely. Both paths create a preview asset first, so editors can compare and decide whether to keep or discard the blurred result.
 
 By default the component uses the existing Craft action endpoints, so it works with the current plugin controllers:
 
@@ -105,7 +107,7 @@ By default the component uses the existing Craft action endpoints, so it works w
 <image-enhancer
 	:asset-id="{{ articleThumbnail ? articleThumbnail.id : 'null' }}"
 	:show-enhancement-options="{{ isRedactie ? 'true' : 'false' }}"
-	:provider-choice-enabled="{{ craft.app.plugins.plugin('_image-quality-checker').settings.imageEnhancementProvider == 'frontend' ? 'true' : 'false' }}"
+	:provider-choice-enabled="{{ craft.app.plugins.plugin('craft-image-enhancer').settings.imageEnhancementProvider == 'frontend' ? 'true' : 'false' }}"
 	src="{{ articleThumbnail and articleThumbnail.url ? articleThumbnail.url ~ '?v=' ~ cachebuster : '' }}"
 	alt="{{ entry.title ?? '' }}"
 	category="{{ articleCategory ?? '' }}"
@@ -132,6 +134,13 @@ The component is also prepared for a future GraphQL transport. Keep `api-transpo
 ```
 
 GraphQL operations can be provided for `enhance`, `blurFaces`, `status`, `cancel`, `reset`, `keep`, and `discard`. Each operation may be a query/mutation string or an object with `query`, `operationName`, `variables`, and `dataPath`.
+When manual blur is used, the `blurFaces` payload includes `manualFaces`, an array of normalized face/head boxes with `x`, `y`, `width`, and `height` values from 0 to 1000.
+
+### Control Panel Asset Fields
+
+The plugin also adds a small **Enhance** action below image assets inside Craft asset fields. Clicking it opens a control-panel modal that queues the same enhancement job, polls the queue status, shows a before/after slider, and lets the editor save the enhanced preview as the replacement file for the existing asset. Saving does not change the relation field value; it replaces the file behind the selected asset.
+
+If **AI image provider** is set to **Choose in frontend**, the modal also shows provider and model selectors and remembers the last selected combination in the browser.
 
 ### Asset Volumes
 
@@ -140,7 +149,7 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 ## Usage
 
 1. Enter an OpenAI API key for analysis.
-2. Make sure **Run quality check on upload** is turned on under **Utilities → Image Quality Checker**.
+2. Make sure **Run quality check on upload** is turned on under **Utilities → Image Enhancer**.
 3. Choose a model or keep **Latest available model** selected.
 4. Select the asset volumes that should be checked.
 5. Choose whether low-scoring images should be enhanced and replaced, or whether every uploaded image should always be enhanced.
@@ -149,12 +158,12 @@ Select the asset volumes that should be analyzed. Images uploaded to other volum
 8. Upload a JPEG or PNG image asset to a selected volume.
 
 The plugin queues an analysis job immediately after upload. If the returned score is below the configured threshold, enabled enhancement and notifications are run.
-The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications.
+The queue job reports milestone progress while it loads the asset, runs the quality check, enhances/replaces the image, and sends notifications. If runtime prompt overrides are set in **Utilities → Image Enhancer**, queued enhancement and face-blur jobs use those prompts instead of the project-config defaults.
 
 To troubleshoot a queue run, enable debug logging and watch Craft's web log:
 
 ```bash
-tail -f storage/logs/web.log | grep 'ImageQualityChecker DEBUG'
+tail -f storage/logs/web.log | grep 'ImageEnhancer DEBUG'
 ```
 
 Debug output includes the PHP process user, original asset ownership, temporary replacement ownership, and final replaced file ownership so server permission issues can be traced.

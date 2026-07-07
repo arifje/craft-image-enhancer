@@ -1,11 +1,11 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\controllers;
+namespace arjanbrinkman\craftimageenhancer\controllers;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
-use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageEnhancementJob;
-use arjanbrinkman\craftimagequalitychecker\jobs\ArticleImageFaceBlurJob;
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
+use arjanbrinkman\craftimageenhancer\jobs\ArticleImageEnhancementJob;
+use arjanbrinkman\craftimageenhancer\jobs\ArticleImageFaceBlurJob;
+use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
 use craft\elements\Asset;
 use craft\helpers\UrlHelper;
@@ -28,8 +28,8 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('You do not have permission to enhance this asset.');
 		}
 
-		$settings = ImageQualityChecker::getInstance()->getSettings();
-		$enhancementService = ImageQualityChecker::getInstance()->aiImageEnhancement;
+		$settings = ImageEnhancer::getInstance()->getSettings();
+		$enhancementService = ImageEnhancer::getInstance()->aiImageEnhancement;
 		$providerOptions = $this->getProviderOptionsForRequest($settings);
 		if ($providerOptions === false) {
 			return $this->asJsonFailure('Invalid AI image provider or model.');
@@ -72,12 +72,12 @@ class ArticleImageController extends Controller
 				'assetId' => $asset->id,
 				'jobId' => $jobId,
 				'token' => $token,
-				'statusUrl' => UrlHelper::actionUrl('_image-quality-checker/article-image/status'),
+				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
 				'imageEnhancementProvider' => $providerOptions['provider'] ?? $settings->imageEnhancementProvider,
 				'imageEnhancementModel' => $providerOptions['model'] ?? $enhancementService->getProviderModel($settings, $providerOptions),
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not queue enhancement: ' . $e->getMessage());
 		}
 	}
@@ -99,8 +99,14 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('Imagick is required to blur faces.');
 		}
 
-		$settings = ImageQualityChecker::getInstance()->getSettings();
-		if (trim($settings->chatGptApiKey) === '') {
+		$manualFaces = $this->getManualBlurFacesForRequest();
+		if ($manualFaces === false) {
+			return $this->asJsonFailure('Manual blur areas are invalid.');
+		}
+		$useManualFaces = is_array($manualFaces) && !empty($manualFaces);
+
+		$settings = ImageEnhancer::getInstance()->getSettings();
+		if (!$useManualFaces && trim($settings->chatGptApiKey) === '') {
 			return $this->asJsonFailure('ChatGPT API key is missing.');
 		}
 
@@ -115,6 +121,8 @@ class ArticleImageController extends Controller
 				'status' => 'queued',
 				'assetId' => $asset->id,
 				'operation' => 'blurFaces',
+				'blurMode' => $useManualFaces ? 'manual' : 'auto',
+				'manualFaceCount' => $useManualFaces ? count($manualFaces) : 0,
 				'progress' => 0,
 				'progressLabel' => 'Queued',
 			]);
@@ -122,11 +130,15 @@ class ArticleImageController extends Controller
 				'assetId' => $asset->id,
 				'userId' => Craft::$app->getUser()->getId(),
 				'token' => $token,
+				'useManualFaces' => $useManualFaces,
+				'manualFaces' => $manualFaces ?: [],
 			]));
 			$this->setEnhancementStatus($token, [
 				'status' => 'queued',
 				'assetId' => $asset->id,
 				'operation' => 'blurFaces',
+				'blurMode' => $useManualFaces ? 'manual' : 'auto',
+				'manualFaceCount' => $useManualFaces ? count($manualFaces) : 0,
 				'jobId' => $jobId,
 				'progress' => 0,
 				'progressLabel' => 'Queued',
@@ -139,12 +151,79 @@ class ArticleImageController extends Controller
 				'operation' => 'blurFaces',
 				'jobId' => $jobId,
 				'token' => $token,
-				'statusUrl' => UrlHelper::actionUrl('_image-quality-checker/article-image/status'),
+				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Article image face blur queueing failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Article image face blur queueing failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not queue face blur: ' . $e->getMessage());
 		}
+	}
+
+	private function getManualBlurFacesForRequest(): array|false|null
+	{
+		$value = Craft::$app->getRequest()->getBodyParam('manualFaces');
+
+		if ($value === null || $value === '') {
+			return null;
+		}
+
+		if (is_string($value)) {
+			$value = json_decode($value, true);
+			if (!is_array($value)) {
+				return false;
+			}
+		}
+
+		if (isset($value['faces']) && is_array($value['faces'])) {
+			$value = $value['faces'];
+		}
+
+		if (!is_array($value)) {
+			return false;
+		}
+
+		$faces = [];
+		foreach ($value as $face) {
+			if (!is_array($face)) {
+				return false;
+			}
+
+			$x = $this->normalizeBlurCoordinate($face['x'] ?? null);
+			$y = $this->normalizeBlurCoordinate($face['y'] ?? null);
+			$width = $this->normalizeBlurCoordinate($face['width'] ?? null);
+			$height = $this->normalizeBlurCoordinate($face['height'] ?? null);
+
+			if ($x === null || $y === null || $width === null || $height === null) {
+				return false;
+			}
+
+			$width = min(1000 - $x, $width);
+			$height = min(1000 - $y, $height);
+
+			if ($width < 5 || $height < 5) {
+				return false;
+			}
+
+			$faces[] = [
+				'x' => $x,
+				'y' => $y,
+				'width' => $width,
+				'height' => $height,
+				'confidence' => 'manual',
+				'source' => 'manual',
+			];
+		}
+
+		return !empty($faces) ? $faces : false;
+	}
+
+	private function normalizeBlurCoordinate(mixed $value): ?int
+	{
+		if (!is_numeric($value)) {
+			return null;
+		}
+
+		return max(0, min(1000, (int) round((float) $value)));
 	}
 
 	private function getProviderOptionsForRequest(Settings $settings): array|false
@@ -261,7 +340,7 @@ class ArticleImageController extends Controller
 				Craft::$app->queue->release($jobId);
 				$released = true;
 			} catch (\Throwable $e) {
-				Craft::warning('ImageQualityChecker: Could not release canceled article image enhancement job: ' . $e->getMessage(), __METHOD__);
+				Craft::warning('ImageEnhancer: Could not release canceled article image enhancement job: ' . $e->getMessage(), __METHOD__);
 			}
 		}
 
@@ -337,11 +416,11 @@ class ArticleImageController extends Controller
 				return $this->asJsonFailure('Could not prepare the enhanced file for replacement.');
 			}
 
-			ImageQualityChecker::$skipAssetQueue = true;
+			ImageEnhancer::$skipAssetQueue = true;
 			try {
 				Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
 			} finally {
-				ImageQualityChecker::$skipAssetQueue = false;
+				ImageEnhancer::$skipAssetQueue = false;
 			}
 
 			$this->deleteElement($previewAsset);
@@ -353,7 +432,7 @@ class ArticleImageController extends Controller
 				'imageUrl' => $this->appendCacheBuster($asset->getUrl()),
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Keeping enhanced article image failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Keeping enhanced article image failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not keep enhanced image: ' . $e->getMessage());
 		} finally {
 			if (isset($tempPath) && file_exists($tempPath)) {
@@ -388,7 +467,7 @@ class ArticleImageController extends Controller
 				'assetId' => $asset->id,
 			]);
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Discarding enhanced article image failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Discarding enhanced article image failed: ' . $e->getMessage(), __METHOD__);
 			return $this->asJsonFailure('Could not discard enhanced image: ' . $e->getMessage());
 		}
 	}
@@ -439,18 +518,18 @@ class ArticleImageController extends Controller
 
 	private function deleteElement(Asset $asset): void
 	{
-		ImageQualityChecker::$skipAssetQueue = true;
+		ImageEnhancer::$skipAssetQueue = true;
 		try {
 			Craft::$app->elements->deleteElement($asset);
 		} finally {
-			ImageQualityChecker::$skipAssetQueue = false;
+			ImageEnhancer::$skipAssetQueue = false;
 		}
 	}
 
 	private function getTempReplacementPath(Asset $asset): string
 	{
 		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-quality-checker-');
+		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
 
 		if (!$extension) {
 			return $tempPath;
@@ -544,12 +623,12 @@ class ArticleImageController extends Controller
 
 	private function getEnhancementStatusCacheKey(string $token): string
 	{
-		return 'image-quality-checker:article-image-enhancement:' . $token;
+		return 'image-enhancer:article-image-enhancement:' . $token;
 	}
 
 	private function getEnhancementAssetStatusCacheKey(int $assetId): string
 	{
-		return 'image-quality-checker:article-image-enhancement-asset:' . $assetId;
+		return 'image-enhancer:article-image-enhancement-asset:' . $assetId;
 	}
 
 	private function asJsonFailure(string $message): Response

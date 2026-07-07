@@ -1,9 +1,9 @@
 <?php
 
-namespace arjanbrinkman\craftimagequalitychecker\jobs;
+namespace arjanbrinkman\craftimageenhancer\jobs;
 
-use arjanbrinkman\craftimagequalitychecker\ImageQualityChecker;
-use arjanbrinkman\craftimagequalitychecker\models\Settings;
+use arjanbrinkman\craftimageenhancer\ImageEnhancer;
+use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
 use craft\db\Query;
 use craft\db\Table;
@@ -25,7 +25,7 @@ class ArticleImageEnhancementJob extends BaseJob
 
 	public function execute($queue): void
 	{
-		$settings = ImageQualityChecker::getInstance()->getSettings();
+		$settings = ImageEnhancer::getInstance()->getSettings();
 		$this->updateStatus('running', 0.05, 'Loading asset');
 		$this->setProgress($queue, 0.05, 'Loading asset');
 
@@ -46,7 +46,7 @@ class ArticleImageEnhancementJob extends BaseJob
 			}
 
 			$providerOptions = $this->getProviderOptions();
-			$providerLabel = ImageQualityChecker::getInstance()->aiImageEnhancement->getProviderLabel($settings, $providerOptions);
+			$providerLabel = ImageEnhancer::getInstance()->aiImageEnhancement->getProviderLabel($settings, $providerOptions);
 			$this->updateStatus('running', 0.2, 'Sending image to ' . $providerLabel);
 			$this->setProgress($queue, 0.2, 'Sending image to ' . $providerLabel);
 			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $providerOptions);
@@ -84,7 +84,7 @@ class ArticleImageEnhancementJob extends BaseJob
 			}
 
 			if ($this->queueRetryIfEnabled($settings, $e)) {
-				Craft::warning('ImageQualityChecker: Article image enhancement failed; retry queued: ' . $e->getMessage(), __METHOD__);
+				Craft::warning('ImageEnhancer: Article image enhancement failed; retry queued: ' . $e->getMessage(), __METHOD__);
 				throw $e;
 			}
 
@@ -92,7 +92,7 @@ class ArticleImageEnhancementJob extends BaseJob
 				'message' => $e->getMessage(),
 			]);
 			$this->sendSlackErrorNotification($settings, $e);
-			Craft::error('ImageQualityChecker: Article image enhancement queue job failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Article image enhancement queue job failed: ' . $e->getMessage(), __METHOD__);
 			throw $e;
 		}
 	}
@@ -100,7 +100,7 @@ class ArticleImageEnhancementJob extends BaseJob
 	private function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, array $providerOptions = []): string
 	{
 		[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
-		$tempPath = ImageQualityChecker::getInstance()->aiImageEnhancement->enhanceToTempFile($client, $settings, $asset, $localPath, $providerOptions);
+		$tempPath = ImageEnhancer::getInstance()->aiImageEnhancement->enhanceToTempFile($client, $settings, $asset, $localPath, $providerOptions);
 
 		if ($originalWidth && $originalHeight) {
 			$this->normalizeReplacementImageDimensions($asset, $tempPath, $originalWidth, $originalHeight);
@@ -132,11 +132,11 @@ class ArticleImageEnhancementJob extends BaseJob
 		$previewAsset->avoidFilenameConflicts = true;
 		$previewAsset->setScenario(Asset::SCENARIO_CREATE);
 
-		ImageQualityChecker::$skipAssetQueue = true;
+		ImageEnhancer::$skipAssetQueue = true;
 		try {
 			$saved = Craft::$app->elements->saveElement($previewAsset);
 		} finally {
-			ImageQualityChecker::$skipAssetQueue = false;
+			ImageEnhancer::$skipAssetQueue = false;
 		}
 
 		return $saved ? $previewAsset : null;
@@ -144,11 +144,11 @@ class ArticleImageEnhancementJob extends BaseJob
 
 	private function deletePreviewAsset(Asset $asset): void
 	{
-		ImageQualityChecker::$skipAssetQueue = true;
+		ImageEnhancer::$skipAssetQueue = true;
 		try {
 			Craft::$app->elements->deleteElement($asset);
 		} finally {
-			ImageQualityChecker::$skipAssetQueue = false;
+			ImageEnhancer::$skipAssetQueue = false;
 		}
 	}
 
@@ -185,7 +185,7 @@ class ArticleImageEnhancementJob extends BaseJob
 	private function getTempReplacementPath(Asset $asset): string
 	{
 		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-quality-checker-');
+		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
 
 		if (!$extension) {
 			return $tempPath;
@@ -287,7 +287,7 @@ class ArticleImageEnhancementJob extends BaseJob
 
 			return true;
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Could not queue retry for failed article image enhancement: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Could not queue retry for failed article image enhancement: ' . $e->getMessage(), __METHOD__);
 			return false;
 		}
 	}
@@ -330,7 +330,7 @@ class ArticleImageEnhancementJob extends BaseJob
 			}
 
 			if (!$settings->slackBotToken || $errorChannel === '') {
-				Craft::warning('ImageQualityChecker: Slack error notification skipped because bot token or channel is missing.', __METHOD__);
+				Craft::warning('ImageEnhancer: Slack error notification skipped because bot token or channel is missing.', __METHOD__);
 				return;
 			}
 
@@ -349,21 +349,21 @@ class ArticleImageEnhancementJob extends BaseJob
 			]);
 			$responseData = json_decode((string) $response->getBody(), true);
 			if (($responseData['ok'] ?? true) === false) {
-				Craft::warning('ImageQualityChecker: Slack error notification API error: ' . ($responseData['error'] ?? 'unknown'), __METHOD__);
+				Craft::warning('ImageEnhancer: Slack error notification API error: ' . ($responseData['error'] ?? 'unknown'), __METHOD__);
 			}
 		} catch (\Throwable $e) {
-			Craft::error('ImageQualityChecker: Slack error notification failed: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Slack error notification failed: ' . $e->getMessage(), __METHOD__);
 		}
 	}
 
 	private function getStatusCacheKey(): string
 	{
-		return 'image-quality-checker:article-image-enhancement:' . $this->token;
+		return 'image-enhancer:article-image-enhancement:' . $this->token;
 	}
 
 	private function getAssetStatusCacheKey(): string
 	{
-		return 'image-quality-checker:article-image-enhancement-asset:' . $this->assetId;
+		return 'image-enhancer:article-image-enhancement-asset:' . $this->assetId;
 	}
 
 	private function getRelatedEntryForAsset(int $assetId): ?Entry

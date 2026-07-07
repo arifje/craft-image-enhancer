@@ -1,8 +1,11 @@
 {% import '_includes/forms' as forms %}
 
+<h2>Runtime settings</h2>
+<p>These values are stored in the database, not project config, so admins can update them directly on production.</p>
+
 <form method="post" accept-charset="UTF-8">
-	{{ actionInput('_image-quality-checker/runtime-settings/save') }}
-	{{ redirectInput('utilities/image-quality-checker') }}
+	{{ actionInput('craft-image-enhancer/runtime-settings/save') }}
+	{{ redirectInput('utilities/image-enhancer') }}
 	{{ csrfInput() }}
 
 	{{ forms.lightswitchField({
@@ -11,6 +14,31 @@
 		name: 'enabled',
 		on: enabled,
 		instructions: 'When disabled, new image uploads are ignored and queued analysis jobs stop before running.',
+	}) }}
+
+	<hr>
+
+	<h2>Runtime prompt overrides</h2>
+	<p>Leave a prompt empty to use the plugin settings/default prompt. Runtime overrides take effect immediately and do not change project config.</p>
+
+	{{ forms.textareaField({
+		label: 'AI enhancement prompt override',
+		id: 'creativeEnhancementPromptOverride',
+		name: 'creativeEnhancementPromptOverride',
+		rows: 16,
+		value: creativeEnhancementPromptOverride,
+		placeholder: creativeEnhancementPromptDefault,
+		instructions: 'Optional production override for OpenAI, xAI, and Google image enhancement. The 1-10 tuning levels are still appended automatically.',
+	}) }}
+
+	{{ forms.textareaField({
+		label: 'Face blur detection prompt override',
+		id: 'faceBlurDetectionPromptOverride',
+		name: 'faceBlurDetectionPromptOverride',
+		rows: 8,
+		value: faceBlurDetectionPromptOverride,
+		placeholder: faceBlurDetectionPromptDefault,
+		instructions: 'Optional production override for the Blur faces detector. It must still return valid JSON face/head boxes.',
 	}) }}
 
 	<input type="submit" class="btn submit" value="Save">
