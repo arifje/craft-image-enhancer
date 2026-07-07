@@ -22,22 +22,29 @@
 	color: #b83d0f;
 }
 
+.modal.image-enhancer-cp-modal,
 .image-enhancer-cp-modal {
-	width: min(980px, calc(100vw - 48px));
-	max-height: calc(100vh - 48px);
-	overflow: auto;
+	box-sizing: border-box;
+	width: min(920px, calc(100vw - 96px));
+	max-height: min(760px, calc(100vh - 72px));
+	overflow: hidden;
 }
 
 .image-enhancer-cp-modal.is-visible {
 	position: fixed;
 	z-index: 10000;
-	top: 24px;
+	top: 36px;
 	left: 50%;
 	transform: translateX(-50%);
 }
 
 .image-enhancer-cp-shell {
-	padding: 24px;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	max-height: min(760px, calc(100vh - 72px));
+	padding: 20px;
+	overflow: auto;
 }
 
 .image-enhancer-cp-header {
@@ -45,7 +52,7 @@
 	align-items: flex-start;
 	justify-content: space-between;
 	gap: 16px;
-	margin-bottom: 18px;
+	margin-bottom: 14px;
 }
 
 .image-enhancer-cp-header h2 {
@@ -74,7 +81,7 @@
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 12px;
-	margin-bottom: 16px;
+	margin-bottom: 12px;
 }
 
 .image-enhancer-cp-provider label {
@@ -94,6 +101,7 @@
 
 .image-enhancer-cp-stage {
 	position: relative;
+	flex: 0 0 auto;
 	overflow: hidden;
 	border-radius: 6px;
 	background: #edf0f2;
@@ -103,9 +111,7 @@
 .image-enhancer-cp-compare {
 	position: relative;
 	width: 100%;
-	height: min(65vh, 640px);
-	min-height: 360px;
-	max-height: 65vh;
+	height: clamp(240px, 42vh, 430px);
 	background: #202a33;
 }
 
@@ -114,8 +120,6 @@
 	display: block;
 	width: 100%;
 	height: 100%;
-	min-height: 360px;
-	max-height: 65vh;
 	object-fit: contain;
 }
 
@@ -190,7 +194,7 @@
 
 .image-enhancer-cp-status,
 .image-enhancer-cp-error {
-	margin-top: 14px;
+	margin-top: 12px;
 	padding: 10px 12px;
 	border-radius: 4px;
 }
@@ -223,11 +227,15 @@
 }
 
 .image-enhancer-cp-actions {
+	position: sticky;
+	bottom: -20px;
 	display: flex;
 	flex-wrap: wrap;
 	justify-content: flex-end;
 	gap: 8px;
-	margin-top: 18px;
+	margin: 16px -20px -20px;
+	padding: 14px 20px 20px;
+	background: #fff;
 }
 
 @keyframes image-enhancer-cp-spin {
@@ -239,10 +247,16 @@
 @media (max-width: 640px) {
 	.image-enhancer-cp-modal {
 		width: calc(100vw - 20px);
+		max-height: calc(100vh - 20px);
+	}
+
+	.image-enhancer-cp-modal.is-visible {
+		top: 10px;
 	}
 
 	.image-enhancer-cp-shell {
 		padding: 16px;
+		max-height: calc(100vh - 20px);
 	}
 
 	.image-enhancer-cp-provider {
@@ -253,6 +267,12 @@
 	.image-enhancer-cp-compare,
 	.image-enhancer-cp-single img,
 	.image-enhancer-cp-compare img {
-		min-height: 240px;
+		height: clamp(220px, 38vh, 360px);
+	}
+
+	.image-enhancer-cp-actions {
+		bottom: -16px;
+		margin: 14px -16px -16px;
+		padding: 12px 16px 16px;
 	}
 }
