@@ -63,14 +63,22 @@
 		window.addEventListener('hashchange', scheduleScanBurst);
 		observer = new MutationObserver((mutations) => {
 			mutations.forEach((mutation) => {
-				mutation.addedNodes.forEach((node) => {
-					if (node.nodeType === Node.ELEMENT_NODE) {
-						scanAssetFields(node);
-					}
-				});
+				if (mutation.type === 'childList') {
+					mutation.addedNodes.forEach((node) => {
+						if (node.nodeType === Node.ELEMENT_NODE) {
+							scanAssetFields(node);
+						}
+					});
+				}
+
+				if (mutation.type === 'attributes' && mutation.target.nodeType === Node.ELEMENT_NODE) {
+					scanAssetFields(mutation.target);
+				}
 			});
 		});
 		observer.observe(document.body, {
+			attributes: true,
+			attributeFilter: ['class', 'style', 'src', 'srcset', 'data-asset-id', 'data-id', 'data-kind', 'data-type'],
 			childList: true,
 			subtree: true,
 		});
@@ -111,6 +119,11 @@
 		const candidates = new Set();
 		if (root.matches && root.matches(scanSelector)) {
 			candidates.add(root);
+		}
+
+		const closestCandidate = root.closest?.(scanSelector);
+		if (closestCandidate) {
+			candidates.add(closestCandidate);
 		}
 
 		root.querySelectorAll?.(scanSelector).forEach((candidate) => {
