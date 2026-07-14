@@ -34,8 +34,11 @@
 	const config = mergeConfig(defaults, window.ImageEnhancerCp || {});
 	const providerStorageKey = 'craft-image-enhancer:cp:provider-preference';
 	const scanSelector = [
+		'.field .element',
+		'.field .element-card',
 		'.field .element[data-id]',
 		'.field .element-card[data-id]',
+		'.field .asset[data-id]',
 		'.field [data-asset-id]',
 		'.field [data-type*="Asset"][data-id]',
 	].join(',');
@@ -61,24 +64,10 @@
 		document.addEventListener('click', onPotentialTabChange, true);
 		document.addEventListener('keydown', onPotentialTabChange, true);
 		window.addEventListener('hashchange', scheduleScanBurst);
-		observer = new MutationObserver((mutations) => {
-			mutations.forEach((mutation) => {
-				if (mutation.type === 'childList') {
-					mutation.addedNodes.forEach((node) => {
-						if (node.nodeType === Node.ELEMENT_NODE) {
-							scanAssetFields(node);
-						}
-					});
-				}
-
-				if (mutation.type === 'attributes' && mutation.target.nodeType === Node.ELEMENT_NODE) {
-					scanAssetFields(mutation.target);
-				}
-			});
+		observer = new MutationObserver(() => {
+			scheduleScanBurst();
 		});
 		observer.observe(document.body, {
-			attributes: true,
-			attributeFilter: ['class', 'style', 'src', 'srcset', 'data-asset-id', 'data-id', 'data-kind', 'data-type'],
 			childList: true,
 			subtree: true,
 		});
@@ -175,15 +164,21 @@
 	function isAssetElement(card) {
 		const type = card.dataset.type || card.getAttribute('data-type') || '';
 		if (type) {
-			return type.includes('Asset') && Boolean(card.querySelector('img') || getBackgroundImageUrl(card));
+			return type.includes('Asset');
 		}
 
-		const kind = card.dataset.kind || card.getAttribute('data-kind') || '';
-		const hasAssetHint = card.classList.contains('asset') ||
-			kind === 'image' ||
-			Boolean(card.closest('[data-type*="Asset"]'));
+		const kind = (card.dataset.kind || card.getAttribute('data-kind') || '').toLowerCase();
+		if (kind && kind !== 'image') {
+			return false;
+		}
 
-		return hasAssetHint && Boolean(card.querySelector('img') || getBackgroundImageUrl(card));
+		return Boolean(card.dataset.assetId ||
+			card.classList.contains('asset') ||
+			kind === 'image' ||
+			card.querySelector('[data-asset-id]') ||
+			card.closest('[data-type*="Asset"]') ||
+			card.querySelector('img') ||
+			getBackgroundImageUrl(card));
 	}
 
 	function isAllowedAssetField(card) {
