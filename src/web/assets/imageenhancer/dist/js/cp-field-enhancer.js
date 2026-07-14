@@ -382,9 +382,9 @@
 				'  <div class="image-enhancer-cp-error" data-error hidden></div>',
 				'  <div class="image-enhancer-cp-actions">',
 				'    <button type="button" class="btn submit" data-enhance>Enhance</button>',
-				'    <button type="button" class="btn" data-cancel hidden>Cancel</button>',
-				'    <button type="button" class="btn submit" data-keep hidden>Save replacement</button>',
-				'    <button type="button" class="btn" data-discard hidden>Discard</button>',
+				'    <button type="button" class="btn image-enhancer-cp-is-hidden" data-cancel>Cancel</button>',
+				'    <button type="button" class="btn submit image-enhancer-cp-is-hidden" data-keep>Save replacement</button>',
+				'    <button type="button" class="btn image-enhancer-cp-is-hidden" data-discard>Discard</button>',
 				'  </div>',
 				'</div>',
 			].join('');
@@ -419,6 +419,7 @@
 			root.querySelector('.image-enhancer-cp-close').addEventListener('click', () => this.close());
 
 			this.setupProviderControls();
+			this.setActionState('idle');
 			this.updateComparison();
 			this.restoreStatus();
 		}
@@ -488,12 +489,12 @@
 
 		async enhance() {
 			this.clearError();
-			this.setBusy(true, 'Queued...');
 			this.token = '';
 			this.jobId = '';
 			this.previewId = '';
 			this.enhancedUrl = '';
 			this.setPreviewMode(false);
+			this.setBusy(true, 'Queued...');
 
 			try {
 				const payload = {
@@ -588,7 +589,7 @@
 			}
 
 			this.clearError();
-			this.setBusy(true, 'Saving replacement...');
+			this.setPreviewProcessing(true, 'Saving replacement...');
 
 			try {
 				const response = await this.request('keep', {
@@ -604,7 +605,7 @@
 				}
 				this.close();
 			} catch (error) {
-				this.setBusy(false);
+				this.setPreviewProcessing(false);
 				this.showError(error);
 			}
 		}
@@ -616,7 +617,7 @@
 			}
 
 			this.clearError();
-			this.setBusy(true, 'Discarding...');
+			this.setPreviewProcessing(true, 'Discarding...');
 
 			try {
 				await this.request('discard', {
@@ -626,7 +627,7 @@
 				});
 				this.close();
 			} catch (error) {
-				this.setBusy(false);
+				this.setPreviewProcessing(false);
 				this.showError(error);
 			}
 		}
@@ -649,18 +650,38 @@
 		setPreviewMode(enabled) {
 			this.single.hidden = enabled;
 			this.compare.hidden = !enabled;
-			this.keepButton.hidden = !enabled;
-			this.discardButton.hidden = !enabled;
-			this.enhanceButton.hidden = enabled;
-			this.cancelButton.hidden = true;
+			this.setActionState(enabled ? 'preview' : 'idle');
 		}
 
 		setBusy(isBusy, label = '', includeCounter = false) {
 			this.enhanceButton.disabled = isBusy;
 			this.keepButton.disabled = isBusy;
 			this.discardButton.disabled = isBusy;
-			this.cancelButton.hidden = !isBusy || Boolean(this.previewId);
+			this.cancelButton.disabled = false;
+			this.setActionState(isBusy ? 'busy' : 'idle');
 			this.setStatus(label, isBusy, includeCounter);
+		}
+
+		setPreviewProcessing(isProcessing, label = '') {
+			this.enhanceButton.disabled = true;
+			this.cancelButton.disabled = true;
+			this.keepButton.disabled = isProcessing;
+			this.discardButton.disabled = isProcessing;
+			this.setActionState('preview');
+			this.setStatus(label, isProcessing);
+		}
+
+		setActionState(state) {
+			this.toggleButton(this.enhanceButton, state !== 'idle');
+			this.toggleButton(this.cancelButton, state !== 'busy');
+			this.toggleButton(this.keepButton, state !== 'preview');
+			this.toggleButton(this.discardButton, state !== 'preview');
+		}
+
+		toggleButton(button, isHidden) {
+			button.classList.toggle('image-enhancer-cp-is-hidden', isHidden);
+			button.hidden = isHidden;
+			button.setAttribute('aria-hidden', isHidden ? 'true' : 'false');
 		}
 
 		setStatus(label, isLoading = false, includeCounter = false) {

@@ -238,6 +238,10 @@
 	background: #fff;
 }
 
+.image-enhancer-cp-is-hidden {
+	display: none !important;
+}
+
 @keyframes image-enhancer-cp-spin {
 	to {
 		transform: rotate(360deg);
