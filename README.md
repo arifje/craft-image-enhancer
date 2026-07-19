@@ -19,7 +19,7 @@ Configure the plugin from the Craft control panel plugin settings.
 
 ### ChatGPT
 
-- **ChatGPT API Key**: Your OpenAI API key.
+- **ChatGPT API Key**: Your OpenAI API key, entered directly or selected from an environment variable.
 - **ChatGPT Prompt**: The prompt used to evaluate each image.
 - **ChatGPT Model**: Choose a fixed OpenAI model, or select **Latest available model**.
 - **Language of the ChatGPT result**: The language used for the returned reason.
@@ -65,6 +65,8 @@ AI-enhanced replacements are cropped back to the original asset dimensions so th
 4. Choose an OpenAI image model, for example `gpt-image-2`.
 
 The same OpenAI key is used for quality analysis, face detection fallback, and OpenAI image enhancement.
+
+API key fields support Craft environment-variable references. Add keys to `.env`, for example `OPENAI_API_KEY=sk-...`, and select `$OPENAI_API_KEY` from the field suggestions. The saved project config contains only the environment-variable reference; Craft resolves the key when making API requests. The xAI and Google fields work the same way.
 
 #### Grok Imagine / xAI
 

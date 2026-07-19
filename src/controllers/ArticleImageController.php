@@ -106,7 +106,7 @@ class ArticleImageController extends Controller
 		$useManualFaces = is_array($manualFaces) && !empty($manualFaces);
 
 		$settings = ImageEnhancer::getInstance()->getSettings();
-		if (!$useManualFaces && trim($settings->chatGptApiKey) === '') {
+		if (!$useManualFaces && $settings->getResolvedChatGptApiKey() === '') {
 			return $this->asJsonFailure('ChatGPT API key is missing.');
 		}
 

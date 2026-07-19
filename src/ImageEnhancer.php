@@ -103,7 +103,7 @@ class ImageEnhancer extends Plugin
 	public function getChatGptModelOptions(): array
 	{
 		$models = Settings::fallbackChatGptModels();
-		$apiKey = $this->getSettings()->chatGptApiKey;
+		$apiKey = $this->getSettings()->getResolvedChatGptApiKey();
 
 		if ($apiKey) {
 			try {

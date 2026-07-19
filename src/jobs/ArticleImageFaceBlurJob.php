@@ -55,7 +55,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 				$this->setProgress($queue, 0.2, 'Preparing manual blur areas');
 				$faces = $this->normalizeManualFaceBoxes($this->manualFaces);
 			} else {
-				$apiKey = trim($settings->chatGptApiKey);
+				$apiKey = $settings->getResolvedChatGptApiKey();
 				if ($apiKey === '') {
 					throw new \RuntimeException('ChatGPT API key is missing.');
 				}

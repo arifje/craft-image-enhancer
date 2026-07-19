@@ -7,13 +7,14 @@
 
 	<h1>ChatGPT</h1>
 	
-	{{ forms.textField({
+	{{ forms.autosuggestField({
 		label: 'ChatGPT API Key',
 		name: 'chatGptApiKey',
 		id: 'chatGptApiKey',
-		instructions: 'Enter your OpenAI API key here. This will be used to analyze images.',
+		instructions: 'Enter your OpenAI API key here or select an environment variable. This will be used to analyze images.',
 		value: settings.chatGptApiKey,
 		placeholder: 'sk-XXXXXXXXXXXXXXXXXXXXXXX',
+		suggestEnvVars: true,
 	}) }}
 	
 	{{ forms.textareaField({
@@ -254,13 +255,14 @@
 					<p>Requires an xAI API key.</p>
 				</div>
 
-				{{ forms.textField({
+				{{ forms.autosuggestField({
 					label: 'API key',
 					name: 'xAiApiKey',
 					id: 'xAiApiKey',
-					instructions: 'Stored in project config and used for Grok Imagine requests.',
+					instructions: 'Stored in project config and used for Grok Imagine requests. Environment variables are supported.',
 					value: settings.xAiApiKey,
 					placeholder: 'xai-...',
+					suggestEnvVars: true,
 				}) }}
 
 				{{ forms.selectField({
@@ -279,13 +281,14 @@
 					<p>Requires a Google AI API key.</p>
 				</div>
 
-				{{ forms.textField({
+				{{ forms.autosuggestField({
 					label: 'API key',
 					name: 'googleAiApiKey',
 					id: 'googleAiApiKey',
-					instructions: 'Stored in project config and used for Google image requests.',
+					instructions: 'Stored in project config and used for Google image requests. Environment variables are supported.',
 					value: settings.googleAiApiKey,
 					placeholder: 'AIza...',
+					suggestEnvVars: true,
 				}) }}
 
 				{{ forms.selectField({

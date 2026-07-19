@@ -31,9 +31,9 @@ class AiImageEnhancementService extends Component
 	public function getConfiguredApiKey(Settings $settings, array $providerOptions = []): string
 	{
 		return match ($this->resolveProvider($settings, $providerOptions)) {
-			Settings::IMAGE_PROVIDER_XAI => trim($settings->xAiApiKey),
-			Settings::IMAGE_PROVIDER_GOOGLE => trim($settings->googleAiApiKey),
-			default => trim($settings->chatGptApiKey),
+			Settings::IMAGE_PROVIDER_XAI => $settings->getResolvedXAiApiKey(),
+			Settings::IMAGE_PROVIDER_GOOGLE => $settings->getResolvedGoogleAiApiKey(),
+			default => $settings->getResolvedChatGptApiKey(),
 		};
 	}
 

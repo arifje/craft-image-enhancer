@@ -4,6 +4,7 @@ namespace arjanbrinkman\craftimageenhancer\models;
 
 use Craft;
 use craft\base\Model;
+use craft\helpers\App;
 
 /**
  * Image Enhancer settings
@@ -165,6 +166,21 @@ PROMPT;
 	public string $creativeEnhancementPrompt = self::DEFAULT_CREATIVE_ENHANCEMENT_PROMPT;
 	public string $faceBlurDetectionPrompt = self::DEFAULT_FACE_BLUR_DETECTION_PROMPT;
 
+	public function getResolvedChatGptApiKey(): string
+	{
+		return $this->resolveEnvValue($this->chatGptApiKey);
+	}
+
+	public function getResolvedXAiApiKey(): string
+	{
+		return $this->resolveEnvValue($this->xAiApiKey);
+	}
+
+	public function getResolvedGoogleAiApiKey(): string
+	{
+		return $this->resolveEnvValue($this->googleAiApiKey);
+	}
+
 	public function rules(): array
 	{
 		return [
@@ -287,6 +303,11 @@ PROMPT;
 		}
 
 		return $this->creativeEnhancementPrompt;
+	}
+
+	private function resolveEnvValue(string $value): string
+	{
+		return trim((string) App::parseEnv($value));
 	}
 
 	public function getCreativeEnhancementPromptForRequest(): string

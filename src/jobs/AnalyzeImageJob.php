@@ -111,7 +111,7 @@ class AnalyzeImageJob extends BaseJob
 		
 		$imageBase64 = base64_encode(file_get_contents($localPath));
 		
-		$apiKey = trim($settings->chatGptApiKey);
+		$apiKey = $settings->getResolvedChatGptApiKey();
 		$client = Craft::createGuzzleClient();
 		$imageUrl = $asset->getUrl();
 		$relatedEntry = $this->getRelatedEntryForAsset($asset->id);
