@@ -2,6 +2,7 @@
 	'use strict';
 
 	const defaults = {
+		craftMajorVersion: 4,
 		uploadRequirementAssistantEnabled: false,
 		providerChoiceEnabled: false,
 		imageEnhancementProvider: 'openai',
@@ -1228,7 +1229,7 @@
 		}
 
 		const viewMode = input.settings.viewMode;
-		const craftMajorVersion = Number.parseInt(String(Craft.version || '').split('.')[0], 10);
+		const craftMajorVersion = Number.parseInt(String(config.craftMajorVersion || 4), 10);
 		if (craftMajorVersion === 4) {
 			const response = await Craft.sendActionRequest('POST', 'elements/get-element-html', {
 				data: {

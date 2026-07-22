@@ -190,6 +190,7 @@ class ImageEnhancer extends Plugin
 
 		$settings = $this->getSettings();
 		$config = [
+			'craftMajorVersion' => (int) explode('.', Craft::$app->getVersion())[0],
 			'uploadRequirementAssistantEnabled' => $settings->enableUploadRequirementAssistant,
 			'providerChoiceEnabled' => $settings->imageEnhancementProvider === Settings::IMAGE_PROVIDER_FRONTEND,
 			'imageEnhancementProvider' => $settings->imageEnhancementProvider,
