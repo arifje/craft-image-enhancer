@@ -76,7 +76,6 @@ class ArticleImageEnhancementJob extends BaseJob
 
 			$this->updateStatus('complete', 1, 'Enhanced preview ready', [
 				'previewId' => $previewAsset->id,
-				'enhancedUrl' => $this->appendCacheBuster($previewAsset->getUrl()),
 			]);
 			$this->setProgress($queue, 1, 'Enhanced preview ready');
 		} catch (\Throwable $e) {
@@ -239,15 +238,6 @@ class ArticleImageEnhancementJob extends BaseJob
 		return $fsPath . DIRECTORY_SEPARATOR . $asset->folderPath . $asset->filename;
 	}
 
-	private function appendCacheBuster(?string $url): ?string
-	{
-		if (!$url) {
-			return null;
-		}
-
-		return $url . (str_contains($url, '?') ? '&' : '?') . 'v=' . time();
-	}
-
 	private function updateStatus(string $status, float $progress, string $progressLabel, array $extra = []): void
 	{
 		if ($status !== 'canceled' && $this->isCanceled()) {
@@ -296,6 +286,8 @@ class ArticleImageEnhancementJob extends BaseJob
 				'retryAttempt' => $nextAttempt,
 				'imageEnhancementProvider' => $this->imageEnhancementProvider,
 				'imageEnhancementModel' => $this->imageEnhancementModel,
+				'targetWidth' => $this->targetWidth,
+				'targetHeight' => $this->targetHeight,
 			]), null, $delay);
 
 			$this->updateStatus('queued', 0, $delay > 0 ? 'Retrying in ' . $delay . ' seconds' : 'Retrying', [

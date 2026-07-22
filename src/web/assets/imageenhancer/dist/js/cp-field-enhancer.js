@@ -591,7 +591,7 @@
 			this.closeButton.addEventListener('click', () => this.requestClose());
 
 			if (this.uploadRepair) {
-				this.enhanceButton.textContent = 'Enhance with AI';
+				this.enhanceButton.textContent = 'Resize & Enhance';
 				this.keepButton.textContent = 'Use enhanced image';
 				this.discardButton.textContent = 'Back';
 				this.updateUploadRepairDetails(this.uploadRepair);

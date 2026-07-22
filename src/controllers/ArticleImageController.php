@@ -10,6 +10,7 @@ use Craft;
 use craft\elements\Asset;
 use craft\helpers\UrlHelper;
 use craft\web\Controller;
+use yii\web\NotFoundHttpException;
 use yii\web\Response;
 
 class ArticleImageController extends Controller
@@ -30,7 +31,7 @@ class ArticleImageController extends Controller
 
 		$settings = ImageEnhancer::getInstance()->getSettings();
 		$enhancementService = ImageEnhancer::getInstance()->aiImageEnhancement;
-		$repairToken = (string) Craft::$app->getRequest()->getBodyParam('uploadRepairToken');
+		$repairToken = (string) Craft::$app->getRequest()->getParam('uploadRepairToken');
 		$repairTarget = null;
 		if ($repairToken !== '') {
 			$repairTarget = ImageEnhancer::getInstance()->assetRequirements->getRepairTargetDimensions(
@@ -328,7 +329,52 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('Enhancement status token does not match this asset.');
 		}
 
+		$previewId = (int) ($status['previewId'] ?? 0);
+		if (($status['status'] ?? null) === 'complete' && $previewId) {
+			$previewAsset = Craft::$app->assets->getAssetById($previewId);
+			if (
+				$previewAsset instanceof Asset &&
+				$this->isPreviewAssetForOriginal($previewAsset, $asset, (string) ($status['token'] ?? $token))
+			) {
+				$status['enhancedUrl'] = UrlHelper::actionUrl('craft-image-enhancer/article-image/preview', [
+					'assetId' => $assetId,
+					'previewId' => $previewId,
+					'token' => (string) ($status['token'] ?? $token),
+					'uploadRepairToken' => (string) Craft::$app->getRequest()->getBodyParam('uploadRepairToken'),
+					'v' => time(),
+				]);
+			}
+		}
+
 		return $this->asJson(array_merge(['success' => true], $status));
+	}
+
+	public function actionPreview(): Response
+	{
+		$this->requireLogin();
+
+		$request = Craft::$app->getRequest();
+		$asset = Craft::$app->assets->getAssetById((int) $request->getQueryParam('assetId'));
+		$previewAsset = Craft::$app->assets->getAssetById((int) $request->getQueryParam('previewId'));
+		$token = (string) $request->getQueryParam('token');
+
+		if (
+			!$this->isSupportedImageAsset($asset) ||
+			!$this->isSupportedImageAsset($previewAsset) ||
+			$token === '' ||
+			!$this->canSaveAsset($asset) ||
+			!$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)
+		) {
+			throw new NotFoundHttpException('Enhanced preview not found.');
+		}
+
+		$response = Craft::$app->getResponse();
+		$response->format = Response::FORMAT_RAW;
+		$response->headers->set('Content-Type', $previewAsset->mimeType ?: 'application/octet-stream');
+		$response->headers->set('Cache-Control', 'private, no-store, max-age=0');
+		$response->content = $previewAsset->getContents();
+
+		return $response;
 	}
 
 	public function actionCancel(): Response
@@ -558,7 +604,7 @@ class ArticleImageController extends Controller
 			return true;
 		}
 
-		$repairToken = (string) Craft::$app->getRequest()->getBodyParam('uploadRepairToken');
+		$repairToken = (string) Craft::$app->getRequest()->getParam('uploadRepairToken');
 
 		return $user &&
 			$repairToken !== '' &&
