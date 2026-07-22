@@ -2,6 +2,7 @@
 	'use strict';
 
 	const defaults = {
+		uploadRequirementAssistantEnabled: false,
 		providerChoiceEnabled: false,
 		imageEnhancementProvider: 'openai',
 		imageEnhancementModel: 'gpt-image-2',
@@ -9,6 +10,10 @@
 		googleImageEnhancementModel: 'gemini-3.1-flash-image',
 		allowedFieldHandles: [],
 		routes: {
+			uploadAssistant: 'craft-image-enhancer/upload-assistant/upload',
+			uploadLocalRepair: 'craft-image-enhancer/upload-assistant/local-repair',
+			uploadFinalize: 'craft-image-enhancer/upload-assistant/finalize',
+			uploadDiscard: 'craft-image-enhancer/upload-assistant/discard',
 			assetInfo: 'craft-image-enhancer/article-image/asset-info',
 			enhance: 'craft-image-enhancer/article-image/enhance',
 			status: 'craft-image-enhancer/article-image/status',
@@ -44,6 +49,8 @@
 	].join(',');
 	let observer = null;
 	let scanBurstTimer = null;
+	let activeUploadRepair = false;
+	const uploadRepairQueue = [];
 
 	function ready(callback) {
 		if (document.readyState === 'loading') {
@@ -60,6 +67,7 @@
 		}
 
 		scanAssetFields(document);
+		scanUploadAssistantInputs(document);
 		document.addEventListener('click', onDocumentClick, true);
 		document.addEventListener('click', onPotentialTabChange, true);
 		document.addEventListener('keydown', onPotentialTabChange, true);
@@ -99,9 +107,134 @@
 		window.clearTimeout(scanBurstTimer);
 		scanBurstTimer = window.setTimeout(() => {
 			scanAssetFields(document);
-			window.setTimeout(() => scanAssetFields(document), 250);
-			window.setTimeout(() => scanAssetFields(document), 750);
+			scanUploadAssistantInputs(document);
+			window.setTimeout(() => {
+				scanAssetFields(document);
+				scanUploadAssistantInputs(document);
+			}, 250);
+			window.setTimeout(() => {
+				scanAssetFields(document);
+				scanUploadAssistantInputs(document);
+			}, 750);
 		}, 50);
+	}
+
+	function scanUploadAssistantInputs(root) {
+		if (!config.uploadRequirementAssistantEnabled || !window.jQuery || !window.Craft?.AssetSelectInput) {
+			return;
+		}
+
+		const containers = new Set();
+		if (root.matches?.('.elementselect')) {
+			containers.add(root);
+		}
+		root.querySelectorAll?.('.elementselect').forEach((container) => containers.add(container));
+		containers.forEach(setupUploadAssistantInput);
+	}
+
+	function setupUploadAssistantInput(container) {
+		if (container.dataset.imageEnhancerUploadAssistantReady === '1' || !isAllowedUploadField(container)) {
+			return;
+		}
+
+		const input = window.jQuery(container).data('elementSelect');
+		if (!input || !(input instanceof Craft.AssetSelectInput) || !input.uploader?.uploader) {
+			return;
+		}
+
+		const route = config.routes.uploadAssistant;
+		const originalDone = input.uploader.events?.fileuploaddone;
+		if (!route || typeof originalDone !== 'function') {
+			return;
+		}
+
+		const $uploader = input.uploader.$element;
+		$uploader.off('fileuploaddone', originalDone);
+		$uploader.off('fileuploaddone.imageEnhancerUploadAssistant');
+		$uploader.on('fileuploaddone.imageEnhancerUploadAssistant', (event, data = null) => {
+			const result = event instanceof CustomEvent ? event.detail : data?.result;
+			if (!result?.needsRepair) {
+				originalDone(event, data);
+				return;
+			}
+
+			finishUploadProgress(input);
+			enqueueUploadRepair(input, result);
+		});
+
+		input.uploader.uploader.fileupload('option', {
+			url: Craft.getActionUrl(route),
+		});
+		container.dataset.imageEnhancerUploadAssistantReady = '1';
+	}
+
+	function isAllowedUploadField(container) {
+		const field = container.closest('.field');
+		const handle = getFieldHandle(field);
+		const allowedHandles = Array.isArray(config.allowedFieldHandles)
+			? config.allowedFieldHandles.filter(Boolean)
+			: [];
+
+		if (allowedHandles.length > 0) {
+			return Boolean(handle && allowedHandles.includes(handle));
+		}
+
+		return Boolean(field && !isNestedField(field));
+	}
+
+	function finishUploadProgress(input) {
+		if (!input.uploader.isLastUpload()) {
+			return;
+		}
+
+		input.progressBar?.hideProgressBar();
+		input.$container?.removeClass('uploading');
+	}
+
+	function enqueueUploadRepair(input, result) {
+		uploadRepairQueue.push({ input, result });
+		openNextUploadRepair();
+	}
+
+	function openNextUploadRepair() {
+		if (activeUploadRepair || uploadRepairQueue.length === 0) {
+			return;
+		}
+
+		activeUploadRepair = true;
+		const { input, result } = uploadRepairQueue.shift();
+		const modal = new CpEnhancerModal({
+			assetId: result.assetId,
+			originalUrl: result.previewUrl,
+			card: null,
+			assetInput: input,
+			uploadRepair: result,
+			onDestroyed: () => {
+				activeUploadRepair = false;
+				openNextUploadRepair();
+			},
+		});
+
+		modal.show().catch(async (error) => {
+			await discardQueuedUpload(result.repairToken);
+			activeUploadRepair = false;
+			openNextUploadRepair();
+			Craft.cp?.displayError(error instanceof Error ? error.message : 'Could not open the upload assistant.');
+		});
+	}
+
+	async function discardQueuedUpload(repairToken) {
+		if (!repairToken || !config.routes.uploadDiscard) {
+			return;
+		}
+
+		try {
+			await Craft.sendActionRequest('POST', config.routes.uploadDiscard, {
+				data: { repairToken },
+			});
+		} catch (error) {
+			// The temporary upload will be cleaned up by Craft if this request fails.
+		}
 	}
 
 	function scanAssetFields(root) {
@@ -302,10 +435,17 @@
 	}
 
 	class CpEnhancerModal {
-		constructor({ assetId, originalUrl, card }) {
+		constructor({ assetId, originalUrl, card, assetInput = null, uploadRepair = null, onDestroyed = null }) {
 			this.assetId = assetId;
 			this.originalUrl = originalUrl;
 			this.card = card;
+			this.assetInput = assetInput;
+			this.uploadRepair = uploadRepair;
+			this.repairToken = uploadRepair?.repairToken || '';
+			this.onDestroyed = onDestroyed;
+			this.uploadFinalized = false;
+			this.uploadDiscarded = false;
+			this.destroyed = false;
 			this.token = '';
 			this.jobId = '';
 			this.previewId = '';
@@ -320,7 +460,9 @@
 		}
 
 		async show() {
-			await this.resolveAssetInfo();
+			if (!this.uploadRepair) {
+				await this.resolveAssetInfo();
+			}
 			this.build();
 
 			if (window.Garnish && window.jQuery && Garnish.$bod) {
@@ -355,16 +497,27 @@
 		}
 
 		build() {
+			const title = this.uploadRepair ? 'Image does not meet field requirements' : 'Enhance image';
+			const description = this.uploadRepair
+				? 'Review the uploaded image and choose how to make it selectable for this field.'
+				: 'Queue an enhancement, compare the result, then save it over the current asset.';
 			const root = document.createElement('div');
 			root.className = 'modal image-enhancer-cp-modal';
 			root.innerHTML = [
 				'<div class="image-enhancer-cp-shell">',
 				'  <div class="image-enhancer-cp-header">',
 				'    <div>',
-				'      <h2>Enhance image</h2>',
-				'      <p>Queue an enhancement, compare the result, then save it over the current asset.</p>',
+				`      <h2>${title}</h2>`,
+				`      <p>${description}</p>`,
 				'    </div>',
 				'    <button type="button" class="image-enhancer-cp-close" aria-label="Close">&times;</button>',
+				'  </div>',
+				'  <div class="image-enhancer-upload-summary" data-upload-summary hidden>',
+				'    <div class="image-enhancer-upload-summary__facts" data-upload-facts></div>',
+				'    <div class="image-enhancer-upload-summary__issues">',
+				'      <h3>Why it cannot be selected</h3>',
+				'      <ul data-upload-issues></ul>',
+				'    </div>',
 				'  </div>',
 				'  <div class="image-enhancer-cp-provider" data-provider-controls hidden>',
 				'    <label><span>Provider</span><select data-provider></select></label>',
@@ -389,10 +542,12 @@
 				'  </div>',
 				'  <div class="image-enhancer-cp-error" data-error hidden></div>',
 				'  <div class="image-enhancer-cp-actions">',
+				'    <button type="button" class="btn submit image-enhancer-cp-is-hidden" data-local-repair>Resize locally</button>',
 				'    <button type="button" class="btn submit" data-enhance>Enhance</button>',
 				'    <button type="button" class="btn image-enhancer-cp-is-hidden" data-cancel>Cancel</button>',
 				'    <button type="button" class="btn submit image-enhancer-cp-is-hidden" data-keep>Save replacement</button>',
 				'    <button type="button" class="btn image-enhancer-cp-is-hidden" data-discard>Discard</button>',
+				'    <button type="button" class="btn image-enhancer-cp-is-hidden" data-discard-upload>Discard upload</button>',
 				'  </div>',
 				'</div>',
 			].join('');
@@ -410,9 +565,15 @@
 			this.statusText = root.querySelector('[data-status-text]');
 			this.error = root.querySelector('[data-error]');
 			this.enhanceButton = root.querySelector('[data-enhance]');
+			this.localRepairButton = root.querySelector('[data-local-repair]');
 			this.cancelButton = root.querySelector('[data-cancel]');
 			this.keepButton = root.querySelector('[data-keep]');
 			this.discardButton = root.querySelector('[data-discard]');
+			this.discardUploadButton = root.querySelector('[data-discard-upload]');
+			this.closeButton = root.querySelector('.image-enhancer-cp-close');
+			this.uploadSummary = root.querySelector('[data-upload-summary]');
+			this.uploadFacts = root.querySelector('[data-upload-facts]');
+			this.uploadIssues = root.querySelector('[data-upload-issues]');
 			this.providerControls = root.querySelector('[data-provider-controls]');
 			this.providerSelect = root.querySelector('[data-provider]');
 			this.modelSelect = root.querySelector('[data-model]');
@@ -420,16 +581,187 @@
 			this.originalImage.src = this.originalUrl;
 			this.compareOriginalImage.src = this.originalUrl;
 			this.range.addEventListener('input', () => this.updateComparison());
+			root.querySelector('[data-local-repair]').addEventListener('click', () => this.repairLocally());
 			root.querySelector('[data-enhance]').addEventListener('click', () => this.enhance());
 			root.querySelector('[data-cancel]').addEventListener('click', () => this.cancel());
 			root.querySelector('[data-keep]').addEventListener('click', () => this.keep());
 			root.querySelector('[data-discard]').addEventListener('click', () => this.discard());
-			root.querySelector('.image-enhancer-cp-close').addEventListener('click', () => this.close());
+			root.querySelector('[data-discard-upload]').addEventListener('click', () => this.discardUpload());
+			this.closeButton.addEventListener('click', () => this.requestClose());
+
+			if (this.uploadRepair) {
+				this.enhanceButton.textContent = 'Enhance with AI';
+				this.keepButton.textContent = 'Use enhanced image';
+				this.discardButton.textContent = 'Back';
+				this.updateUploadRepairDetails(this.uploadRepair);
+			}
 
 			this.setupProviderControls();
 			this.setActionState('idle');
 			this.updateComparison();
-			this.restoreStatus();
+			if (!this.uploadRepair) {
+				this.restoreStatus();
+			}
+		}
+
+		updateUploadRepairDetails(details) {
+			this.uploadRepair = { ...this.uploadRepair, ...details };
+			this.uploadSummary.hidden = false;
+			this.uploadFacts.replaceChildren();
+
+			const facts = [
+				['File', this.uploadRepair.filename || 'Uploaded image'],
+				['Current size', `${this.uploadRepair.width || 0} × ${this.uploadRepair.height || 0} px`],
+				['File size', this.uploadRepair.fileSizeLabel || 'Unknown'],
+			];
+			if (this.uploadRepair.targetWidth && this.uploadRepair.targetHeight) {
+				facts.push(['Proposed size', `${this.uploadRepair.targetWidth} × ${this.uploadRepair.targetHeight} px`]);
+			}
+
+			facts.forEach(([label, value]) => {
+				const fact = document.createElement('div');
+				const factLabel = document.createElement('span');
+				const factValue = document.createElement('strong');
+				factLabel.textContent = label;
+				factValue.textContent = value;
+				fact.append(factLabel, factValue);
+				this.uploadFacts.appendChild(fact);
+			});
+
+			this.uploadIssues.replaceChildren();
+			(this.uploadRepair.violations || []).forEach((violation) => {
+				const item = document.createElement('li');
+				item.textContent = violation.message || `${violation.label || 'Image'} does not meet the field requirement.`;
+				this.uploadIssues.appendChild(item);
+			});
+
+			this.localRepairButton.disabled = !this.uploadRepair.repairable ||
+				!this.uploadRepair.targetWidth ||
+				!this.uploadRepair.targetHeight;
+			this.localRepairButton.textContent = this.uploadRepair.targetWidth && this.uploadRepair.targetHeight
+				? `Resize to ${this.uploadRepair.targetWidth} × ${this.uploadRepair.targetHeight}`
+				: 'Resize locally';
+		}
+
+		async repairLocally() {
+			if (!this.uploadRepair || this.localRepairButton.disabled) {
+				return;
+			}
+
+			this.clearError();
+			this.setRepairProcessing(true, 'Resizing image...');
+			try {
+				const response = await this.request('uploadLocalRepair', {
+					repairToken: this.repairToken,
+				});
+				if (!response.complete) {
+					this.updateUploadRepairDetails(response);
+					this.refreshUploadRepairPreview();
+					throw new Error(response.message || 'The resized image still does not meet every field requirement.');
+				}
+
+				await this.completeUploadRepair(response, 'Image resized and added to the field.');
+			} catch (error) {
+				this.setRepairProcessing(false);
+				this.showError(error);
+			}
+		}
+
+		async completeUploadRepair(response, notice) {
+			if (!response.assetId || !this.assetInput) {
+				throw new Error('The repaired asset could not be added to this field.');
+			}
+
+			this.uploadFinalized = true;
+			try {
+				await selectRepairedAsset(this.assetInput, response.assetId);
+			} catch (error) {
+				Craft.cp?.displayError('The image was saved, but the asset field could not refresh. Reload this entry to see it.');
+				this.close();
+				return;
+			}
+			Craft.cp?.runQueue?.();
+			if (window.Craft?.cp) {
+				Craft.cp.displayNotice(notice);
+			}
+			this.close();
+		}
+
+		refreshUploadRepairPreview() {
+			this.originalUrl = withCacheBuster(this.originalUrl);
+			this.originalImage.src = this.originalUrl;
+			this.compareOriginalImage.src = this.originalUrl;
+		}
+
+		async discardUpload() {
+			if (!this.uploadRepair || this.uploadDiscarded || this.uploadFinalized) {
+				this.close();
+				return;
+			}
+
+			this.clearError();
+			this.setRepairProcessing(true, 'Discarding upload...');
+			try {
+				if (this.previewId) {
+					await this.request('discard', {
+						assetId: this.assetId,
+						previewId: this.previewId,
+						token: this.token,
+					});
+					this.previewId = '';
+				}
+				await this.request('uploadDiscard', {
+					repairToken: this.repairToken,
+				});
+				this.uploadDiscarded = true;
+				this.close();
+			} catch (error) {
+				this.setRepairProcessing(false);
+				this.showError(error);
+			}
+		}
+
+		async requestClose() {
+			if (!this.uploadRepair || this.uploadFinalized || this.uploadDiscarded) {
+				this.close();
+				return;
+			}
+
+			const confirmed = window.confirm('Discard this uploaded image?');
+			if (confirmed) {
+				await this.discardUpload();
+			}
+		}
+
+		async cleanupPendingUpload() {
+			if (!this.uploadRepair || this.uploadFinalized || this.uploadDiscarded) {
+				return;
+			}
+
+			this.uploadDiscarded = true;
+			try {
+				if (this.token) {
+					await this.request('cancel', {
+						assetId: this.assetId,
+						token: this.token,
+						jobId: this.jobId,
+						uploadRepairToken: this.repairToken,
+					});
+				}
+				if (this.previewId) {
+					await this.request('discard', {
+						assetId: this.assetId,
+						previewId: this.previewId,
+						token: this.token,
+						uploadRepairToken: this.repairToken,
+					});
+				}
+				await this.request('uploadDiscard', {
+					repairToken: this.repairToken,
+				});
+			} catch (error) {
+				// Craft's temporary asset cleanup remains the final fallback.
+			}
 		}
 
 		setupProviderControls() {
@@ -508,6 +840,9 @@
 				const payload = {
 					assetId: this.assetId,
 				};
+				if (this.uploadRepair) {
+					payload.uploadRepairToken = this.repairToken;
+				}
 				if (config.providerChoiceEnabled) {
 					payload.imageEnhancementProvider = this.selectedProvider;
 					payload.imageEnhancementModel = this.selectedModel;
@@ -538,6 +873,7 @@
 					assetId: this.assetId,
 					token: this.token,
 					jobId: this.jobId,
+					uploadRepairToken: this.repairToken,
 				});
 
 				if (response.status === 'complete') {
@@ -580,6 +916,7 @@
 					assetId: this.assetId,
 					token: this.token,
 					jobId: this.jobId,
+					uploadRepairToken: this.repairToken,
 				});
 				window.clearTimeout(this.pollTimer);
 				this.setBusy(false);
@@ -605,7 +942,24 @@
 					previewId: this.previewId,
 					token: this.token,
 					previewUrl: this.enhancedUrl,
+					uploadRepairToken: this.repairToken,
 				});
+				if (this.uploadRepair) {
+					const finalized = await this.request('uploadFinalize', {
+						repairToken: this.repairToken,
+					});
+					if (!finalized.complete) {
+						this.previewId = '';
+						this.enhancedUrl = '';
+						this.updateUploadRepairDetails(finalized);
+						this.refreshUploadRepairPreview();
+						this.setPreviewMode(false);
+						throw new Error(finalized.message || 'The enhanced image still does not meet every field requirement.');
+					}
+
+					await this.completeUploadRepair(finalized, 'Enhanced image added to the field.');
+					return;
+				}
 				const imageUrl = response.imageUrl || this.enhancedUrl;
 				refreshAssetFieldImage(this.assetId, withCacheBuster(imageUrl), this.card);
 				if (window.Craft?.cp) {
@@ -613,7 +967,11 @@
 				}
 				this.close();
 			} catch (error) {
-				this.setPreviewProcessing(false);
+				if (this.uploadRepair && !this.previewId) {
+					this.setRepairProcessing(false);
+				} else {
+					this.setPreviewProcessing(false);
+				}
 				this.showError(error);
 			}
 		}
@@ -632,7 +990,15 @@
 					assetId: this.assetId,
 					previewId: this.previewId,
 					token: this.token,
+					uploadRepairToken: this.repairToken,
 				});
+				if (this.uploadRepair) {
+					this.previewId = '';
+					this.enhancedUrl = '';
+					this.setPreviewMode(false);
+					this.setStatus('', false);
+					return;
+				}
 				this.close();
 			} catch (error) {
 				this.setPreviewProcessing(false);
@@ -666,11 +1032,25 @@
 			this.keepButton.disabled = isBusy;
 			this.discardButton.disabled = isBusy;
 			this.cancelButton.disabled = false;
+			this.closeButton.disabled = isBusy;
 			this.setActionState(isBusy ? 'busy' : 'idle');
 			this.setStatus(label, isBusy, includeCounter);
 		}
 
+		setRepairProcessing(isProcessing, label = '') {
+			this.closeButton.disabled = isProcessing;
+			this.localRepairButton.disabled = isProcessing || !this.uploadRepair?.repairable;
+			this.enhanceButton.disabled = isProcessing;
+			this.cancelButton.disabled = true;
+			this.keepButton.disabled = true;
+			this.discardButton.disabled = true;
+			this.discardUploadButton.disabled = isProcessing;
+			this.setActionState(isProcessing ? 'processing' : 'idle');
+			this.setStatus(label, isProcessing);
+		}
+
 		setPreviewProcessing(isProcessing, label = '') {
+			this.closeButton.disabled = isProcessing;
 			this.enhanceButton.disabled = true;
 			this.cancelButton.disabled = true;
 			this.keepButton.disabled = isProcessing;
@@ -680,6 +1060,16 @@
 		}
 
 		setActionState(state) {
+			if (this.uploadRepair) {
+				this.toggleButton(this.localRepairButton, state !== 'idle');
+				this.toggleButton(this.enhanceButton, state !== 'idle');
+				this.toggleButton(this.cancelButton, state !== 'busy');
+				this.toggleButton(this.keepButton, state !== 'preview');
+				this.toggleButton(this.discardButton, state !== 'preview');
+				this.toggleButton(this.discardUploadButton, state !== 'idle');
+				return;
+			}
+
 			this.toggleButton(this.enhanceButton, state !== 'idle');
 			this.toggleButton(this.cancelButton, state !== 'busy');
 			this.toggleButton(this.keepButton, state !== 'preview');
@@ -771,9 +1161,17 @@
 		}
 
 		destroy() {
+			if (this.destroyed) {
+				return;
+			}
+			this.destroyed = true;
+			void this.cleanupPendingUpload();
 			window.clearTimeout(this.pollTimer);
 			window.clearInterval(this.statusTickTimer);
 			this.root?.remove();
+			if (typeof this.onDestroyed === 'function') {
+				this.onDestroyed();
+			}
 		}
 
 		getInitialProvider() {
@@ -822,6 +1220,64 @@
 				// Ignore storage errors in the CP.
 			}
 		}
+	}
+
+	async function selectRepairedAsset(input, assetId) {
+		if (!input?.canAddMoreElements?.()) {
+			throw new Error('The field limit has been reached, so the repaired image could not be selected.');
+		}
+
+		const viewMode = input.settings.viewMode;
+		const craftMajorVersion = Number.parseInt(String(Craft.version || '').split('.')[0], 10);
+		if (craftMajorVersion === 4) {
+			const response = await Craft.sendActionRequest('POST', 'elements/get-element-html', {
+				data: {
+					elementId: assetId,
+					siteId: input.settings.criteria?.siteId,
+					thumbSize: viewMode,
+				},
+			});
+			const element = window.jQuery(response.data.html);
+			await Craft.appendHeadHtml(response.data.headHtml);
+			input.selectUploadedFile(Craft.getElementInfo(element));
+			input.$container.trigger('change');
+			Craft.cp?.setEdited?.(true);
+			scheduleScanBurst();
+			return;
+		}
+
+		const response = await Craft.sendActionRequest('POST', 'app/render-elements', {
+			data: {
+				elements: [
+					{
+						type: 'craft\\elements\\Asset',
+						id: assetId,
+						siteId: input.settings.criteria?.siteId,
+						instances: [
+							{
+								context: 'field',
+								ui: ['list', 'list-inline', 'large', 'thumbs'].includes(viewMode) ? 'chip' : 'card',
+								size: ['large', 'thumbs'].includes(viewMode) ? 'large' : 'small',
+								showActionMenu: input.settings.showActionMenu,
+							},
+						],
+					},
+				],
+			},
+		});
+
+		const elementHtml = response.data?.elements?.[assetId]?.[0];
+		if (!elementHtml) {
+			throw new Error('Craft could not render the repaired asset.');
+		}
+
+		const elementInfo = Craft.getElementInfo(elementHtml);
+		await input.selectElements([elementInfo]);
+		await Craft.appendHeadHtml(response.data.headHtml);
+		await Craft.appendBodyHtml(response.data.bodyHtml);
+		input.$container.trigger('change');
+		Craft.cp?.setEdited?.(true);
+		scheduleScanBurst();
 	}
 
 	function refreshAssetFieldImage(assetId, imageUrl, sourceCard) {

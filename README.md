@@ -144,6 +144,19 @@ The plugin also adds a small **Enhance** action below image assets inside Craft 
 
 If **AI image provider** is set to **Choose in frontend**, the modal also shows provider and model selectors and remembers the last selected combination in the browser.
 
+#### Upload Requirement Assistant
+
+Enable **Assist image uploads that do not meet field requirements** on the **Volumes** settings tab to replace Craft's generic “asset is not selectable” message for repairable image uploads. The assistant applies to the asset fields selected under **Enable Image Enhancer tools in these asset fields**.
+
+When an uploaded image fails a width, height, or file-size selection condition, the plugin keeps it in Craft's temporary upload folder and shows a modal with:
+
+- The filename, current dimensions, file size, and failed field rules.
+- A proportional local resize using Craft's configured GD or Imagick image driver.
+- Queued AI enhancement using the configured provider, including the before/after comparison.
+- A discard action that permanently removes the temporary upload.
+
+After local or AI processing, the plugin evaluates the complete field selection condition again. Only a passing image is moved into the field's configured upload folder and selected in the field. Unsupported failures continue through Craft's normal rejection path, and closing or discarding the assistant cleans up the temporary asset.
+
 ### Asset Volumes
 
 Select the asset volumes that should be analyzed. Images uploaded to other volumes are skipped.
@@ -177,3 +190,4 @@ Debug output includes the PHP process user, original asset ownership, temporary 
 - Remote filesystems may need additional handling before their assets can be analyzed.
 - The Vue component is GraphQL-ready, but the plugin currently ships Craft action endpoints only; GraphQL schema/resolvers still need to be added before `api-transport="graphql"` can be used.
 - AI enhancement can alter image details more than Imagick safe optimization, depending on the selected provider, configured prompt, and model output.
+- The upload requirement assistant repairs numeric width, height, and file-size selection conditions while preserving the source aspect ratio. Other failed selection-condition rules remain non-repairable.

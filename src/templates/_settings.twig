@@ -531,6 +531,14 @@
 <div id="tab-volumes"  class="hidden">
 	
 	<h1>Asset Volumes</h1>
+
+	{{ forms.lightswitchField({
+		label: 'Assist image uploads that do not meet field requirements',
+		id: 'enableUploadRequirementAssistant',
+		name: 'enableUploadRequirementAssistant',
+		on: settings.enableUploadRequirementAssistant,
+		instructions: 'For the configured CP asset fields, keep repairable image uploads temporarily and show editors a resize or AI enhancement workflow instead of only reporting that the asset is not selectable.',
+	}) }}
 	
 	{% set allVolumes = craft.app.volumes.allVolumes %}
 	
@@ -560,8 +568,8 @@
 	{% endfor %}
 
 	{{ forms.checkboxGroupField({
-		label: 'Show the CP Enhance action in these asset fields',
-		instructions: 'Select the asset fields that should show the Enhance link in the control panel. If nothing is selected, the action is limited to top-level asset fields and hidden inside Matrix/nested fields.',
+		label: 'Enable Image Enhancer tools in these asset fields',
+		instructions: 'Select the asset fields that should show the Enhance link and, when enabled above, the upload requirement assistant. If nothing is selected, the tools are limited to top-level asset fields and hidden inside Matrix/nested fields.',
 		name: 'cpEnhancerAssetFieldHandles',
 		options: cpEnhancerAssetFieldOptions
 	}) }}

@@ -22,6 +22,8 @@ class ArticleImageEnhancementJob extends BaseJob
 	public int $retryAttempt = 0;
 	public ?string $imageEnhancementProvider = null;
 	public ?string $imageEnhancementModel = null;
+	public ?int $targetWidth = null;
+	public ?int $targetHeight = null;
 
 	public function execute($queue): void
 	{
@@ -102,8 +104,10 @@ class ArticleImageEnhancementJob extends BaseJob
 		[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
 		$tempPath = ImageEnhancer::getInstance()->aiImageEnhancement->enhanceToTempFile($client, $settings, $asset, $localPath, $providerOptions);
 
-		if ($originalWidth && $originalHeight) {
-			$this->normalizeReplacementImageDimensions($asset, $tempPath, $originalWidth, $originalHeight);
+		$targetWidth = $this->targetWidth ?: $originalWidth;
+		$targetHeight = $this->targetHeight ?: $originalHeight;
+		if ($targetWidth && $targetHeight) {
+			$this->normalizeReplacementImageDimensions($asset, $tempPath, $targetWidth, $targetHeight);
 		}
 
 		return $tempPath;
@@ -155,6 +159,19 @@ class ArticleImageEnhancementJob extends BaseJob
 	private function normalizeReplacementImageDimensions(Asset $asset, string $path, int $targetWidth, int $targetHeight): void
 	{
 		if (!class_exists(Imagick::class)) {
+			$normalizedPath = $this->getTempReplacementPath($asset);
+			try {
+				$image = Craft::$app->getImages()->loadImage($path);
+				$image->scaleAndCrop($targetWidth, $targetHeight, true);
+				if (!$image->saveAs($normalizedPath) || !copy($normalizedPath, $path)) {
+					throw new \RuntimeException('Could not normalize the enhanced image dimensions.');
+				}
+			} finally {
+				if (file_exists($normalizedPath)) {
+					@unlink($normalizedPath);
+				}
+			}
+
 			return;
 		}
 
@@ -186,6 +203,9 @@ class ArticleImageEnhancementJob extends BaseJob
 	{
 		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
 		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
+		if ($tempPath === false) {
+			throw new \RuntimeException('Could not create a temporary image file.');
+		}
 
 		if (!$extension) {
 			return $tempPath;

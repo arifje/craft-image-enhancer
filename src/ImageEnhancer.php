@@ -6,6 +6,7 @@ use Craft;
 
 use arjanbrinkman\craftimageenhancer\models\Settings;
 use arjanbrinkman\craftimageenhancer\services\AiImageEnhancementService;
+use arjanbrinkman\craftimageenhancer\services\AssetRequirementService;
 use arjanbrinkman\craftimageenhancer\services\ImageQualityService;
 use arjanbrinkman\craftimageenhancer\services\RuntimeSettingsService;
 use arjanbrinkman\craftimageenhancer\jobs\AnalyzeImageJob;
@@ -35,6 +36,7 @@ use craft\events\TemplateEvent;
  * @method static ImageEnhancer getInstance()
  * @method Settings getSettings()
  * @property AiImageEnhancementService $aiImageEnhancement
+ * @property AssetRequirementService $assetRequirements
  * @property RuntimeSettingsService $runtimeSettings
  */
 class ImageEnhancer extends Plugin
@@ -49,6 +51,7 @@ class ImageEnhancer extends Plugin
 			'components' => [
 				'imageQualityService' => ImageQualityService::class,
 				'aiImageEnhancement' => AiImageEnhancementService::class,
+				'assetRequirements' => AssetRequirementService::class,
 				'runtimeSettings' => RuntimeSettingsService::class,
 			],
 		];
@@ -187,6 +190,7 @@ class ImageEnhancer extends Plugin
 
 		$settings = $this->getSettings();
 		$config = [
+			'uploadRequirementAssistantEnabled' => $settings->enableUploadRequirementAssistant,
 			'providerChoiceEnabled' => $settings->imageEnhancementProvider === Settings::IMAGE_PROVIDER_FRONTEND,
 			'imageEnhancementProvider' => $settings->imageEnhancementProvider,
 			'imageEnhancementModel' => $settings->imageEnhancementModel,
@@ -200,6 +204,10 @@ class ImageEnhancer extends Plugin
 				Settings::IMAGE_PROVIDER_GOOGLE => Settings::googleImageEnhancementModelOptions(),
 			],
 			'routes' => [
+				'uploadAssistant' => 'craft-image-enhancer/upload-assistant/upload',
+				'uploadLocalRepair' => 'craft-image-enhancer/upload-assistant/local-repair',
+				'uploadFinalize' => 'craft-image-enhancer/upload-assistant/finalize',
+				'uploadDiscard' => 'craft-image-enhancer/upload-assistant/discard',
 				'assetInfo' => 'craft-image-enhancer/article-image/asset-info',
 				'enhance' => 'craft-image-enhancer/article-image/enhance',
 				'status' => 'craft-image-enhancer/article-image/status',
@@ -239,10 +247,6 @@ class ImageEnhancer extends Plugin
 				return;
 			}
 
-			if (!$this->runtimeSettings->isQualityCheckEnabled()) {
-				return;
-			}
-
 			if (self::$skipAssetQueue) {
 				return;
 			}
@@ -253,12 +257,20 @@ class ImageEnhancer extends Plugin
 				return;
 			}*/
 			
-			// Push to a job
-			Craft::$app->queue->push(new AnalyzeImageJob([
-				'assetId' => $element->id,
-				'entryId' => $this->getRequestEntryId() ?? $this->getRelatedEntryIdForAsset($element->id),
-			]));
+			$this->queueAssetAnalysis($element, $this->getRequestEntryId());
 		});
+	}
+
+	public function queueAssetAnalysis(Asset $asset, ?int $entryId = null): void
+	{
+		if (!$this->runtimeSettings->isQualityCheckEnabled()) {
+			return;
+		}
+
+		Craft::$app->queue->push(new AnalyzeImageJob([
+			'assetId' => $asset->id,
+			'entryId' => $entryId ?? $this->getRelatedEntryIdForAsset((int) $asset->id),
+		]));
 	}
 
 	private function getRequestEntryId(): ?int

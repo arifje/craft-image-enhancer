@@ -30,6 +30,18 @@ class ArticleImageController extends Controller
 
 		$settings = ImageEnhancer::getInstance()->getSettings();
 		$enhancementService = ImageEnhancer::getInstance()->aiImageEnhancement;
+		$repairToken = (string) Craft::$app->getRequest()->getBodyParam('uploadRepairToken');
+		$repairTarget = null;
+		if ($repairToken !== '') {
+			$repairTarget = ImageEnhancer::getInstance()->assetRequirements->getRepairTargetDimensions(
+				$repairToken,
+				(int) $asset->id,
+				(int) Craft::$app->getUser()->getId(),
+			);
+			if ($repairTarget === null) {
+				return $this->asJsonFailure('This upload repair session is invalid or has expired.');
+			}
+		}
 		$providerOptions = $this->getProviderOptionsForRequest($settings);
 		if ($providerOptions === false) {
 			return $this->asJsonFailure('Invalid AI image provider or model.');
@@ -57,6 +69,8 @@ class ArticleImageController extends Controller
 				'token' => $token,
 				'imageEnhancementProvider' => $providerOptions['provider'] ?? null,
 				'imageEnhancementModel' => $providerOptions['model'] ?? null,
+				'targetWidth' => $repairTarget['width'] ?? null,
+				'targetHeight' => $repairTarget['height'] ?? null,
 			]));
 			$this->setEnhancementStatus($token, [
 				'status' => 'queued',
@@ -540,7 +554,19 @@ class ArticleImageController extends Controller
 	{
 		$user = Craft::$app->getUser()->getIdentity();
 
-		return $user && $asset->canSave($user);
+		if ($user && $asset->canSave($user)) {
+			return true;
+		}
+
+		$repairToken = (string) Craft::$app->getRequest()->getBodyParam('uploadRepairToken');
+
+		return $user &&
+			$repairToken !== '' &&
+			ImageEnhancer::getInstance()->assetRequirements->getAuthorizedRepairContext(
+				$repairToken,
+				(int) $user->id,
+				(int) $asset->id,
+			) !== null;
 	}
 
 	private function deleteElement(Asset $asset): void
