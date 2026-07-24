@@ -138,30 +138,9 @@ The component is also prepared for a future GraphQL transport. Keep `api-transpo
 GraphQL operations can be provided for `enhance`, `blurFaces`, `status`, `cancel`, `reset`, `keep`, and `discard`. Each operation may be a query/mutation string or an object with `query`, `operationName`, `variables`, and `dataPath`.
 When manual blur is used, the `blurFaces` payload includes `manualFaces`, an array of normalized face/head boxes with `x`, `y`, `width`, and `height` values from 0 to 1000.
 
-### Image Creator
-
-Image Creator integrates the template generator from the optional Craft Cards plugin into the Craft control panel.
-
-1. Install and enable `arjan-brinkman/craft-cards`.
-2. Configure its Abyssale API key, public temporary upload path/URL, and at least one Abyssale template.
-3. Give editors permission to save assets in the intended Craft volumes.
-
-The **Image Creator** item in the control-panel sidebar opens a dedicated generator. Editors can choose a template and format, enter the template text, upload up to two JPEG/PNG source images, generate the result, and save it as a normal Craft asset in a writable volume.
-
-Asset fields enabled under **Enable Image Enhancer tools in these asset fields** also show a **Create** action beside **Enhance**. It opens the same Vue component in a modal. **Add to field** saves the generated image in that field's resolved upload location and selects it immediately. When a single-asset field is already full, the generated asset replaces the clicked field selection without overwriting the original asset file.
-
-Generated result URLs are retained server-side behind a short-lived, user-bound token before import. The plugin downloads and validates the result itself, checks field selection conditions, enforces Craft volume permissions, and marks the entry as edited after selection.
-
-The Vue source lives in `src/web/assets/imageenhancer/src`. Its compiled production bundle is committed with the plugin. Rebuild it after component changes:
-
-```bash
-npm install
-npm run build
-```
-
 ### Control Panel Asset Fields
 
-The plugin adds small **Enhance** and, when Craft Cards is configured, **Create** actions below image assets inside enabled Craft asset fields. Clicking **Enhance** opens a control-panel modal that queues the same enhancement job, polls the queue status, shows a before/after slider, and lets the editor save the enhanced preview as the replacement file for the existing asset. Saving does not change the relation field value; it replaces the file behind the selected asset.
+The plugin also adds a small **Enhance** action below image assets inside Craft asset fields. Clicking it opens a control-panel modal that queues the same enhancement job, polls the queue status, shows a before/after slider, and lets the editor save the enhanced preview as the replacement file for the existing asset. Saving does not change the relation field value; it replaces the file behind the selected asset.
 
 If **AI image provider** is set to **Choose in frontend**, the modal also shows provider and model selectors and remembers the last selected combination in the browser.
 

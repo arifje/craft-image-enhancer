@@ -10,13 +10,6 @@
 		xAiImageEnhancementModel: 'grok-imagine-image-quality',
 		googleImageEnhancementModel: 'gemini-3.1-flash-image',
 		allowedFieldHandles: [],
-		imageCreator: {
-			available: false,
-			message: '',
-			templates: [],
-			volumes: [],
-			routes: {},
-		},
 		routes: {
 			uploadAssistant: 'craft-image-enhancer/upload-assistant/upload',
 			uploadLocalRepair: 'craft-image-enhancer/upload-assistant/local-repair',
@@ -277,19 +270,10 @@
 
 		const action = document.createElement('div');
 		action.className = 'image-enhancer-cp-field-action';
-		action.innerHTML = [
-			'<button type="button" class="image-enhancer-cp-field-button" data-image-enhancer-action="enhance">Enhance</button>',
-			config.imageCreator?.available
-				? '<button type="button" class="image-enhancer-cp-field-button" data-image-enhancer-action="create">Create</button>'
-				: '',
-		].join('');
-		const button = action.querySelector('[data-image-enhancer-action="enhance"]');
+		action.innerHTML = '<button type="button" class="image-enhancer-cp-field-button">Enhance</button>';
+		const button = action.querySelector('button');
 		button.dataset.imageEnhancerCpAssetId = assetId;
 		button.dataset.imageEnhancerCpOriginalUrl = originalUrl;
-		const createButton = action.querySelector('[data-image-enhancer-action="create"]');
-		if (createButton) {
-			createButton.dataset.imageEnhancerCpAssetId = assetId;
-		}
 
 		card.appendChild(action);
 		card.dataset.imageEnhancerCpReady = '1';
@@ -433,24 +417,6 @@
 		event.stopPropagation();
 
 		const card = button.closest('.element[data-id], .element-card[data-id], [data-asset-id]');
-		if (button.dataset.imageEnhancerAction === 'create') {
-			const modal = new CpImageCreatorModal({
-				assetId: button.dataset.imageEnhancerCpAssetId,
-				card,
-				assetInput: getAssetInput(card),
-			});
-			button.disabled = true;
-			modal.show()
-				.catch((error) => {
-					const message = error instanceof Error ? error.message : 'Could not open Image Creator.';
-					Craft.cp?.displayError(message);
-				})
-				.finally(() => {
-					button.disabled = false;
-				});
-			return;
-		}
-
 		const modal = new CpEnhancerModal({
 			assetId: button.dataset.imageEnhancerCpAssetId,
 			originalUrl: button.dataset.imageEnhancerCpOriginalUrl || getImageUrl(card),
@@ -467,104 +433,6 @@
 			.finally(() => {
 				button.disabled = false;
 			});
-	}
-
-	function getAssetInput(card) {
-		const container = card?.closest?.('.elementselect');
-		if (!container || !window.jQuery || !window.Craft?.AssetSelectInput) {
-			return null;
-		}
-
-		const input = window.jQuery(container).data('elementSelect');
-
-		return input instanceof Craft.AssetSelectInput ? input : null;
-	}
-
-	class CpImageCreatorModal {
-		constructor({ assetId, card, assetInput }) {
-			this.assetId = assetId;
-			this.card = card;
-			this.assetInput = assetInput;
-			this.modal = null;
-			this.root = null;
-			this.mounted = null;
-			this.destroyed = false;
-		}
-
-		async show() {
-			if (!this.assetInput) {
-				throw new Error('The current asset field could not be resolved.');
-			}
-			if (!window.ImageEnhancerImageCreator?.mount) {
-				throw new Error('The Image Creator component is unavailable.');
-			}
-
-			this.root = document.createElement('div');
-			this.root.className = 'modal image-creator-cp-modal';
-			const mountElement = document.createElement('div');
-			this.root.appendChild(mountElement);
-
-			if (window.Garnish && window.jQuery && Garnish.$bod) {
-				this.$root = window.jQuery(this.root).appendTo(Garnish.$bod);
-				this.modal = new Garnish.Modal(this.$root, {
-					onHide: () => window.setTimeout(() => this.destroy(), 0),
-				});
-			} else {
-				document.body.appendChild(this.root);
-			}
-
-			this.mounted = window.ImageEnhancerImageCreator.mount(mountElement, {
-				mode: 'field',
-				config: config.imageCreator,
-				fieldContext: {
-					fieldId: this.assetInput.settings.fieldId,
-					elementId: this.assetInput.settings.sourceElementId || 0,
-					siteId: this.assetInput.settings.criteria?.siteId || 0,
-				},
-				onSaved: (asset) => this.selectGeneratedAsset(asset),
-				onClose: () => this.hide(),
-			});
-		}
-
-		async selectGeneratedAsset(asset) {
-			if (!asset?.assetId) {
-				throw new Error('The generated asset response is invalid.');
-			}
-
-			if (this.assetInput.canAddMoreElements?.()) {
-				await selectRepairedAsset(this.assetInput, asset.assetId);
-				return;
-			}
-
-			if (typeof this.assetInput.replaceElement === 'function' && this.assetId) {
-				await this.assetInput.replaceElement(this.assetId, asset.assetId);
-				this.assetInput.$container?.trigger('change');
-				Craft.cp?.setEdited?.(true);
-				scheduleScanBurst();
-				return;
-			}
-
-			throw new Error('The field limit has been reached and the selected asset could not be replaced.');
-		}
-
-		hide() {
-			if (this.modal) {
-				this.modal.hide();
-				return;
-			}
-
-			this.destroy();
-		}
-
-		destroy() {
-			if (this.destroyed) {
-				return;
-			}
-
-			this.destroyed = true;
-			this.mounted?.unmount?.();
-			this.root?.remove();
-		}
 	}
 
 	class CpEnhancerModal {
@@ -1485,7 +1353,7 @@
 			}
 		});
 
-		const button = card.querySelector('[data-image-enhancer-action="enhance"]');
+		const button = card.querySelector('.image-enhancer-cp-field-button');
 		if (button) {
 			button.dataset.imageEnhancerCpOriginalUrl = imageUrl;
 		}

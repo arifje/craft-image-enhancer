@@ -7,7 +7,6 @@ use Craft;
 use arjanbrinkman\craftimageenhancer\models\Settings;
 use arjanbrinkman\craftimageenhancer\services\AiImageEnhancementService;
 use arjanbrinkman\craftimageenhancer\services\AssetRequirementService;
-use arjanbrinkman\craftimageenhancer\services\ImageCreatorService;
 use arjanbrinkman\craftimageenhancer\services\ImageQualityService;
 use arjanbrinkman\craftimageenhancer\services\RuntimeSettingsService;
 use arjanbrinkman\craftimageenhancer\jobs\AnalyzeImageJob;
@@ -38,13 +37,11 @@ use craft\events\TemplateEvent;
  * @method Settings getSettings()
  * @property AiImageEnhancementService $aiImageEnhancement
  * @property AssetRequirementService $assetRequirements
- * @property ImageCreatorService $imageCreator
  * @property RuntimeSettingsService $runtimeSettings
  */
 class ImageEnhancer extends Plugin
 {
 	public string $schemaVersion = '1.2.0';
-	public bool $hasCpSection = true;
 	public bool $hasCpSettings = true;
 	public static bool $skipAssetQueue = false;
 
@@ -55,7 +52,6 @@ class ImageEnhancer extends Plugin
 				'imageQualityService' => ImageQualityService::class,
 				'aiImageEnhancement' => AiImageEnhancementService::class,
 				'assetRequirements' => AssetRequirementService::class,
-				'imageCreator' => ImageCreatorService::class,
 				'runtimeSettings' => RuntimeSettingsService::class,
 			],
 		];
@@ -87,16 +83,6 @@ class ImageEnhancer extends Plugin
 	protected function createSettingsModel(): ?Model
 	{
 		return Craft::createObject(Settings::class);
-	}
-
-	public function getCpNavItem(): ?array
-	{
-		$item = parent::getCpNavItem();
-		if ($item !== null) {
-			$item['label'] = 'Image Creator';
-		}
-
-		return $item;
 	}
 
 	protected function settingsHtml(): ?string
@@ -218,17 +204,6 @@ class ImageEnhancer extends Plugin
 				Settings::IMAGE_PROVIDER_XAI => Settings::xAiImageEnhancementModelOptions(),
 				Settings::IMAGE_PROVIDER_GOOGLE => Settings::googleImageEnhancementModelOptions(),
 			],
-			'imageCreator' => array_merge(
-				$this->imageCreator->getClientConfig(),
-				[
-					'routes' => [
-						'templateData' => 'craft-image-enhancer/image-creator/template-data',
-						'upload' => 'craft-image-enhancer/image-creator/upload',
-						'generate' => 'craft-image-enhancer/image-creator/generate',
-						'save' => 'craft-image-enhancer/image-creator/save',
-					],
-				],
-			),
 			'routes' => [
 				'uploadAssistant' => 'craft-image-enhancer/upload-assistant/upload',
 				'uploadLocalRepair' => 'craft-image-enhancer/upload-assistant/local-repair',
