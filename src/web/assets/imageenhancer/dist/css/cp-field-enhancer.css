@@ -1,4 +1,7 @@
 .image-enhancer-cp-field-action {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
 	margin-top: 6px;
 	line-height: 1;
 }
@@ -20,6 +23,11 @@
 .image-enhancer-cp-field-button:hover,
 .image-enhancer-cp-field-button:focus {
 	color: #b83d0f;
+}
+
+.image-enhancer-cp-field-button:disabled {
+	opacity: 0.55;
+	cursor: wait;
 }
 
 .modal.image-enhancer-cp-modal,

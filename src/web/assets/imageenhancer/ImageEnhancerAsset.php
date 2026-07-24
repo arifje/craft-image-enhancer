@@ -10,20 +10,22 @@ use craft\web\assets\cp\CpAsset;
  */
 class ImageEnhancerAsset extends AssetBundle
 {
-   public function init(): void
-   {
-	   $this->sourcePath = __DIR__ . '/dist';
-	   $this->depends = [
-		   CpAsset::class,
-	   ];
-	   $this->js = [
-		   'js/check.js',
-		   'js/cp-field-enhancer.js',
-	   ];
-	   $this->css = [
-		   'css/cp-field-enhancer.css',
-	   ];
-	   
-	   parent::init();
-   }
+    public function init(): void
+    {
+        $this->sourcePath = __DIR__ . '/dist';
+        $this->depends = [
+            CpAsset::class,
+        ];
+        $this->js = [
+            'js/check.js',
+            'creator/image-creator.js',
+            'js/cp-field-enhancer.js',
+        ];
+        $this->css = [
+            'creator/image-creator.css',
+            'css/cp-field-enhancer.css',
+        ];
+
+        parent::init();
+    }
 }
