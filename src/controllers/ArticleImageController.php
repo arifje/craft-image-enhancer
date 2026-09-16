@@ -392,7 +392,7 @@ class ArticleImageController extends Controller
 		$provider = (string) $request->getBodyParam('imageEnhancementProvider');
 		$model = (string) $request->getBodyParam('imageEnhancementModel');
 		$modelsByProvider = [
-			Settings::IMAGE_PROVIDER_OPENAI => array_column(Settings::imageEnhancementModelOptions(), 'value'),
+			Settings::IMAGE_PROVIDER_OPENAI => array_column(ImageEnhancer::getInstance()->getImageEnhancementModelOptions(), 'value'),
 			Settings::IMAGE_PROVIDER_XAI => array_column(Settings::xAiImageEnhancementModelOptions(), 'value'),
 			Settings::IMAGE_PROVIDER_GOOGLE => array_column(Settings::googleImageEnhancementModelOptions(), 'value'),
 		];

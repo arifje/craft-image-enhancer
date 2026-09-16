@@ -263,9 +263,17 @@ PROMPT;
 	public static function imageEnhancementModelOptions(): array
 	{
 		return [
+			['label' => 'GPT Image 2.5 Sunburst', 'value' => 'gpt-image-2.5-sunburst'],
+			['label' => 'GPT Image 2.5 Flare', 'value' => 'gpt-image-2.5-flare'],
 			['label' => 'GPT Image 2', 'value' => self::IMAGE_MODEL_GPT_IMAGE_2],
 			['label' => 'GPT Image 1', 'value' => self::IMAGE_MODEL_GPT_IMAGE_1],
 		];
+	}
+
+	public static function isSupportedImageEnhancementModel(string $model): bool
+	{
+		return $model === 'chatgpt-image-latest'
+			|| preg_match('/^gpt-image-[a-z0-9]+(?:[.-][a-z0-9]+)*$/D', $model) === 1;
 	}
 
 	public static function xAiImageEnhancementModelOptions(): array

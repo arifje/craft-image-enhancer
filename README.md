@@ -64,9 +64,13 @@ AI-enhanced replacements are cropped back to the original asset dimensions so th
 1. Create an API key in the OpenAI platform dashboard.
 2. Enter it in **Settings → ChatGPT → ChatGPT API Key**.
 3. In **Enhancement**, set **AI image provider** to **OpenAI**.
-4. Choose an OpenAI image model, for example `gpt-image-2`.
+4. Choose an OpenAI image model, for example `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`.
 
 The same OpenAI key is used for quality analysis, face detection fallback, and OpenAI image enhancement.
+
+OpenAI model options are loaded from the [Models API](https://developers.openai.com/api/reference/resources/models/methods/list) using the saved API key and cached in Craft for **15 minutes**. The settings page and control-panel editor share this list, and frontend model validation uses the same options. New `gpt-image-*` models appear automatically when returned for your account, including dated snapshots; the `chatgpt-image-latest` alias is also supported. The selected model ID is sent unchanged to the image editing API. The ChatGPT settings selector reuses the cached discovery response.
+
+With no key, an unavailable API, or no compatible models returned, the selector uses built-in fallback options, including GPT Image 2.5 Sunburst and Flare. Your saved compatible model stays selectable even if it is absent from discovery. Failed lookups are also cached for 15 minutes to avoid repeated delays. Fallback options do not guarantee model access for your account. After saving a new API key, reload settings; changing the resolved key uses a separate cache entry. An unchanged key picks up new models on the next page load after cache expiry (or after clearing Craft's data cache).
 
 API key fields support Craft environment-variable references. Add keys to `.env`, for example `OPENAI_API_KEY=sk-...`, and select `$OPENAI_API_KEY` from the field suggestions. The saved project config contains only the environment-variable reference; Craft resolves the key when making API requests. The xAI and Google fields work the same way.
 
@@ -117,6 +121,7 @@ By default the component uses the existing Craft action endpoints, so it works w
 	:asset-id="{{ articleThumbnail ? articleThumbnail.id : 'null' }}"
 	:show-enhancement-options="{{ isRedactie ? 'true' : 'false' }}"
 	:provider-choice-enabled="{{ craft.app.plugins.plugin('craft-image-enhancer').settings.imageEnhancementProvider == 'frontend' ? 'true' : 'false' }}"
+	:open-ai-image-enhancement-models="{{ craft.app.plugins.plugin('craft-image-enhancer').getImageEnhancementModelOptions()|json_encode|e('html_attr') }}"
 	src="{{ articleThumbnail and articleThumbnail.url ? articleThumbnail.url ~ '?v=' ~ cachebuster : '' }}"
 	alt="{{ entry.title ?? '' }}"
 	category="{{ articleCategory ?? '' }}"
@@ -127,6 +132,8 @@ By default the component uses the existing Craft action endpoints, so it works w
 ```
 
 Current action endpoint mode assumes a logged-in Craft user, same-origin requests, CSRF, and asset save permissions. This is the right mode for Craft preview pages.
+
+Pass `open-ai-image-enhancement-models` as shown above to keep the copyable Vue component's OpenAI selector synchronized with the cached server list. Without this prop, the component uses its bundled model defaults.
 
 The component is also prepared for a future GraphQL transport. Keep `api-transport` unset for now. Once GraphQL mutations/queries are added to the backend, the same component can switch transports:
 
@@ -189,6 +196,10 @@ tail -f storage/logs/web.log | grep 'ImageEnhancer DEBUG'
 ```
 
 Debug output includes the PHP process user, original asset ownership, temporary replacement ownership, and final replaced file ownership so server permission issues can be traced.
+
+## Development checks
+
+Run `php tests/openai-models.php` for dependency-free regression checks covering model discovery, cache expiry, credential changes, fallbacks, saved selections, and frontend request validation. These checks use framework and HTTP doubles; they do not replace testing in a running Craft installation with an OpenAI API key.
 
 ## Current Limitations
 

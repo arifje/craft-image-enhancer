@@ -9,6 +9,7 @@ use arjanbrinkman\craftimageenhancer\services\AiImageEnhancementService;
 use arjanbrinkman\craftimageenhancer\services\AiVideoGenerationService;
 use arjanbrinkman\craftimageenhancer\services\AssetRequirementService;
 use arjanbrinkman\craftimageenhancer\services\ImageQualityService;
+use arjanbrinkman\craftimageenhancer\services\OpenAiModelService;
 use arjanbrinkman\craftimageenhancer\services\RuntimeSettingsService;
 use arjanbrinkman\craftimageenhancer\jobs\AnalyzeImageJob;
 use arjanbrinkman\craftimageenhancer\utilities\QualityCheckUtility;
@@ -40,6 +41,7 @@ use craft\events\TemplateEvent;
  * @property AiVideoGenerationService $aiVideoGeneration
  * @property AssetRequirementService $assetRequirements
  * @property RuntimeSettingsService $runtimeSettings
+ * @property OpenAiModelService $openAiModels
  */
 class ImageEnhancer extends Plugin
 {
@@ -52,6 +54,7 @@ class ImageEnhancer extends Plugin
 		return [
 			'components' => [
 				'imageQualityService' => ImageQualityService::class,
+				'openAiModels' => OpenAiModelService::class,
 				'aiImageEnhancement' => AiImageEnhancementService::class,
 				'aiVideoGeneration' => AiVideoGenerationService::class,
 				'assetRequirements' => AssetRequirementService::class,
@@ -98,7 +101,7 @@ class ImageEnhancer extends Plugin
 			'imageEnhancementTriggerOptions' => Settings::imageEnhancementTriggerOptions(),
 			'imageEnhancementActionOptions' => Settings::imageEnhancementActionOptions(),
 			'imageEnhancementProviderOptions' => Settings::imageEnhancementProviderOptions(),
-			'imageEnhancementModelOptions' => Settings::imageEnhancementModelOptions(),
+			'imageEnhancementModelOptions' => $this->getImageEnhancementModelOptions(),
 			'xAiImageEnhancementModelOptions' => Settings::xAiImageEnhancementModelOptions(),
 			'googleImageEnhancementModelOptions' => Settings::googleImageEnhancementModelOptions(),
 			'imageEnhancementFaceHandlingOptions' => Settings::imageEnhancementFaceHandlingOptions(),
@@ -109,25 +112,10 @@ class ImageEnhancer extends Plugin
 	public function getChatGptModelOptions(): array
 	{
 		$models = Settings::fallbackChatGptModels();
-		$apiKey = $this->getSettings()->getResolvedChatGptApiKey();
 
-		if ($apiKey) {
-			try {
-				$response = Craft::createGuzzleClient()->get('https://api.openai.com/v1/models', [
-					'headers' => [
-						'Authorization' => 'Bearer ' . $apiKey,
-					],
-				]);
-				$data = json_decode((string) $response->getBody(), true);
-
-				foreach ($data['data'] ?? [] as $model) {
-					$id = $model['id'] ?? null;
-					if ($id && Settings::isSupportedChatGptModel($id)) {
-						$models[] = $id;
-					}
-				}
-			} catch (\Throwable $e) {
-				Craft::warning('ImageEnhancer: Could not fetch OpenAI models: ' . $e->getMessage(), __METHOD__);
+		foreach ($this->openAiModels->getModels($this->getSettings()) as $model) {
+			if (Settings::isSupportedChatGptModel($model)) {
+				$models[] = $model;
 			}
 		}
 
@@ -137,6 +125,11 @@ class ImageEnhancer extends Plugin
 			'label' => $model === Settings::MODEL_LATEST ? 'Latest available model' : $model,
 			'value' => $model,
 		], $models);
+	}
+
+	public function getImageEnhancementModelOptions(): array
+	{
+		return $this->openAiModels->getImageModelOptions($this->getSettings());
 	}
 
 	private function _registerSettings(): void
@@ -204,7 +197,7 @@ class ImageEnhancer extends Plugin
 			'allowedFieldHandles' => $settings->cpEnhancerAssetFieldHandles,
 			'providerOptions' => Settings::imageEnhancementProviderOptions(),
 			'modelOptions' => [
-				Settings::IMAGE_PROVIDER_OPENAI => Settings::imageEnhancementModelOptions(),
+				Settings::IMAGE_PROVIDER_OPENAI => $this->getImageEnhancementModelOptions(),
 				Settings::IMAGE_PROVIDER_XAI => Settings::xAiImageEnhancementModelOptions(),
 				Settings::IMAGE_PROVIDER_GOOGLE => Settings::googleImageEnhancementModelOptions(),
 			],
