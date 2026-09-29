@@ -76,6 +76,15 @@ namespace {
         public int $now = 0;
         public array $entries = [];
 
+        public function get(array $key): mixed
+        {
+            $key = json_encode($key);
+            if (!isset($this->entries[$key]) || $this->entries[$key]['expires'] <= $this->now) {
+                return false;
+            }
+            return $this->entries[$key]['value'];
+        }
+
         public function getOrSet(array $key, callable $callback, int $duration): array
         {
             $key = json_encode($key);
@@ -130,6 +139,12 @@ namespace {
 
     putenv('IMAGE_ENHANCER_TEST_KEY=test-account-a');
     $settings->chatGptApiKey = '$IMAGE_ENHANCER_TEST_KEY';
+
+    // Page renders use the cache-only path: a cold cache falls back without any HTTP call.
+    check($service->getCachedModels($settings) === null, 'Cold cache must report a miss.');
+    $values = array_column($plugin->getImageEnhancementModelOptions(false), 'value');
+    check(in_array('gpt-image-2.5-flare', $values, true), 'Cache-only lookup must fall back on a miss.');
+    check(count($client->requests) === 0, 'Cache-only lookup must never contact OpenAI.');
     $client->body = json_encode(['data' => [
         ['id' => 'gpt-image-2.5-sunburst'], ['id' => 'gpt-image-2.5-flare'],
         ['id' => 'gpt-image-2.5-sunburst-2026-09-08'], ['id' => 'gpt-image-2.5-flare'],
@@ -155,6 +170,8 @@ namespace {
     check(!in_array('gpt-image-2.5-sunburst', array_column($plugin->getChatGptModelOptions(), 'value'), true), 'Image models must not enter the ChatGPT selector.');
     check(count($client->requests) === 1, 'ChatGPT and image selectors must share the cache.');
     check(!str_contains(json_encode($cache->entries), 'test-account-a'), 'Do not store credentials in cache keys or values.');
+    check(array_column($plugin->getImageEnhancementModelOptions(false), 'value') === $values, 'Cache-only lookup must reuse discovered models.');
+    check(count($client->requests) === 1, 'Warm cache-only lookup must not contact OpenAI.');
 
     $settings->imageEnhancementProvider = Settings::IMAGE_PROVIDER_FRONTEND;
     $request->body = ['imageEnhancementProvider' => 'openai', 'imageEnhancementModel' => 'gpt-image-2.5-sunburst'];
@@ -163,6 +180,8 @@ namespace {
     $providerOptions = $validate->invoke($controller, $settings);
     check(is_array($providerOptions), 'Discovered models must pass frontend request validation.');
     check((new AiImageEnhancementService())->getProviderModel($settings, $providerOptions) === 'gpt-image-2.5-sunburst', 'Do not rewrite the selected model.');
+    $request->body['imageEnhancementModel'] = 'gpt-image-1';
+    check(is_array($validate->invoke($controller, $settings)), 'Curated fallback models shown on a cold cache must pass validation.');
     $request->body['imageEnhancementModel'] = 'gpt-image-999';
     check($validate->invoke($controller, $settings) === false, 'Reject unlisted frontend model IDs.');
 

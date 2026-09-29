@@ -10,6 +10,12 @@ class m260623_120000_add_prompt_overrides_to_runtime_settings extends Migration
 
 	public function safeUp(): bool
 	{
+		// Nothing to alter if the table was never created (the Install migration or
+		// m260519_091500_create_runtime_settings_table creates it with these columns).
+		if (!$this->db->tableExists(self::TABLE)) {
+			return true;
+		}
+
 		if (!$this->columnExists('creativeEnhancementPromptOverride')) {
 			$this->addColumn(self::TABLE, 'creativeEnhancementPromptOverride', $this->text()->null());
 		}
@@ -36,7 +42,7 @@ class m260623_120000_add_prompt_overrides_to_runtime_settings extends Migration
 
 	private function columnExists(string $column): bool
 	{
-		$table = $this->db->getTableSchema(self::TABLE);
+		$table = $this->db->getTableSchema(self::TABLE, true);
 
 		return $table !== null && $table->getColumn($column) !== null;
 	}

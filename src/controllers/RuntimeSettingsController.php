@@ -5,19 +5,22 @@ namespace arjanbrinkman\craftimageenhancer\controllers;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use Craft;
 use craft\web\Controller;
-use yii\web\ForbiddenHttpException;
 use yii\web\Response;
 
 class RuntimeSettingsController extends Controller
 {
+	/**
+	 * Runtime settings are DB-stored operational toggles (not project config), so admins may
+	 * change them even when allowAdminChanges is off: `requireAdmin(false)`.
+	 *
+	 * @throws \yii\web\BadRequestHttpException
+	 * @throws \yii\web\ForbiddenHttpException
+	 */
 	public function actionSave(): Response
 	{
+		$this->requireCpRequest();
+		$this->requireAdmin(false);
 		$this->requirePostRequest();
-
-		$user = Craft::$app->getUser()->getIdentity();
-		if (!$user || !$user->admin) {
-			throw new ForbiddenHttpException('Only admins can change Image Enhancer runtime settings.');
-		}
 
 		$request = Craft::$app->getRequest();
 		$enabled = (bool) $request->getBodyParam('enabled');

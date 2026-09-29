@@ -1,3 +1,11 @@
+/*
+ * Hand-authored, no build step. Colors use Craft CP custom properties that exist
+ * in both Craft 4 and Craft 5 (--text-color, --light-text-color, --hairline-color,
+ * --medium-hairline-color, --error-color, --gray-050/100, --red-050, --white), with
+ * the previous hex values as fallbacks. --modal-bg is Craft 5 only and falls back
+ * to --white. The dark image stage, white compare divider, and orange accent are
+ * intentional and theme-independent.
+ */
 .image-enhancer-cp-field-action {
 	margin-top: 6px;
 	line-height: 1;
@@ -60,7 +68,7 @@
 
 .image-enhancer-cp-header p {
 	margin: 4px 0 0;
-	color: #596673;
+	color: var(--light-text-color, #596673);
 }
 
 .image-enhancer-cp-close {
@@ -69,8 +77,8 @@
 	height: 32px;
 	border: 0;
 	border-radius: 4px;
-	background: #eef1f4;
-	color: #33475b;
+	background: var(--gray-100, #eef1f4);
+	color: var(--text-color, #33475b);
 	cursor: pointer;
 	font-size: 24px;
 	line-height: 1;
@@ -87,9 +95,9 @@
 	gap: 16px;
 	margin-bottom: 16px;
 	padding: 14px;
-	border: 1px solid #d8dee6;
+	border: 1px solid var(--hairline-color, #d8dee6);
 	border-radius: 6px;
-	background: #f7f8fa;
+	background: var(--gray-050, #f7f8fa);
 }
 
 .image-enhancer-upload-summary[hidden],
@@ -119,7 +127,7 @@
 
 .image-enhancer-upload-summary__facts span {
 	margin-bottom: 2px;
-	color: #66727f;
+	color: var(--light-text-color, #66727f);
 	font-size: 11px;
 	font-weight: 700;
 	text-transform: uppercase;
@@ -132,7 +140,7 @@
 
 .image-enhancer-upload-summary__issues {
 	padding-left: 16px;
-	border-left: 1px solid #d8dee6;
+	border-left: 1px solid var(--hairline-color, #d8dee6);
 }
 
 .image-enhancer-upload-summary__issues h3 {
@@ -175,9 +183,9 @@
 .image-enhancer-cp-video {
 	margin-bottom: 12px;
 	padding: 12px;
-	border: 1px solid #d8dee6;
+	border: 1px solid var(--hairline-color, #d8dee6);
 	border-radius: 6px;
-	background: #f7f8fa;
+	background: var(--gray-050, #f7f8fa);
 }
 
 .image-enhancer-cp-custom-edit label,
@@ -189,7 +197,7 @@
 }
 
 .image-enhancer-cp-video label span {
-	color: #66727f;
+	color: var(--light-text-color, #66727f);
 	font-weight: 400;
 }
 
@@ -228,7 +236,7 @@
 .image-enhancer-cp-custom-edit p,
 .image-enhancer-cp-video p {
 	margin: 6px 0 0;
-	color: #66727f;
+	color: var(--light-text-color, #66727f);
 	font-size: 12px;
 }
 
@@ -237,7 +245,7 @@
 	flex: 0 0 auto;
 	overflow: hidden;
 	border-radius: 6px;
-	background: #edf0f2;
+	background: var(--gray-100, #edf0f2);
 }
 
 .image-enhancer-cp-single,
@@ -369,20 +377,20 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 8px;
-	background: #f3f7fb;
-	color: #33475b;
+	background: var(--gray-050, #f3f7fb);
+	color: var(--text-color, #33475b);
 }
 
 .image-enhancer-cp-error {
-	background: #fff0f0;
-	color: #cf1124;
+	background: var(--red-050, #fff0f0);
+	color: var(--error-color, #cf1124);
 }
 
 .image-enhancer-cp-spinner {
 	display: none;
 	width: 16px;
 	height: 16px;
-	border: 2px solid rgba(51, 71, 91, 0.25);
+	border: 2px solid var(--medium-hairline-color, rgba(51, 71, 91, 0.25));
 	border-top-color: #d94d19;
 	border-radius: 50%;
 }
@@ -395,8 +403,8 @@
 .image-enhancer-cp-footer {
 	position: relative;
 	flex: 0 0 auto;
-	border-top: 1px solid #d8dee6;
-	background: #fff;
+	border-top: 1px solid var(--hairline-color, #d8dee6);
+	background: var(--modal-bg, var(--white, #fff));
 	box-shadow: 0 -8px 18px rgba(32, 42, 51, 0.06);
 	z-index: 2;
 }
@@ -454,7 +462,7 @@
 	.image-enhancer-upload-summary__issues {
 		padding-top: 12px;
 		padding-left: 0;
-		border-top: 1px solid #d8dee6;
+		border-top: 1px solid var(--hairline-color, #d8dee6);
 		border-left: 0;
 	}
 

@@ -23,6 +23,26 @@ use yii\web\Response;
 
 class UploadAssistantController extends Controller
 {
+    /**
+     * The upload assistant hands images to the paid AI repair flow, so gate the whole
+     * controller on CP requests plus the plugin permission. Admins pass automatically.
+     *
+     * @inheritdoc
+     * @throws BadRequestHttpException
+     * @throws ForbiddenHttpException
+     */
+    public function beforeAction($action): bool
+    {
+        if (!parent::beforeAction($action)) {
+            return false;
+        }
+
+        $this->requireCpRequest();
+        $this->requirePermission(ImageEnhancer::PERMISSION_USE_AI_TOOLS);
+
+        return true;
+    }
+
     public function actionUpload(): Response
     {
         $this->requireCpRequest();
@@ -72,12 +92,7 @@ class UploadAssistantController extends Controller
         $asset->title = AssetsHelper::filename2Title(pathinfo($originalFilename, PATHINFO_FILENAME));
         $asset->setScenario(Asset::SCENARIO_CREATE);
 
-        ImageEnhancer::$skipAssetQueue = true;
-        try {
-            $saved = Craft::$app->getElements()->saveElement($asset);
-        } finally {
-            ImageEnhancer::$skipAssetQueue = false;
-        }
+        $saved = ImageEnhancer::suppressAssetQueue(static fn(): bool => Craft::$app->getElements()->saveElement($asset));
 
         if (!$saved) {
             return $this->asModelFailure($asset);
@@ -127,7 +142,8 @@ class UploadAssistantController extends Controller
             'assetId' => $asset->id,
             'filename' => $uploadedFile->name,
             'repairToken' => $token,
-            'previewUrl' => UrlHelper::actionUrl('craft-image-enhancer/upload-assistant/preview', ['token' => $token]),
+            // `token` is Craft's reserved token param on GET requests, so use `repairKey`.
+            'previewUrl' => UrlHelper::actionUrl('craft-image-enhancer/upload-assistant/preview', ['repairKey' => $token]),
         ], $inspection));
     }
 
@@ -162,12 +178,9 @@ class UploadAssistantController extends Controller
                 return $this->jsonFailure('Craft could not save the resized image.');
             }
 
-            ImageEnhancer::$skipAssetQueue = true;
-            try {
-                Craft::$app->getAssets()->replaceAssetFile($repair['asset'], $targetPath, $repair['asset']->filename);
-            } finally {
-                ImageEnhancer::$skipAssetQueue = false;
-            }
+            ImageEnhancer::suppressAssetQueue(
+                static fn() => Craft::$app->getAssets()->replaceAssetFile($repair['asset'], $targetPath, $repair['asset']->filename),
+            );
         } catch (\Throwable $e) {
             Craft::error('ImageEnhancer: Local upload repair failed: ' . $e->getMessage(), __METHOD__);
             return $this->jsonFailure('Could not resize the image.');
@@ -212,12 +225,17 @@ class UploadAssistantController extends Controller
         return $this->asJson(['success' => true, 'discarded' => true]);
     }
 
-    public function actionPreview(string $token): Response
+    /**
+     * Streams the pending upload. Reads `repairKey` (not `token`, which Craft reserves).
+     *
+     * @throws BadRequestHttpException
+     */
+    public function actionPreview(string $repairKey): Response
     {
         $this->requireCpRequest();
         $this->requireLogin();
 
-        $repair = $this->getRepair($token);
+        $repair = $this->getRepair($repairKey);
         if ($repair === null) {
             throw new BadRequestHttpException('This upload repair session has expired.');
         }
@@ -316,6 +334,12 @@ class UploadAssistantController extends Controller
         ];
     }
 
+    /**
+     * Resolves the posted reference element (drives dynamic upload paths and selection
+     * conditions). The user must be able to view it.
+     *
+     * @throws ForbiddenHttpException
+     */
     private function getReferenceElement(): ?ElementInterface
     {
         $elementId = (int) Craft::$app->getRequest()->getBodyParam('elementId');
@@ -324,8 +348,17 @@ class UploadAssistantController extends Controller
         }
 
         $siteId = (int) Craft::$app->getRequest()->getBodyParam('siteId') ?: null;
+        $element = Craft::$app->getElements()->getElementById($elementId, null, $siteId);
+        if (!$element) {
+            return null;
+        }
 
-        return Craft::$app->getElements()->getElementById($elementId, null, $siteId);
+        $user = Craft::$app->getUser()->getIdentity();
+        if (!$user || !Craft::$app->getElements()->canView($element, $user)) {
+            throw new ForbiddenHttpException('You do not have permission to use this element.');
+        }
+
+        return $element;
     }
 
     private function getReferenceEntryId(?ElementInterface $element): ?int
@@ -350,13 +383,9 @@ class UploadAssistantController extends Controller
         $asset->avoidFilenameConflicts = true;
         $asset->setScenario(Asset::SCENARIO_MOVE);
 
-        ImageEnhancer::$skipAssetQueue = true;
-        try {
-            if (!Craft::$app->getElements()->saveElement($asset)) {
-                throw new \RuntimeException(implode(' ', $asset->getErrorSummary(true)));
-            }
-        } finally {
-            ImageEnhancer::$skipAssetQueue = false;
+        $saved = ImageEnhancer::suppressAssetQueue(static fn(): bool => Craft::$app->getElements()->saveElement($asset));
+        if (!$saved) {
+            throw new \RuntimeException(implode(' ', $asset->getErrorSummary(true)));
         }
     }
 
@@ -428,12 +457,7 @@ class UploadAssistantController extends Controller
 
     private function deleteAsset(Asset $asset): void
     {
-        ImageEnhancer::$skipAssetQueue = true;
-        try {
-            Craft::$app->getElements()->deleteElement($asset, true);
-        } finally {
-            ImageEnhancer::$skipAssetQueue = false;
-        }
+        ImageEnhancer::suppressAssetQueue(static fn(): bool => Craft::$app->getElements()->deleteElement($asset, true));
     }
 
     private function requirements(): AssetRequirementService

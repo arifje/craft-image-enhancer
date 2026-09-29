@@ -28,6 +28,10 @@ class QualityCheckUtility extends Utility
 		return self::icon();
 	}
 
+	/**
+	 * Anyone with the `utility:image-enhancer` permission can view the runtime settings, but
+	 * only admins can change them (mirrors `RuntimeSettingsController::actionSave()`).
+	 */
 	public static function contentHtml(): string
 	{
 		$plugin = ImageEnhancer::getInstance();
@@ -35,6 +39,7 @@ class QualityCheckUtility extends Utility
 		$settings = $plugin->getSettings();
 
 		return Craft::$app->getView()->renderTemplate('craft-image-enhancer/_utility.twig', [
+			'canEdit' => Craft::$app->getUser()->getIsAdmin(),
 			'enabled' => $runtimeSettings->isQualityCheckEnabled(),
 			'creativeEnhancementPromptOverride' => $runtimeSettings->getCreativeEnhancementPromptOverride(),
 			'faceBlurDetectionPromptOverride' => $runtimeSettings->getFaceBlurDetectionPromptOverride(),

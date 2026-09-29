@@ -20,10 +20,7 @@ class OpenAiModelService extends Component
             return [];
         }
 
-        // Isolate accounts without putting credentials into cache keys or values.
-        $cacheKey = ['craft-image-enhancer', 'openai-models', hash('sha256', $apiKey)];
-
-        return Craft::$app->getCache()->getOrSet($cacheKey, static function() use ($apiKey): array {
+        return Craft::$app->getCache()->getOrSet($this->getCacheKey($apiKey), static function() use ($apiKey): array {
             try {
                 $response = Craft::createGuzzleClient()->get('https://api.openai.com/v1/models', [
                     'headers' => ['Authorization' => 'Bearer ' . $apiKey],
@@ -53,9 +50,33 @@ class OpenAiModelService extends Component
         }, self::CACHE_DURATION);
     }
 
-    public function getImageModelOptions(Settings $settings): array
+    /**
+     * Returns the discovered models from cache without contacting OpenAI.
+     *
+     * Use this on page renders; a cache miss returns null so callers can fall back
+     * to the curated model list instead of blocking the request on a remote call.
+     *
+     * @return string[]|null
+     */
+    public function getCachedModels(Settings $settings): ?array
     {
-        $models = array_values(array_filter($this->getModels($settings), [Settings::class, 'isSupportedImageEnhancementModel']));
+        $apiKey = $settings->getResolvedChatGptApiKey();
+        if ($apiKey === '') {
+            return null;
+        }
+
+        $models = Craft::$app->getCache()->get($this->getCacheKey($apiKey));
+
+        return is_array($models) ? $models : null;
+    }
+
+    /**
+     * @param bool $allowRemoteLookup Whether a cache miss may trigger a live OpenAI request.
+     */
+    public function getImageModelOptions(Settings $settings, bool $allowRemoteLookup = true): array
+    {
+        $discovered = $allowRemoteLookup ? $this->getModels($settings) : ($this->getCachedModels($settings) ?? []);
+        $models = array_values(array_filter($discovered, [Settings::class, 'isSupportedImageEnhancementModel']));
         if ($models === []) {
             $models = array_column(Settings::imageEnhancementModelOptions(), 'value');
         }
@@ -74,5 +95,13 @@ class OpenAiModelService extends Component
                 : 'GPT Image ' . ucwords(str_replace('-', ' ', substr($model, strlen('gpt-image-')))),
             'value' => $model,
         ], $models);
+    }
+
+    /**
+     * Isolates accounts without putting credentials into cache keys or values.
+     */
+    private function getCacheKey(string $apiKey): array
+    {
+        return ['craft-image-enhancer', 'openai-models', hash('sha256', $apiKey)];
     }
 }

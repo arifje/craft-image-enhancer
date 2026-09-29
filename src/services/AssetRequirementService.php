@@ -262,15 +262,19 @@ class AssetRequirementService extends Component
             }
 
             if ($type === 'fileSize') {
-                $bytes = $this->fileSizeBytes($value, (string) ($violation['unit'] ?? 'B'));
+                $bounds = $this->fileSizeBounds($operator, $value, (string) ($violation['unit'] ?? 'B'));
+                if ($bounds === null) {
+                    return ['available' => false, 'width' => null, 'height' => null];
+                }
+
+                [$minimumBytes, $maximumBytes] = $bounds;
                 $currentSize = max(1, (int) $asset->size);
                 $failed = (bool) ($violation['failed'] ?? false);
-                if (in_array($operator, ['>', '>=', '='], true)) {
-                    $minimumScale = max($minimumScale, sqrt(($bytes * ($failed ? 1.15 : 1.0)) / $currentSize));
-                } elseif (in_array($operator, ['<', '<='], true)) {
-                    $maxScale = min($maxScale, sqrt(($bytes * ($failed ? 0.85 : 1.0)) / $currentSize));
-                } else {
-                    return ['available' => false, 'width' => null, 'height' => null];
+                if ($minimumBytes !== null) {
+                    $minimumScale = max($minimumScale, sqrt(($minimumBytes * ($failed ? 1.15 : 1.0)) / $currentSize));
+                }
+                if ($maximumBytes !== null) {
+                    $maxScale = min($maxScale, sqrt(($maximumBytes * ($failed ? 0.85 : 1.0)) / $currentSize));
                 }
                 continue;
             }
@@ -319,16 +323,51 @@ class AssetRequirementService extends Component
         };
     }
 
-    private function fileSizeBytes(float $value, string $unit): int
+    /**
+     * Returns the inclusive [min, max] byte range (null = unbounded) that satisfies a file
+     * size rule, mirroring FileSizeConditionRule::matchElement(): the value is truncated to an
+     * integer, and KB/MB/GB values stand for a rounded range (1 KB = 500 to 1,499 bytes).
+     * Returns null for operators that cannot be targeted, or for an empty rule value.
+     *
+     * @return array{0: ?int, 1: ?int}|null
+     */
+    private function fileSizeBounds(string $operator, float $value, string $unit): ?array
     {
+        $value = (int) $value;
+        if ($value === 0) {
+            return null;
+        }
+
         $multiplier = match ($unit) {
-            'KB' => 1000,
-            'MB' => 1000000,
-            'GB' => 1000000000,
+            FileSizeConditionRule::UNIT_KB => 1000,
+            FileSizeConditionRule::UNIT_MB => 1000000,
+            FileSizeConditionRule::UNIT_GB => 1000000000,
             default => 1,
         };
 
-        return (int) round($value * $multiplier);
+        if ($multiplier === 1) {
+            return match ($operator) {
+                '<' => [null, $value - 1],
+                '<=' => [null, $value],
+                '>' => [$value + 1, null],
+                '>=' => [$value, null],
+                '=' => [$value, $value],
+                default => null,
+            };
+        }
+
+        $maxDiff = intdiv($multiplier, 2);
+        $minBytes = $value * $multiplier - $maxDiff;
+        $maxBytes = $value * $multiplier + $maxDiff - 1;
+
+        return match ($operator) {
+            '<' => [null, $minBytes - 1],
+            '<=' => [null, $minBytes],
+            '>' => [$maxBytes + 1, null],
+            '>=' => [$maxBytes, null],
+            '=' => [$minBytes, $maxBytes],
+            default => null,
+        };
     }
 
     private function formatBytes(int $bytes): string

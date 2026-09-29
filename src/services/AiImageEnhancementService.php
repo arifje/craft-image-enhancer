@@ -2,6 +2,9 @@
 
 namespace arjanbrinkman\craftimageenhancer\services;
 
+use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
+use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
+use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\models\Settings;
 use craft\base\Component;
@@ -94,7 +97,7 @@ class AiImageEnhancementService extends Component
 		}
 
 		try {
-			$response = $client->post('https://api.openai.com/v1/images/edits', [
+			$response = $client->request('POST', 'https://api.openai.com/v1/images/edits', HttpHelper::withTimeouts(HttpHelper::IMAGE_TIMEOUT, [
 				'headers' => [
 					'Authorization' => 'Bearer ' . $apiKey,
 				],
@@ -125,7 +128,7 @@ class AiImageEnhancementService extends Component
 						'contents' => $asset->mimeType === 'image/png' ? 'png' : 'jpeg',
 					],
 				],
-			]);
+			]));
 		} finally {
 			if (is_resource($handle)) {
 				fclose($handle);
@@ -147,7 +150,7 @@ class AiImageEnhancementService extends Component
 		$mimeType = $asset->mimeType ?: 'image/jpeg';
 		$imageDataUri = 'data:' . $mimeType . ';base64,' . $this->getBase64LocalImage($localPath);
 
-		$response = $client->post('https://api.x.ai/v1/images/edits', [
+		$response = $client->request('POST', 'https://api.x.ai/v1/images/edits', HttpHelper::withTimeouts(HttpHelper::IMAGE_TIMEOUT, [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $apiKey,
 				'Content-Type' => 'application/json',
@@ -160,17 +163,18 @@ class AiImageEnhancementService extends Component
 					'url' => $imageDataUri,
 				],
 			],
-		]);
+		]));
+		unset($imageDataUri);
 		$data = json_decode((string) $response->getBody(), true);
 
-		return $this->writeProviderImageResponseToTempFile($client, $asset, $data, 'xAI');
+		return $this->writeProviderImageResponseToTempFile($client, $asset, is_array($data) ? $data : null, 'xAI');
 	}
 
 	private function enhanceWithGoogle(ClientInterface $client, Asset $asset, string $localPath, string $apiKey, string $model, string $prompt): string
 	{
 		$mimeType = $asset->mimeType ?: 'image/jpeg';
 		$encodedModel = rawurlencode($model);
-		$response = $client->post("https://generativelanguage.googleapis.com/v1/models/{$encodedModel}:generateContent", [
+		$response = $client->request('POST', "https://generativelanguage.googleapis.com/v1/models/{$encodedModel}:generateContent", HttpHelper::withTimeouts(HttpHelper::IMAGE_TIMEOUT, [
 			'headers' => [
 				'x-goog-api-key' => $apiKey,
 				'Content-Type' => 'application/json',
@@ -189,9 +193,9 @@ class AiImageEnhancementService extends Component
 					],
 				]],
 			],
-		]);
+		]));
 		$data = json_decode((string) $response->getBody(), true);
-		$imageData = $this->extractGoogleImageData($data);
+		$imageData = $this->extractGoogleImageData(is_array($data) ? $data : null);
 
 		if (!$imageData) {
 			throw new \RuntimeException('Google Nano Banana returned no enhanced image data.');
@@ -203,12 +207,12 @@ class AiImageEnhancementService extends Component
 	private function writeProviderImageResponseToTempFile(ClientInterface $client, Asset $asset, ?array $data, string $providerLabel): string
 	{
 		$imageData = $data['data'][0]['b64_json'] ?? $data['b64_json'] ?? null;
-		if ($imageData) {
+		if (is_string($imageData) && $imageData !== '') {
 			return $this->writeBase64ImageToTempFile($asset, $imageData);
 		}
 
 		$imageUrl = $data['data'][0]['url'] ?? $data['url'] ?? null;
-		if ($imageUrl) {
+		if (is_string($imageUrl) && $imageUrl !== '') {
 			if (str_starts_with($imageUrl, 'data:')) {
 				[, $base64] = explode(',', $imageUrl, 2) + [null, null];
 				if ($base64) {
@@ -216,13 +220,7 @@ class AiImageEnhancementService extends Component
 				}
 			}
 
-			$response = $client->get($imageUrl);
-			$tempPath = $this->getTempReplacementPath($asset);
-			if (file_put_contents($tempPath, (string) $response->getBody()) === false) {
-				throw new \RuntimeException('Could not write enhanced image URL response to a temporary file.');
-			}
-
-			return $tempPath;
+			return $this->downloadProviderImage($client, $asset, $imageUrl, $providerLabel);
 		}
 
 		throw new \RuntimeException($providerLabel . ' returned no enhanced image data.');
@@ -249,8 +247,9 @@ class AiImageEnhancementService extends Component
 			throw new \RuntimeException('Provider returned invalid base64 image data.');
 		}
 
-		$tempPath = $this->getTempReplacementPath($asset);
+		$tempPath = FileHelper::createTempPathForAsset($asset);
 		if (file_put_contents($tempPath, $decodedImage) === false) {
+			FileHelper::delete($tempPath);
 			throw new \RuntimeException('Could not write enhanced image data to a temporary file.');
 		}
 
@@ -267,17 +266,35 @@ class AiImageEnhancementService extends Component
 		return base64_encode($imageData);
 	}
 
-	private function getTempReplacementPath(Asset $asset): string
+	/**
+	 * Downloads a provider-hosted result image. Only https URLs on x.ai hosts are fetched
+	 * (every redirect hop is re-checked), with timeouts and a size cap, and the result must
+	 * be an image.
+	 *
+	 * @throws \RuntimeException
+	 * @throws \GuzzleHttp\Exception\GuzzleException
+	 */
+	private function downloadProviderImage(ClientInterface $client, Asset $asset, string $imageUrl, string $providerLabel): string
 	{
-		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
-
-		if (!$extension) {
-			return $tempPath;
+		if (!HttpHelper::isAllowedXaiUrl($imageUrl)) {
+			throw new \RuntimeException($providerLabel . ' returned an invalid image URL.');
 		}
 
-		@unlink($tempPath);
+		$tempPath = FileHelper::createTempPathForAsset($asset);
+		HttpHelper::downloadToFile(
+			$client,
+			$imageUrl,
+			$tempPath,
+			HttpHelper::MAX_IMAGE_DOWNLOAD_BYTES,
+			HttpHelper::withTimeouts(HttpHelper::DOWNLOAD_TIMEOUT),
+			[HttpHelper::class, 'isAllowedXaiUrl'],
+		);
 
-		return $tempPath . '.' . $extension;
+		if (ImageHelper::validateImageInfo(ImageHelper::getImageInfo($tempPath)) !== null) {
+			FileHelper::delete($tempPath);
+			throw new \RuntimeException($providerLabel . ' returned a file that is not a supported image.');
+		}
+
+		return $tempPath;
 	}
 }

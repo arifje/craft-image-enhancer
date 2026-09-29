@@ -2,6 +2,13 @@
 
 namespace arjanbrinkman\craftimageenhancer\jobs;
 
+use arjanbrinkman\craftimageenhancer\helpers\AssetHelper;
+use arjanbrinkman\craftimageenhancer\helpers\ChatModelHelper;
+use arjanbrinkman\craftimageenhancer\helpers\FaceBoxHelper;
+use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
+use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
+use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
+use arjanbrinkman\craftimageenhancer\helpers\JobStatus;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
@@ -14,18 +21,41 @@ use GuzzleHttp\ClientInterface;
 use Imagick;
 use ImagickDraw;
 use ImagickPixel;
+use yii\queue\RetryableJobInterface;
 
-class ArticleImageFaceBlurJob extends BaseJob
+/**
+ * Creates a face-blurred preview asset. Faces are detected on a downscaled, auto-oriented
+ * copy; boxes are normalized (0-1000) so they apply to the auto-oriented original.
+ */
+class ArticleImageFaceBlurJob extends BaseJob implements RetryableJobInterface
 {
+	/** Up to three detection requests (3 x 120s) + local blurring. */
+	private const TTR = 600;
+
 	public int $assetId;
 	public ?int $userId = null;
 	public string $token;
 	public bool $useManualFaces = false;
 	public array $manualFaces = [];
 
+	public function getTtr(): int
+	{
+		return self::TTR;
+	}
+
+	public function canRetry($attempt, $error): bool
+	{
+		return false;
+	}
+
 	public function execute($queue): void
 	{
 		$settings = ImageEnhancer::getInstance()->getSettings();
+		$localPath = null;
+		$analysisPath = null;
+		$tempPath = null;
+		$previewAsset = null;
+
 		$this->updateStatus('running', 0.05, 'Loading asset');
 		$this->setProgress($queue, 0.05, 'Loading asset');
 
@@ -35,25 +65,22 @@ class ArticleImageFaceBlurJob extends BaseJob
 				return;
 			}
 
-			$asset = Craft::$app->assets->getAssetById($this->assetId);
-			if (!$this->isSupportedImageAsset($asset)) {
+			$asset = Craft::$app->getAssets()->getAssetById($this->assetId);
+			if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
 				throw new \RuntimeException('Asset not found or unsupported.');
 			}
 			if (!class_exists(Imagick::class)) {
 				throw new \RuntimeException('Imagick is required to blur faces.');
 			}
 
-			$localPath = $this->getFullAssetPath($asset);
-			if (!$localPath || !file_exists($localPath)) {
-				throw new \RuntimeException('Could not find the original asset file.');
-			}
+			$localPath = FileHelper::copyAssetToTemp($asset);
 
 			if ($this->useManualFaces) {
 				$this->updateStatus('running', 0.2, 'Preparing manual blur areas', [
 					'blurMode' => 'manual',
 				]);
 				$this->setProgress($queue, 0.2, 'Preparing manual blur areas');
-				$faces = $this->normalizeManualFaceBoxes($this->manualFaces);
+				$faces = FaceBoxHelper::normalizeManualFaceBoxes($this->manualFaces);
 			} else {
 				$apiKey = $settings->getResolvedChatGptApiKey();
 				if ($apiKey === '') {
@@ -64,14 +91,22 @@ class ArticleImageFaceBlurJob extends BaseJob
 					'blurMode' => 'auto',
 				]);
 				$this->setProgress($queue, 0.2, 'Detecting faces');
-				$faces = $this->detectFaces(Craft::createGuzzleClient(), $settings, $asset, $localPath, $apiKey);
-			}
-			if (empty($faces)) {
-				throw new \RuntimeException('No faces found to blur.');
+				$analysisPath = ImageHelper::createAnalysisCopy($localPath);
+				$faces = $this->detectFaces(Craft::createGuzzleClient(), $settings, $analysisPath, $apiKey, $queue);
 			}
 
 			if ($this->isCanceled()) {
 				$this->finishCanceled($queue);
+				return;
+			}
+
+			if (empty($faces)) {
+				// An expected outcome, not a job failure.
+				$this->updateStatus('failed', 1, 'No faces found', [
+					'message' => 'No faces found to blur.',
+					'faceCount' => 0,
+				]);
+				$this->setProgress($queue, 1, 'No faces found');
 				return;
 			}
 
@@ -80,17 +115,25 @@ class ArticleImageFaceBlurJob extends BaseJob
 			$tempPath = $this->blurFacesToTempFile($asset, $localPath, $faces);
 
 			if ($this->isCanceled()) {
-				@unlink($tempPath);
 				$this->finishCanceled($queue);
 				return;
 			}
 
 			$this->updateStatus('running', 0.85, 'Saving blurred preview');
 			$this->setProgress($queue, 0.85, 'Saving blurred preview');
-			$previewAsset = $this->createPreviewAsset($asset, $tempPath);
+			$previewAsset = AssetHelper::createAssetFromFile(
+				$asset,
+				$tempPath,
+				AssetHelper::getPreviewFilename($asset, AssetHelper::FACE_BLUR_PREVIEW_MARKER),
+				$this->userId ?: $asset->uploaderId,
+			);
 			if (!$previewAsset instanceof Asset) {
-				@unlink($tempPath);
 				throw new \RuntimeException('Could not save the blurred preview asset.');
+			}
+
+			if ($this->isCanceled()) {
+				$this->finishCanceled($queue);
+				return;
 			}
 
 			$this->updateStatus('complete', 1, 'Blurred preview ready', [
@@ -99,6 +142,14 @@ class ArticleImageFaceBlurJob extends BaseJob
 				'faceCount' => count($faces),
 				'blurMode' => $this->useManualFaces ? 'manual' : 'auto',
 			]);
+
+			// A cancel that raced the "complete" write must not leave an orphaned preview.
+			if ($this->isCanceled()) {
+				$this->finishCanceled($queue);
+				return;
+			}
+
+			$previewAsset = null;
 			$this->setProgress($queue, 1, 'Blurred preview ready');
 		} catch (\Throwable $e) {
 			if ($this->isCanceled()) {
@@ -107,65 +158,82 @@ class ArticleImageFaceBlurJob extends BaseJob
 			}
 
 			$this->updateStatus('failed', 1, 'Face blur failed', [
-				'message' => $e->getMessage(),
+				'message' => HttpHelper::describeForUser($e),
 			]);
-			Craft::error('ImageEnhancer: Article image face blur queue job failed: ' . $e->getMessage(), __METHOD__);
-			throw $e;
+			$this->setProgress($queue, 1, 'Face blur failed');
+			Craft::error('ImageEnhancer: Article image face blur queue job failed: ' . HttpHelper::describe($e) . ' ' . HttpHelper::describeForUser($e), __METHOD__);
+
+			if ($e instanceof \Error) {
+				throw $e;
+			}
+		} finally {
+			if ($previewAsset instanceof Asset) {
+				AssetHelper::deleteGeneratedAsset($previewAsset);
+			}
+			FileHelper::delete($localPath, $analysisPath, $tempPath);
 		}
 	}
 
-	private function detectFaces(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, string $apiKey): array
+	/**
+	 * Detects faces on the analysis copy, trying the configured model and two fallbacks.
+	 *
+	 * @throws \RuntimeException if no model returned a usable answer
+	 */
+	private function detectFaces(ClientInterface $client, Settings $settings, string $analysisPath, string $apiKey, $queue): array
 	{
-		$mime = $asset->mimeType ?: 'image/jpeg';
-		$imageBase64 = base64_encode(file_get_contents($localPath));
+		$imageData = file_get_contents($analysisPath);
+		if ($imageData === false) {
+			throw new \RuntimeException('Could not read the image for face detection.');
+		}
+
+		$dataUri = 'data:image/jpeg;base64,' . base64_encode($imageData);
+		unset($imageData);
 		$prompt = ImageEnhancer::getInstance()->runtimeSettings->getFaceBlurDetectionPromptForRequest($settings);
 		$models = array_values(array_unique([
-			$this->resolveChatGptModel($client, $settings->chatGptModel, $apiKey),
+			ChatModelHelper::resolveModel($settings),
 			'gpt-4o-mini',
 			'gpt-4o',
 		]));
 
-		foreach ($models as $model) {
+		foreach ($models as $index => $model) {
+			if ($this->isCanceled()) {
+				return [];
+			}
+
+			$label = $index === 0 ? 'Detecting faces' : 'Retrying face detection';
+			$this->updateStatus('running', 0.2 + ($index * 0.12), $label);
+			$this->setProgress($queue, 0.2 + ($index * 0.12), $label);
+
 			try {
-				$response = $client->post('https://api.openai.com/v1/chat/completions', [
-					'headers' => [
-						'Authorization' => 'Bearer ' . $apiKey,
-						'Content-Type' => 'application/json',
+				$json = ChatModelHelper::createCompletion($client, $apiKey, ChatModelHelper::buildPayload($model, [[
+					'role' => 'user',
+					'content' => [
+						[
+							'type' => 'text',
+							'text' => $prompt,
+						],
+						[
+							'type' => 'image_url',
+							'image_url' => ['url' => $dataUri],
+						],
 					],
-					'json' => [
-						'model' => $model,
-						'response_format' => ['type' => 'json_object'],
-						'messages' => [[
-							'role' => 'user',
-							'content' => [
-								[
-									'type' => 'text',
-									'text' => $prompt,
-								],
-								[
-									'type' => 'image_url',
-									'image_url' => ['url' => 'data:' . $mime . ';base64,' . $imageBase64],
-								],
-							],
-						]],
-						'max_completion_tokens' => 1200,
-					],
-				]);
+				]], 1200, [
+					'response_format' => ['type' => 'json_object'],
+				]));
 			} catch (\Throwable $e) {
-				Craft::warning('ImageEnhancer: Face blur detection attempt failed: ' . $e->getMessage(), __METHOD__);
+				Craft::warning('ImageEnhancer: Face blur detection attempt failed for model ' . $model . ': ' . HttpHelper::describe($e), __METHOD__);
 				continue;
 			}
 
-			$json = json_decode((string) $response->getBody(), true);
 			$content = $json['choices'][0]['message']['content'] ?? '';
-			$data = $this->extractJsonObject((string) $content);
-			$faces = $this->normalizeFaceBoxes($data);
+			$data = FaceBoxHelper::extractJsonObject(is_string($content) ? $content : '');
+			$faces = FaceBoxHelper::normalizeFaceBoxes($data);
 
 			if (!empty($faces)) {
 				return $faces;
 			}
 
-			if (is_array($data) && array_key_exists('faces', $data)) {
+			if (is_array($data) && array_key_exists('faces', $data) && is_array($data['faces'])) {
 				return [];
 			}
 
@@ -175,61 +243,63 @@ class ArticleImageFaceBlurJob extends BaseJob
 		throw new \RuntimeException('Could not detect face positions.');
 	}
 
-	private function normalizeManualFaceBoxes(array $faces): array
-	{
-		$normalizedFaces = $this->normalizeFaceBoxes(['faces' => $faces]);
-
-		return array_map(static fn(array $face): array => array_merge($face, [
-			'confidence' => 'manual',
-			'source' => 'manual',
-		]), $normalizedFaces);
-	}
-
+	/**
+	 * Blurs each face region of the auto-oriented original and writes a temp file.
+	 *
+	 * @throws \ImagickException
+	 * @throws \RuntimeException
+	 */
 	private function blurFacesToTempFile(Asset $asset, string $localPath, array $faces): string
 	{
-		$tempPath = $this->getTempReplacementPath($asset);
+		$tempPath = FileHelper::createTempPathForAsset($asset);
 		$image = new Imagick($localPath);
-		$image->setImagePage(0, 0, 0, 0);
+		$output = $image;
 
-		$imageWidth = $image->getImageWidth();
-		$imageHeight = $image->getImageHeight();
+		try {
+			// Detection and manual boxes both refer to the displayed (oriented) image.
+			ImageHelper::autoOrient($image);
+			$image->setImagePage(0, 0, 0, 0);
 
-		foreach ($faces as $face) {
-			$box = $this->normalizedFaceBoxToPixels($face, $imageWidth, $imageHeight);
-			if ($box['width'] < 2 || $box['height'] < 2) {
-				continue;
+			$imageWidth = $image->getImageWidth();
+			$imageHeight = $image->getImageHeight();
+
+			foreach (array_slice($faces, 0, FaceBoxHelper::MAX_FACES) as $face) {
+				$box = FaceBoxHelper::toPixels($face, $imageWidth, $imageHeight);
+				if ($box['width'] < 2 || $box['height'] < 2) {
+					continue;
+				}
+
+				// Copy only the face region instead of cloning the whole image per face.
+				$sourceRegion = $image->getImageRegion($box['width'], $box['height'], $box['x'], $box['y']);
+				$sourceRegion->setImagePage(0, 0, 0, 0);
+				$fragmentedRegion = $this->createFragmentedFaceRegion($sourceRegion);
+				$mask = $this->createHeadShapeMask($box['width'], $box['height']);
+
+				try {
+					$fragmentedRegion->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+					$fragmentedRegion->compositeImage($mask, Imagick::COMPOSITE_DSTIN, 0, 0);
+					$image->compositeImage($fragmentedRegion, Imagick::COMPOSITE_OVER, $box['x'], $box['y']);
+				} finally {
+					$sourceRegion->clear();
+					$fragmentedRegion->clear();
+					$mask->clear();
+				}
 			}
 
-			$sourceRegion = clone $image;
-			$sourceRegion->cropImage($box['width'], $box['height'], $box['x'], $box['y']);
-			$sourceRegion->setImagePage(0, 0, 0, 0);
-
-			$fragmentedRegion = $this->createFragmentedFaceRegion($sourceRegion);
-			$mask = $this->createHeadShapeMask($box['width'], $box['height']);
-
-			$fragmentedRegion->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
-			$fragmentedRegion->compositeImage($mask, Imagick::COMPOSITE_DSTIN, 0, 0);
-			$image->compositeImage($fragmentedRegion, Imagick::COMPOSITE_OVER, $box['x'], $box['y']);
-
-			$sourceRegion->clear();
-			$sourceRegion->destroy();
-			$fragmentedRegion->clear();
-			$fragmentedRegion->destroy();
-			$mask->clear();
-			$mask->destroy();
+			// Keeps the ICC profile; the orientation tag was reset by autoOrient().
+			$output = ImageHelper::applyOutputFormat($image, (string) $asset->mimeType, 90);
+			if (!$output->writeImage($tempPath)) {
+				throw new \RuntimeException('Could not write the blurred image.');
+			}
+		} catch (\Throwable $e) {
+			FileHelper::delete($tempPath);
+			throw $e;
+		} finally {
+			if ($output !== $image) {
+				$output->clear();
+			}
+			$image->clear();
 		}
-
-		if (in_array($asset->mimeType, ['image/jpeg', 'image/jpg'], true)) {
-			$image->setImageCompression(Imagick::COMPRESSION_JPEG);
-			$image->setImageCompressionQuality(90);
-			$image->setImageFormat('jpeg');
-		} elseif ($asset->mimeType === 'image/png') {
-			$image->setImageFormat('png');
-		}
-
-		$image->writeImage($tempPath);
-		$image->clear();
-		$image->destroy();
 
 		return $tempPath;
 	}
@@ -269,211 +339,14 @@ class ArticleImageFaceBlurJob extends BaseJob
 		$mask->drawImage($draw);
 		$mask->blurImage(0, max(0.6, min($width, $height) * 0.015));
 		$draw->clear();
-		$draw->destroy();
 
 		return $mask;
 	}
 
-	private function normalizedFaceBoxToPixels(array $face, int $imageWidth, int $imageHeight): array
+	private function isSupportedImageAsset(Asset $asset): bool
 	{
-		$x = (float) $face['x'] / 1000 * $imageWidth;
-		$y = (float) $face['y'] / 1000 * $imageHeight;
-		$width = (float) $face['width'] / 1000 * $imageWidth;
-		$height = (float) $face['height'] / 1000 * $imageHeight;
-
-		if (($face['source'] ?? '') === 'manual') {
-			$x = max(0, (int) floor($x));
-			$y = max(0, (int) floor($y));
-			$right = min($imageWidth, (int) ceil($x + $width));
-			$bottom = min($imageHeight, (int) ceil($y + $height));
-
-			return [
-				'x' => $x,
-				'y' => $y,
-				'width' => max(0, $right - $x),
-				'height' => max(0, $bottom - $y),
-			];
-		}
-
-		[$x, $y, $width, $height] = $this->coerceFaceBoxToHeadShape($x, $y, $width, $height, $imageWidth, $imageHeight);
-		$paddingX = $width * 0.14;
-		$paddingY = $height * 0.18;
-
-		$x = max(0, (int) floor($x - $paddingX));
-		$y = max(0, (int) floor($y - $paddingY));
-		$right = min($imageWidth, (int) ceil($x + $width + ($paddingX * 2)));
-		$bottom = min($imageHeight, (int) ceil($y + $height + ($paddingY * 2)));
-
-		return [
-			'x' => $x,
-			'y' => $y,
-			'width' => max(0, $right - $x),
-			'height' => max(0, $bottom - $y),
-		];
-	}
-
-	private function coerceFaceBoxToHeadShape(float $x, float $y, float $width, float $height, int $imageWidth, int $imageHeight): array
-	{
-		$centerX = $x + ($width / 2);
-		$centerY = $y + ($height / 2);
-		$ratio = $width / max(1, $height);
-		$relativeArea = ($width * $height) / max(1, $imageWidth * $imageHeight);
-		$bottom = $y + $height;
-
-		if ($ratio < 0.5) {
-			$width = $height * 0.68;
-		} elseif ($ratio > 1.35) {
-			$height = $width / 1.05;
-		}
-
-		if ($height > $width * 1.65) {
-			$height = $width * 1.35;
-			$centerY = $y + ($height / 2);
-		}
-
-		if ($relativeArea > 0.42 && $bottom > $imageHeight * 0.72 && $height > $width * 1.05) {
-			$height = min($height, $width * 1.25);
-			$centerY = $y + ($height / 2);
-		}
-
-		$x = $centerX - ($width / 2);
-		$y = $centerY - ($height / 2);
-
-		if ($x < 0) {
-			$x = 0;
-		}
-		if ($y < 0) {
-			$y = 0;
-		}
-		if ($x + $width > $imageWidth) {
-			$x = max(0, $imageWidth - $width);
-		}
-		if ($y + $height > $imageHeight) {
-			$y = max(0, $imageHeight - $height);
-		}
-
-		return [$x, $y, min($width, $imageWidth), min($height, $imageHeight)];
-	}
-
-	private function normalizeFaceBoxes(?array $data): array
-	{
-		if (!is_array($data) || !isset($data['faces']) || !is_array($data['faces'])) {
-			return [];
-		}
-
-		$faces = [];
-		foreach ($data['faces'] as $face) {
-			if (!is_array($face)) {
-				continue;
-			}
-
-			$x = $this->normalizeCoordinate($face['x'] ?? null);
-			$y = $this->normalizeCoordinate($face['y'] ?? null);
-			$width = $this->normalizeCoordinate($face['width'] ?? null);
-			$height = $this->normalizeCoordinate($face['height'] ?? null);
-
-			if ($x === null || $y === null || $width === null || $height === null || $width < 5 || $height < 5) {
-				continue;
-			}
-
-			$faces[] = [
-				'x' => $x,
-				'y' => $y,
-				'width' => min(1000 - $x, $width),
-				'height' => min(1000 - $y, $height),
-				'confidence' => (string) ($face['confidence'] ?? ''),
-				'source' => (string) ($face['source'] ?? ''),
-			];
-		}
-
-		return $faces;
-	}
-
-	private function normalizeCoordinate(mixed $value): ?int
-	{
-		if (!is_numeric($value)) {
-			return null;
-		}
-
-		return max(0, min(1000, (int) round((float) $value)));
-	}
-
-	private function extractJsonObject(string $content): ?array
-	{
-		$data = json_decode($content, true);
-		if (is_array($data)) {
-			return $data;
-		}
-
-		$matches = [];
-		preg_match('/\\{.*\\}/s', $content, $matches);
-
-		return isset($matches[0]) ? json_decode($matches[0], true) : null;
-	}
-
-	private function createPreviewAsset(Asset $originalAsset, string $tempPath): ?Asset
-	{
-		$previewAsset = new Asset();
-		$previewAsset->tempFilePath = $tempPath;
-		$previewAsset->filename = $this->getPreviewFilename($originalAsset);
-		$previewAsset->newFolderId = $originalAsset->folderId;
-		$previewAsset->volumeId = $originalAsset->volumeId;
-		$previewAsset->uploaderId = $this->userId ?: $originalAsset->uploaderId;
-		$previewAsset->avoidFilenameConflicts = true;
-		$previewAsset->setScenario(Asset::SCENARIO_CREATE);
-
-		ImageEnhancer::$skipAssetQueue = true;
-		try {
-			$saved = Craft::$app->elements->saveElement($previewAsset);
-		} finally {
-			ImageEnhancer::$skipAssetQueue = false;
-		}
-
-		return $saved ? $previewAsset : null;
-	}
-
-	private function isSupportedImageAsset(?Asset $asset): bool
-	{
-		return $asset instanceof Asset &&
-			$asset->kind === 'image' &&
+		return $asset->kind === Asset::KIND_IMAGE &&
 			in_array($asset->mimeType, ['image/jpeg', 'image/jpg', 'image/png'], true);
-	}
-
-	private function getTempReplacementPath(Asset $asset): string
-	{
-		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
-
-		if (!$extension) {
-			return $tempPath;
-		}
-
-		@unlink($tempPath);
-
-		return $tempPath . '.' . $extension;
-	}
-
-	private function getPreviewFilename(Asset $asset): string
-	{
-		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$baseName = pathinfo($asset->filename, PATHINFO_FILENAME);
-		$baseName = preg_replace('/[^A-Za-z0-9._-]+/', '-', $baseName) ?: 'image';
-
-		return $baseName . '-face-blur-preview-' . date('YmdHis') . ($extension ? '.' . $extension : '');
-	}
-
-	private function getFullAssetPath(Asset $asset): ?string
-	{
-		if (!$this->isSupportedImageAsset($asset)) {
-			return null;
-		}
-
-		$fsPath = Craft::getAlias($asset->getFs()->path);
-		if (!$fsPath) {
-			return null;
-		}
-
-		return $fsPath . DIRECTORY_SEPARATOR . $asset->folderPath . $asset->filename;
 	}
 
 	private function appendCacheBuster(?string $url): ?string
@@ -491,24 +364,19 @@ class ArticleImageFaceBlurJob extends BaseJob
 			return;
 		}
 
-		$statusPayload = array_merge([
+		JobStatus::merge($this->token, $this->assetId, array_merge([
 			'status' => $status,
 			'assetId' => $this->assetId,
 			'token' => $this->token,
 			'operation' => 'blurFaces',
 			'progress' => $progress,
 			'progressLabel' => $progressLabel,
-		], $extra);
-
-		Craft::$app->getCache()->set($this->getStatusCacheKey(), $statusPayload, 3600);
-		Craft::$app->getCache()->set($this->getAssetStatusCacheKey(), $statusPayload, 3600);
+		], $extra));
 	}
 
 	private function isCanceled(): bool
 	{
-		$status = Craft::$app->getCache()->get($this->getStatusCacheKey());
-
-		return is_array($status) && ($status['status'] ?? null) === 'canceled';
+		return JobStatus::isCanceled($this->token);
 	}
 
 	private function finishCanceled($queue): void
@@ -517,81 +385,21 @@ class ArticleImageFaceBlurJob extends BaseJob
 		$this->setProgress($queue, 1, 'Canceled');
 	}
 
-	private function getStatusCacheKey(): string
-	{
-		return 'image-enhancer:article-image-enhancement:' . $this->token;
-	}
-
-	private function getAssetStatusCacheKey(): string
-	{
-		return 'image-enhancer:article-image-enhancement-asset:' . $this->assetId;
-	}
-
-	private function resolveChatGptModel(ClientInterface $client, string $configuredModel, string $apiKey): string
-	{
-		if ($configuredModel !== Settings::MODEL_LATEST) {
-			return $configuredModel;
-		}
-
-		try {
-			$response = $client->get('https://api.openai.com/v1/models', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $apiKey,
-				],
-			]);
-			$data = json_decode((string) $response->getBody(), true);
-			$models = array_values(array_filter(
-				array_map(static fn(array $model): ?string => $model['id'] ?? null, $data['data'] ?? []),
-				static fn(?string $model): bool => $model !== null && Settings::isSupportedChatGptModel($model)
-			));
-
-			usort($models, [$this, 'compareChatGptModels']);
-
-			if (!empty($models)) {
-				return $models[0];
-			}
-		} catch (\Throwable $e) {
-			Craft::warning('ImageEnhancer: Could not resolve latest OpenAI model for face blur: ' . $e->getMessage(), __METHOD__);
-		}
-
-		return 'gpt-4o';
-	}
-
-	private function compareChatGptModels(string $modelA, string $modelB): int
-	{
-		return $this->modelSortScore($modelB) <=> $this->modelSortScore($modelA);
-	}
-
-	private function modelSortScore(string $model): int
-	{
-		if (preg_match('/^gpt-(\d+)(?:\.(\d+))?/', $model, $matches)) {
-			$major = (int) $matches[1];
-			$minor = (int) ($matches[2] ?? 0);
-			$sizePenalty = str_contains($model, 'nano') ? 20 : (str_contains($model, 'mini') ? 10 : 0);
-
-			return ($major * 1000) + ($minor * 10) - $sizePenalty;
-		}
-
-		if (str_starts_with($model, 'gpt-4o')) {
-			return 4000;
-		}
-
-		return 0;
-	}
-
 	private function getRelatedEntryForAsset(int $assetId): ?Entry
 	{
 		$sourceId = (new Query())
-			->select(['sourceId'])
-			->from(Table::RELATIONS)
-			->where(['targetId' => $assetId])
+			->select(['r.sourceId'])
+			->from(['r' => Table::RELATIONS])
+			->innerJoin(['e' => Table::ELEMENTS], '[[e.id]] = [[r.sourceId]]')
+			->where(['r.targetId' => $assetId])
+			->andWhere(['e.revisionId' => null, 'e.dateDeleted' => null])
 			->scalar();
 
 		if (!$sourceId) {
 			return null;
 		}
 
-		$element = Craft::$app->elements->getElementById((int) $sourceId, null, '*');
+		$element = Craft::$app->getElements()->getElementById((int) $sourceId, null, '*');
 		if (!$element) {
 			return null;
 		}
@@ -607,7 +415,9 @@ class ArticleImageFaceBlurJob extends BaseJob
 
 		$owner = Entry::find()
 			->id($ownerId)
+			->site('*')
 			->status(null)
+			->drafts(null)
 			->one();
 
 		return $owner instanceof Entry ? $this->normalizeEntry($owner) : null;
@@ -625,7 +435,9 @@ class ArticleImageFaceBlurJob extends BaseJob
 		if ($ownerId) {
 			$owner = Entry::find()
 				->id($ownerId)
+				->site('*')
 				->status(null)
+				->drafts(null)
 				->one();
 
 			if ($owner instanceof Entry) {
@@ -637,6 +449,7 @@ class ArticleImageFaceBlurJob extends BaseJob
 		if ($canonicalId && (int) $canonicalId !== (int) $entry->id) {
 			$canonical = Entry::find()
 				->id($canonicalId)
+				->site('*')
 				->status(null)
 				->one();
 
@@ -651,15 +464,11 @@ class ArticleImageFaceBlurJob extends BaseJob
 	private function truncateTitle(string $title, int $limit = 25): string
 	{
 		$title = trim($title);
-		$length = function_exists('mb_strlen') ? mb_strlen($title) : strlen($title);
-		if ($length <= $limit) {
+		if (mb_strlen($title) <= $limit) {
 			return $title;
 		}
 
-		$sliceLength = max(0, $limit - 3);
-		$slice = function_exists('mb_substr') ? mb_substr($title, 0, $sliceLength) : substr($title, 0, $sliceLength);
-
-		return rtrim($slice) . '...';
+		return rtrim(mb_substr($title, 0, max(0, $limit - 3))) . '...';
 	}
 
 	protected function defaultDescription(): string

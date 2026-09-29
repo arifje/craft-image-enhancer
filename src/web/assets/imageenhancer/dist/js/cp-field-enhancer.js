@@ -1,3 +1,13 @@
+/**
+ * Image Enhancer: CP asset field integration.
+ *
+ * Hand-authored source. There is no build step for this asset bundle: this file
+ * is served as-is from dist/ by ImageEnhancerAsset, so edit it directly and keep
+ * it valid browser JavaScript (no imports, no transpile-only syntax).
+ *
+ * Never insert server-provided or user-provided text with innerHTML; use
+ * textContent (or Craft.escapeHtml when building markup is unavoidable).
+ */
 (function () {
 	'use strict';
 
@@ -65,8 +75,24 @@
 		'.field [data-asset-id]',
 		'.field [data-type*="Asset"][data-id]',
 	].join(',');
+	// Added nodes matching this selector (or containing a match) warrant a rescan.
+	const relevantMutationSelector = [
+		scanSelector,
+		'.elementselect',
+		'.field',
+	].join(',');
+	// Mutations inside these containers are the plugin's own UI and never need a rescan.
+	const ignoredMutationSelector = [
+		'.image-enhancer-cp-modal',
+		'.image-enhancer-cp-field-action',
+	].join(',');
+	const scanDebounceMs = 50;
+	const scanMaxWaitMs = 400;
+	const scanFollowUpDelays = [250, 750];
 	let observer = null;
-	let scanBurstTimer = null;
+	let scanDebounceTimer = null;
+	let scanFollowUpTimers = [];
+	let scanPendingSince = 0;
 	let activeUploadRepair = false;
 	const uploadRepairQueue = [];
 
@@ -90,8 +116,10 @@
 		document.addEventListener('click', onPotentialTabChange, true);
 		document.addEventListener('keydown', onPotentialTabChange, true);
 		window.addEventListener('hashchange', scheduleScanBurst);
-		observer = new MutationObserver(() => {
-			scheduleScanBurst();
+		observer = new MutationObserver((mutations) => {
+			if (mutations.some(isRelevantMutation)) {
+				scheduleScanBurst();
+			}
 		});
 		observer.observe(document.body, {
 			childList: true,
@@ -121,20 +149,68 @@
 		scheduleScanBurst();
 	}
 
+	function isRelevantMutation(mutation) {
+		if (mutation.type !== 'childList' || mutation.addedNodes.length === 0) {
+			return false;
+		}
+
+		const target = mutation.target;
+		if (!(target instanceof Element) || isIgnoredMutationTarget(target)) {
+			return false;
+		}
+
+		return Array.from(mutation.addedNodes).some(isRelevantAddedNode);
+	}
+
+	function isIgnoredMutationTarget(element) {
+		return Boolean(element.isContentEditable || element.closest(ignoredMutationSelector));
+	}
+
+	function isRelevantAddedNode(node) {
+		if (!(node instanceof Element) || node.matches(ignoredMutationSelector)) {
+			return false;
+		}
+
+		if (node.matches(relevantMutationSelector) || node.querySelector(relevantMutationSelector)) {
+			return true;
+		}
+
+		// Lazy-loaded thumbnails can arrive after the asset card itself.
+		return node.tagName === 'IMG' && Boolean(node.closest('.field'));
+	}
+
+	/**
+	 * Debounced full-document scan, followed by two settle-time rescans.
+	 *
+	 * A new trigger cancels any pending follow-up scans, so sustained DOM churn
+	 * never stacks overlapping scans. The debounce is capped by scanMaxWaitMs so
+	 * continuous mutations cannot starve the scan either.
+	 */
 	function scheduleScanBurst() {
-		window.clearTimeout(scanBurstTimer);
-		scanBurstTimer = window.setTimeout(() => {
-			scanAssetFields(document);
-			scanUploadAssistantInputs(document);
-			window.setTimeout(() => {
-				scanAssetFields(document);
-				scanUploadAssistantInputs(document);
-			}, 250);
-			window.setTimeout(() => {
-				scanAssetFields(document);
-				scanUploadAssistantInputs(document);
-			}, 750);
-		}, 50);
+		cancelFollowUpScans();
+		window.clearTimeout(scanDebounceTimer);
+
+		const now = Date.now();
+		scanPendingSince = scanPendingSince || now;
+		const delay = Math.min(scanDebounceMs, Math.max(0, scanPendingSince + scanMaxWaitMs - now));
+		scanDebounceTimer = window.setTimeout(runScanBurst, delay);
+	}
+
+	function runScanBurst() {
+		scanDebounceTimer = null;
+		scanPendingSince = 0;
+		runScan();
+		scanFollowUpTimers = scanFollowUpDelays.map((delay) => window.setTimeout(runScan, delay));
+	}
+
+	function cancelFollowUpScans() {
+		scanFollowUpTimers.forEach((timer) => window.clearTimeout(timer));
+		scanFollowUpTimers = [];
+	}
+
+	function runScan() {
+		scanAssetFields(document);
+		scanUploadAssistantInputs(document);
 	}
 
 	function scanUploadAssistantInputs(root) {
@@ -227,6 +303,7 @@
 			card: null,
 			assetInput: input,
 			uploadRepair: result,
+			triggerElement: getUploadTriggerElement(input),
 			onDestroyed: () => {
 				activeUploadRepair = false;
 				openNextUploadRepair();
@@ -239,6 +316,13 @@
 			openNextUploadRepair();
 			Craft.cp?.displayError(error instanceof Error ? error.message : 'Could not open the upload assistant.');
 		});
+	}
+
+	function getUploadTriggerElement(input) {
+		const candidates = [input?.$uploadBtn, input?.$addElementBtn];
+		const $button = candidates.find(($candidate) => $candidate && $candidate.length > 0);
+
+		return $button ? $button.get(0) : null;
 	}
 
 	async function discardQueuedUpload(repairToken) {
@@ -287,8 +371,11 @@
 
 		const action = document.createElement('div');
 		action.className = 'image-enhancer-cp-field-action';
-		action.innerHTML = '<button type="button" class="btn small image-enhancer-cp-field-button">Enhance</button>';
-		const button = action.querySelector('button');
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'btn small image-enhancer-cp-field-button';
+		button.textContent = 'Enhance';
+		action.appendChild(button);
 		button.dataset.imageEnhancerCpAssetId = assetId;
 		button.dataset.imageEnhancerCpOriginalUrl = originalUrl;
 
@@ -438,6 +525,7 @@
 			assetId: button.dataset.imageEnhancerCpAssetId,
 			originalUrl: button.dataset.imageEnhancerCpOriginalUrl || getImageUrl(card),
 			card,
+			triggerElement: button,
 		});
 		button.disabled = true;
 		modal.show()
@@ -453,10 +541,11 @@
 	}
 
 	class CpEnhancerModal {
-		constructor({ assetId, originalUrl, card, assetInput = null, uploadRepair = null, onDestroyed = null }) {
+		constructor({ assetId, originalUrl, card, assetInput = null, uploadRepair = null, onDestroyed = null, triggerElement = null }) {
 			this.assetId = assetId;
 			this.originalUrl = originalUrl;
 			this.card = card;
+			this.triggerElement = triggerElement;
 			this.assetInput = assetInput;
 			this.uploadRepair = uploadRepair;
 			this.repairToken = uploadRepair?.repairToken || '';
@@ -477,6 +566,11 @@
 			this.manualBlurDrawStart = null;
 			this.manualBlurRegionSequence = 0;
 			this.pollTimer = null;
+			// Bumped whenever an operation starts, is canceled, or the modal closes;
+			// responses captured under an older value are stale and ignored.
+			this.operationSequence = 0;
+			// Bumped per status request so overlapping polls only honor the latest.
+			this.pollRequestSequence = 0;
 			this.statusStartedAt = 0;
 			this.statusTickTimer = null;
 			this.videoDownloadUrl = '';
@@ -497,9 +591,14 @@
 
 			if (window.Garnish && window.jQuery && Garnish.$bod) {
 				this.$root = window.jQuery(this.root).appendTo(Garnish.$bod);
-				this.modal = new Garnish.Modal(this.$root, {
+				const modalSettings = {
 					onHide: () => this.destroy(),
-				});
+				};
+				// Return focus to the button that opened the modal once it closes.
+				if (this.triggerElement) {
+					modalSettings.triggerElement = window.jQuery(this.triggerElement);
+				}
+				this.modal = new Garnish.Modal(this.$root, modalSettings);
 			} else {
 				document.body.appendChild(this.root);
 				this.root.classList.add('is-visible');
@@ -538,8 +637,8 @@
 				'  <div class="image-enhancer-cp-body">',
 				'  <div class="image-enhancer-cp-header">',
 				'    <div>',
-				`      <h2>${title}</h2>`,
-				`      <p>${description}</p>`,
+				'      <h2 data-title></h2>',
+				'      <p data-description></p>',
 				'    </div>',
 				'    <button type="button" class="image-enhancer-cp-close" aria-label="Close">&times;</button>',
 				'  </div>',
@@ -617,7 +716,9 @@
 			].join('');
 
 			this.root = root;
-			this.originalImage = root.querySelector('[data-original]');
+			root.querySelector('[data-title]').textContent = title;
+			root.querySelector('[data-description]').textContent = description;
+			this.originalImage =root.querySelector('[data-original]');
 			this.compareOriginalImage = root.querySelector('[data-compare-original]');
 			this.enhancedImage = root.querySelector('[data-enhanced]');
 			this.single = root.querySelector('[data-single]');
@@ -886,7 +987,7 @@
 			}
 
 			this.providerControls.hidden = false;
-			this.providerSelect.innerHTML = '';
+			this.providerSelect.replaceChildren();
 			[
 				{ label: 'OpenAI', value: 'openai' },
 				{ label: 'Grok Imagine', value: 'xai' },
@@ -910,7 +1011,7 @@
 		}
 
 		populateModelSelect() {
-			this.modelSelect.innerHTML = '';
+			this.modelSelect.replaceChildren();
 			const options = this.getModelOptions(this.selectedProvider);
 			options.forEach((option) => {
 				this.modelSelect.appendChild(createOption(option));
@@ -960,10 +1061,15 @@
 		}
 
 		async restoreStatus() {
+			const operationSequence = this.operationSequence;
 			try {
 				const response = await this.request('status', {
 					assetId: this.assetId,
 				});
+				// The editor may have started another operation while this was in flight.
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 
 				if (['queued', 'running', 'pending'].includes(response.status) && response.token) {
 					this.token = response.token;
@@ -997,11 +1103,35 @@
 					this.showError(new Error(response.message || 'Video generation failed.'));
 				}
 			} catch (error) {
-				this.showError(error);
+				if (this.isCurrentOperation(operationSequence)) {
+					this.showError(error);
+				}
 			}
 		}
 
+		/**
+		 * Stops any in-flight polling and marks earlier responses as stale.
+		 * Call this at the start of every action that starts a new operation.
+		 */
+		beginOperation() {
+			this.invalidateOperation();
+			this.statusStartedAt = 0;
+
+			return this.operationSequence;
+		}
+
+		invalidateOperation() {
+			window.clearTimeout(this.pollTimer);
+			this.pollTimer = null;
+			this.operationSequence += 1;
+		}
+
+		isCurrentOperation(operationSequence) {
+			return !this.destroyed && operationSequence === this.operationSequence;
+		}
+
 		async enhance() {
+			const operationSequence = this.beginOperation();
 			this.clearError();
 			this.hideCustomEditMode(false);
 			this.hideVideoMode(false);
@@ -1027,6 +1157,9 @@
 				}
 
 				const response = await this.request('enhance', payload);
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.token = response.token || '';
 				this.jobId = response.jobId || '';
 
@@ -1037,6 +1170,9 @@
 
 				this.applyPreview(response);
 			} catch (error) {
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.setBusy(false);
 				this.showError(error);
 			}
@@ -1093,6 +1229,7 @@
 				return;
 			}
 
+			const operationSequence = this.beginOperation();
 			this.clearError();
 			this.operation = 'customEnhance';
 			this.token = '';
@@ -1115,6 +1252,9 @@
 				}
 
 				const response = await this.request('enhance', payload);
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.token = response.token || '';
 				this.jobId = response.jobId || '';
 
@@ -1125,6 +1265,9 @@
 
 				this.applyPreview({ ...response, operation: 'customEnhance' });
 			} catch (error) {
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.setBusy(false);
 				this.startCustomEditMode(true);
 				this.showError(error);
@@ -1191,6 +1334,7 @@
 			}
 
 			const videoPrompt = this.videoPromptInput.value.trim();
+			const operationSequence = this.beginOperation();
 			this.clearError();
 			this.operation = 'createVideo';
 			this.token = '';
@@ -1209,6 +1353,9 @@
 					videoProvider: this.selectedVideoProvider,
 					videoModel: this.selectedVideoModel,
 				});
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.syncVideoSelection(response);
 				this.token = response.token || '';
 				this.jobId = response.jobId || '';
@@ -1220,6 +1367,9 @@
 
 				this.applyVideoResult(response);
 			} catch (error) {
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.setBusy(false);
 				this.startVideoMode(true);
 				this.showError(error);
@@ -1230,12 +1380,16 @@
 			if (!response.downloadUrl) {
 				throw new Error('The video response did not include a download URL.');
 			}
+			const downloadUrl = toSafeHttpUrl(response.downloadUrl);
+			if (!downloadUrl) {
+				throw new Error('The video response included an invalid download URL.');
+			}
 
 			this.operation = 'createVideo';
 			this.syncVideoSelection(response);
 			this.token = response.token || this.token;
-			this.videoDownloadUrl = response.downloadUrl;
-			this.downloadVideoButton.href = response.downloadUrl;
+			this.videoDownloadUrl = downloadUrl;
+			this.downloadVideoButton.href = downloadUrl;
 			if (response.videoFilename) {
 				this.downloadVideoButton.setAttribute('download', response.videoFilename);
 			}
@@ -1275,6 +1429,7 @@
 				return;
 			}
 
+			const operationSequence = this.beginOperation();
 			this.clearError();
 			this.hideCustomEditMode(false);
 			this.hideVideoMode(false);
@@ -1290,6 +1445,9 @@
 				const response = await this.request('blurFaces', {
 					assetId: this.assetId,
 				});
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.token = response.token || '';
 				this.jobId = response.jobId || '';
 
@@ -1300,6 +1458,9 @@
 
 				this.applyPreview({ ...response, operation: 'blurFaces' });
 			} catch (error) {
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.setBusy(false);
 				this.showError(error);
 			}
@@ -1357,6 +1518,7 @@
 				source: 'manual',
 			}));
 
+			const operationSequence = this.beginOperation();
 			this.clearError();
 			this.operation = 'manualBlurFaces';
 			this.token = '';
@@ -1371,6 +1533,9 @@
 					assetId: this.assetId,
 					manualFaces: JSON.stringify(manualFaces),
 				});
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.token = response.token || '';
 				this.jobId = response.jobId || '';
 
@@ -1385,6 +1550,9 @@
 					blurMode: 'manual',
 				});
 			} catch (error) {
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.setBusy(false);
 				this.startManualBlurMode(true);
 				this.showError(error);
@@ -1413,8 +1581,36 @@
 			return true;
 		}
 
+		/**
+		 * Returns true when a status response no longer belongs to the operation
+		 * that dispatched it (a new operation started, it was canceled, the modal
+		 * closed, or a newer status request superseded it).
+		 */
+		isStalePoll(dispatch, response = null) {
+			if (!this.isCurrentOperation(dispatch.operationSequence)) {
+				return true;
+			}
+			if (dispatch.requestSequence !== this.pollRequestSequence || dispatch.token !== this.token) {
+				return true;
+			}
+
+			const responseToken = typeof response?.token === 'string' ? response.token : '';
+
+			return Boolean(responseToken && dispatch.token && responseToken !== dispatch.token);
+		}
+
 		async poll() {
 			window.clearTimeout(this.pollTimer);
+			this.pollTimer = null;
+			if (this.destroyed) {
+				return;
+			}
+
+			const dispatch = {
+				operationSequence: this.operationSequence,
+				requestSequence: ++this.pollRequestSequence,
+				token: this.token,
+			};
 			let shouldResumeManualBlur = false;
 			let shouldResumeCustomEdit = false;
 			let shouldResumeVideo = false;
@@ -1422,10 +1618,13 @@
 			try {
 				const response = await this.request('status', {
 					assetId: this.assetId,
-					token: this.token,
+					token: dispatch.token,
 					jobId: this.jobId,
 					uploadRepairToken: this.repairToken,
 				});
+				if (this.isStalePoll(dispatch, response)) {
+					return;
+				}
 				this.operation = this.resolveOperation(response);
 				if (this.operation === 'createVideo') {
 					this.syncVideoSelection(response);
@@ -1470,6 +1669,9 @@
 				this.setBusy(true, label, response.status === 'running');
 				this.pollTimer = window.setTimeout(() => this.poll(), 1500);
 			} catch (error) {
+				if (this.isStalePoll(dispatch)) {
+					return;
+				}
 				this.setBusy(false);
 				if (shouldResumeManualBlur) {
 					this.resumeManualBlurMode();
@@ -1492,6 +1694,9 @@
 			const shouldResumeManualBlur = this.operation === 'manualBlurFaces';
 			const shouldResumeCustomEdit = this.operation === 'customEnhance';
 			const shouldResumeVideo = this.operation === 'createVideo';
+			// Stop polling while canceling so a late status response can't reopen the busy state.
+			this.invalidateOperation();
+			const operationSequence = this.operationSequence;
 			this.clearError();
 			this.setBusy(true, 'Canceling...');
 
@@ -1502,7 +1707,9 @@
 					jobId: this.jobId,
 					uploadRepairToken: this.repairToken,
 				});
-				window.clearTimeout(this.pollTimer);
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.setBusy(false);
 				if (shouldResumeCustomEdit) {
 					this.startCustomEditMode(true);
@@ -1512,8 +1719,16 @@
 					this.setStatus('Canceled', false);
 				}
 			} catch (error) {
-				this.setBusy(false);
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
 				this.showError(error);
+				// The job may still be running; keep tracking it so the editor can retry.
+				if (this.token) {
+					this.poll();
+					return;
+				}
+				this.setBusy(false);
 			}
 		}
 
@@ -2028,7 +2243,7 @@
 			}
 			this.destroyed = true;
 			void this.cleanupPendingUpload();
-			window.clearTimeout(this.pollTimer);
+			this.invalidateOperation();
 			window.clearInterval(this.statusTickTimer);
 			window.removeEventListener('resize', this.manualBlurResizeHandler);
 			this.root?.remove();
@@ -2205,7 +2420,8 @@
 	}
 
 	function refreshAssetFieldImage(assetId, imageUrl, sourceCard) {
-		if (!assetId || !imageUrl) {
+		// assetId is interpolated into attribute selectors below, so it must be numeric.
+		if (!/^\d+$/.test(String(assetId)) || !imageUrl) {
 			return;
 		}
 
@@ -2272,7 +2488,7 @@
 		[card, ...Array.from(card.querySelectorAll('*'))].forEach((node) => {
 			const style = window.getComputedStyle(node);
 			if (style.backgroundImage && style.backgroundImage !== 'none') {
-				node.style.backgroundImage = `url("${imageUrl}")`;
+				node.style.backgroundImage = `url("${escapeCssString(imageUrl)}")`;
 			}
 		});
 
@@ -2334,6 +2550,27 @@
 	function preloadImage(imageUrl) {
 		const image = new Image();
 		image.src = imageUrl;
+	}
+
+	/**
+	 * Returns an absolute http(s) URL, or '' for anything else (javascript:, data:, etc.).
+	 * Use for server-provided URLs assigned to href attributes.
+	 */
+	function toSafeHttpUrl(url) {
+		if (typeof url !== 'string' || url === '') {
+			return '';
+		}
+
+		try {
+			const parsed = new URL(url, window.location.href);
+			return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+		} catch (error) {
+			return '';
+		}
+	}
+
+	function escapeCssString(value) {
+		return String(value).replace(/[\\"]/g, '\\$&').replace(/[\n\r\f]/g, '');
 	}
 
 	function withCacheBuster(url) {

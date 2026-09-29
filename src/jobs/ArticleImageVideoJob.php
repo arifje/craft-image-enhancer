@@ -2,6 +2,9 @@
 
 namespace arjanbrinkman\craftimageenhancer\jobs;
 
+use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
+use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
+use arjanbrinkman\craftimageenhancer\helpers\JobStatus;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\services\AiVideoGenerationService;
 use Craft;
@@ -14,6 +17,11 @@ use yii\queue\RetryableJobInterface;
 
 class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 {
+	/**
+	 * Google: generation request (900s) + polling (capped at 900s) + download (300s).
+	 */
+	private const TTR = 2400;
+
 	public int $assetId;
 	public ?int $userId = null;
 	public string $token;
@@ -24,6 +32,7 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 	public function execute($queue): void
 	{
 		$videoPath = null;
+		$localPath = null;
 		$this->updateStatus('running', 0.05, 'Loading source image');
 		$this->setProgress($queue, 0.05, 'Loading source image');
 
@@ -33,15 +42,12 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 				return;
 			}
 
-			$asset = Craft::$app->assets->getAssetById($this->assetId);
-			if (!$this->isSupportedImageAsset($asset)) {
+			$asset = Craft::$app->getAssets()->getAssetById($this->assetId);
+			if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
 				throw new \RuntimeException('Asset not found or unsupported.');
 			}
 
-			$localPath = $this->getFullAssetPath($asset);
-			if (!$localPath || !file_exists($localPath)) {
-				throw new \RuntimeException('Could not find the source image file.');
-			}
+			$localPath = FileHelper::copyAssetToTemp($asset);
 
 			$service = ImageEnhancer::getInstance()->aiVideoGeneration;
 			$videoPath = $service->createVideoToTempFile(
@@ -75,6 +81,14 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 				'videoProvider' => $this->videoProvider,
 				'videoModel' => $this->videoModel,
 			]);
+
+			// A cancel that raced the "complete" write must not leave the video behind.
+			if ($this->isCanceled()) {
+				$service->deleteVideo($videoPath);
+				$this->finishCanceled($queue);
+				return;
+			}
+
 			$this->setProgress($queue, 1, 'Video ready to download');
 		} catch (\Throwable $e) {
 			if ($videoPath) {
@@ -87,16 +101,22 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 			}
 
 			$this->updateStatus('failed', 1, 'Video generation failed', [
-				'message' => $e->getMessage(),
+				'message' => HttpHelper::describeForUser($e),
 			]);
-			Craft::error('ImageEnhancer: Article image video queue job failed: ' . $e->getMessage(), __METHOD__);
-			throw $e;
+			$this->setProgress($queue, 1, 'Video generation failed');
+			Craft::error('ImageEnhancer: Article image video queue job failed: ' . HttpHelper::describe($e) . ' ' . HttpHelper::describeForUser($e), __METHOD__);
+
+			if ($e instanceof \Error) {
+				throw $e;
+			}
+		} finally {
+			FileHelper::delete($localPath);
 		}
 	}
 
 	public function getTtr(): int
 	{
-		return 1200;
+		return self::TTR;
 	}
 
 	public function canRetry($attempt, $error): bool
@@ -104,25 +124,10 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 		return false;
 	}
 
-	private function isSupportedImageAsset(?Asset $asset): bool
+	private function isSupportedImageAsset(Asset $asset): bool
 	{
-		return $asset instanceof Asset &&
-			$asset->kind === 'image' &&
+		return $asset->kind === Asset::KIND_IMAGE &&
 			in_array($asset->mimeType, ['image/jpeg', 'image/jpg', 'image/png'], true);
-	}
-
-	private function getFullAssetPath(Asset $asset): ?string
-	{
-		if (!$this->isSupportedImageAsset($asset)) {
-			return null;
-		}
-
-		$fsPath = Craft::getAlias($asset->getFs()->path);
-		if (!$fsPath) {
-			return null;
-		}
-
-		return $fsPath . DIRECTORY_SEPARATOR . $asset->folderPath . $asset->filename;
 	}
 
 	private function updateStatus(string $status, float $progress, string $progressLabel, array $extra = []): void
@@ -131,7 +136,7 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 			return;
 		}
 
-		$statusPayload = array_merge([
+		JobStatus::merge($this->token, $this->assetId, array_merge([
 			'status' => $status,
 			'assetId' => $this->assetId,
 			'token' => $this->token,
@@ -140,33 +145,18 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 			'videoModel' => $this->videoModel,
 			'progress' => $progress,
 			'progressLabel' => $progressLabel,
-		], $extra);
-
-		Craft::$app->getCache()->set($this->getStatusCacheKey(), $statusPayload, 3600);
-		Craft::$app->getCache()->set($this->getAssetStatusCacheKey(), $statusPayload, 3600);
+		], $extra));
 	}
 
 	private function isCanceled(): bool
 	{
-		$status = Craft::$app->getCache()->get($this->getStatusCacheKey());
-
-		return is_array($status) && ($status['status'] ?? null) === 'canceled';
+		return JobStatus::isCanceled($this->token);
 	}
 
 	private function finishCanceled($queue): void
 	{
 		$this->updateStatus('canceled', 1, 'Canceled');
 		$this->setProgress($queue, 1, 'Canceled');
-	}
-
-	private function getStatusCacheKey(): string
-	{
-		return 'image-enhancer:article-image-enhancement:' . $this->token;
-	}
-
-	private function getAssetStatusCacheKey(): string
-	{
-		return 'image-enhancer:article-image-enhancement-asset:' . $this->assetId;
 	}
 
 	private function getRelatedEntryForAsset(): ?Entry

@@ -17,7 +17,6 @@ class ImageEnhancerAsset extends AssetBundle
             CpAsset::class,
         ];
         $this->js = [
-            'js/check.js',
             'js/cp-field-enhancer.js',
         ];
         $this->css = [

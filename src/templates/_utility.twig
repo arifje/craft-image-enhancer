@@ -1,18 +1,27 @@
 {% import '_includes/forms' as forms %}
 
+{# Only admins may save (enforced by RuntimeSettingsController::actionSave()); others get a read-only view. #}
+{% set canEdit = canEdit ?? false %}
+
 <h2>Runtime settings</h2>
 <p>These values are stored in the database, not project config, so admins can update them directly on production.</p>
 
-<form method="post" accept-charset="UTF-8">
-	{{ actionInput('craft-image-enhancer/runtime-settings/save') }}
-	{{ redirectInput('utilities/image-enhancer') }}
-	{{ csrfInput() }}
+{% if not canEdit %}
+	{# Markup matches craft\helpers\Cp::_noticeHtml() (field tips) in Craft 4 and 5. #}
+	<p class="notice has-icon">
+		<span class="icon" aria-hidden="true"></span>
+		<span class="visually-hidden">Note: </span>
+		<span>Only admins can change these runtime settings. The current values are shown read-only.</span>
+	</p>
+{% endif %}
 
+{% set fieldsHtml %}
 	{{ forms.lightswitchField({
 		label: 'Run quality check on upload',
 		id: 'enabled',
 		name: 'enabled',
 		on: enabled,
+		disabled: not canEdit,
 		instructions: 'When disabled, new image uploads are ignored and queued analysis jobs stop before running.',
 	}) }}
 
@@ -28,6 +37,7 @@
 		rows: 16,
 		value: creativeEnhancementPromptOverride,
 		placeholder: creativeEnhancementPromptDefault,
+		disabled: not canEdit,
 		instructions: 'Optional production override for OpenAI, xAI, and Google image enhancement. The 1-10 tuning levels are still appended automatically.',
 	}) }}
 
@@ -38,8 +48,21 @@
 		rows: 8,
 		value: faceBlurDetectionPromptOverride,
 		placeholder: faceBlurDetectionPromptDefault,
+		disabled: not canEdit,
 		instructions: 'Optional production override for the Blur faces detector. It must still return valid JSON face/head boxes.',
 	}) }}
+{% endset %}
 
-	<input type="submit" class="btn submit" value="Save">
-</form>
+{% if canEdit %}
+	<form method="post" accept-charset="UTF-8">
+		{{ actionInput('craft-image-enhancer/runtime-settings/save') }}
+		{{ redirectInput('utilities/image-enhancer') }}
+		{{ csrfInput() }}
+
+		{{ fieldsHtml }}
+
+		<input type="submit" class="btn submit" value="Save">
+	</form>
+{% else %}
+	{{ fieldsHtml }}
+{% endif %}

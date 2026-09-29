@@ -5,6 +5,7 @@ namespace arjanbrinkman\craftimageenhancer\models;
 use Craft;
 use craft\base\Model;
 use craft\helpers\App;
+use yii\validators\UrlValidator;
 
 /**
  * Image Enhancer settings
@@ -128,7 +129,7 @@ PROMPT;
 	public bool $slackErrorNotification = false;
 	public string $slackWebhookUrl = '';
 	public string $slackBotToken = ''; // Required for postMessage method
- 	public string $slackChannel = '';
+	public string $slackChannel = '';
 	public string $slackErrorChannel = '';
 	
 	// Email notification
@@ -167,6 +168,27 @@ PROMPT;
 	public string $creativeEnhancementPrompt = self::DEFAULT_CREATIVE_ENHANCEMENT_PROMPT;
 	public string $faceBlurDetectionPrompt = self::DEFAULT_FACE_BLUR_DETECTION_PROMPT;
 
+	/**
+	 * Integer settings whose raw submitted value is checked before Craft's typecasting
+	 * turns a blank or non-numeric string into `0`.
+	 */
+	private const INTEGER_ATTRIBUTES = [
+		'notificationThreshold',
+		'creativeEnhancementClarityLevel',
+		'creativeEnhancementContrastLevel',
+		'creativeEnhancementColorLevel',
+		'creativeEnhancementNoiseReductionLevel',
+		'failedEnhancementRetryDelay',
+		'safeEnhancementMaxWidth',
+		'safeEnhancementJpegQuality',
+	];
+
+	/**
+	 * @var array<string, string> Integer attributes whose last submitted raw value was
+	 * blank (`blank`) or not an integer (`invalid`).
+	 */
+	private array $_invalidIntegerInput = [];
+
 	public function getResolvedChatGptApiKey(): string
 	{
 		return $this->resolveEnvValue($this->chatGptApiKey);
@@ -182,16 +204,188 @@ PROMPT;
 		return $this->resolveEnvValue($this->googleAiApiKey);
 	}
 
-	public function rules(): array
+	/**
+	 * Returns the Slack webhook URL with any `$ENV_VAR` reference resolved, or an empty string when unset.
+	 */
+	public function getResolvedSlackWebhookUrl(): string
 	{
-		return [
-			[['chatGptApiKey', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementProvider', 'imageEnhancementModel', 'xAiApiKey', 'xAiImageEnhancementModel', 'googleAiApiKey', 'googleImageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt', 'faceBlurDetectionPrompt'], 'string'],
+		return $this->resolveEnvValue($this->slackWebhookUrl);
+	}
+
+	/**
+	 * Returns the Slack bot token with any `$ENV_VAR` reference resolved, or an empty string when unset.
+	 */
+	public function getResolvedSlackBotToken(): string
+	{
+		return $this->resolveEnvValue($this->slackBotToken);
+	}
+
+	/**
+	 * Records blank or non-integer raw input for integer settings before the values are
+	 * typecast, so validation can reject them instead of silently saving `0`.
+	 *
+	 * @param mixed $values
+	 * @param bool $safeOnly
+	 */
+	public function setAttributes($values, $safeOnly = true): void
+	{
+		if (is_array($values)) {
+			foreach (self::INTEGER_ATTRIBUTES as $attribute) {
+				if (!array_key_exists($attribute, $values)) {
+					continue;
+				}
+
+				$problem = self::integerInputProblem($values[$attribute]);
+				if ($problem === null) {
+					unset($this->_invalidIntegerInput[$attribute]);
+					continue;
+				}
+
+				$this->_invalidIntegerInput[$attribute] = $problem;
+			}
+		}
+
+		parent::setAttributes($values, $safeOnly);
+	}
+
+	/**
+	 * Rejects integer settings that were submitted blank or non-numeric.
+	 *
+	 * @param string $attribute
+	 */
+	public function validateIntegerInput(string $attribute): void
+	{
+		$problem = $this->_invalidIntegerInput[$attribute] ?? null;
+		if ($problem === null) {
+			return;
+		}
+
+		$message = $problem === 'blank' ? '{attribute} cannot be blank.' : '{attribute} must be an integer.';
+		$this->addError($attribute, Craft::t('yii', $message, [
+			'attribute' => $this->getAttributeLabel($attribute),
+		]));
+	}
+
+	/**
+	 * Validates the ChatGPT model against the models the analysis job can call.
+	 *
+	 * @param string $attribute
+	 */
+	public function validateChatGptModel(string $attribute): void
+	{
+		$model = (string) $this->$attribute;
+		if ($model === self::MODEL_LATEST || self::isSupportedChatGptModel($model)) {
+			return;
+		}
+
+		$this->addError($attribute, Craft::t('craft-image-enhancer', '{attribute} is not a supported model.', [
+			'attribute' => $this->getAttributeLabel($attribute),
+		]));
+	}
+
+	/**
+	 * Validates the OpenAI image model ID format used by model discovery.
+	 *
+	 * @param string $attribute
+	 */
+	public function validateImageEnhancementModel(string $attribute): void
+	{
+		if (self::isSupportedImageEnhancementModel((string) $this->$attribute)) {
+			return;
+		}
+
+		$this->addError($attribute, Craft::t('craft-image-enhancer', '{attribute} is not a supported model.', [
+			'attribute' => $this->getAttributeLabel($attribute),
+		]));
+	}
+
+	/**
+	 * Validates a literal Slack webhook URL. Environment variable (`$VAR`) and alias (`@alias`)
+	 * references are resolved at send time and are not required to exist in every environment.
+	 *
+	 * @param string $attribute
+	 */
+	public function validateSlackWebhookUrl(string $attribute): void
+	{
+		$value = trim((string) $this->$attribute);
+		if ($value === '' || str_starts_with($value, '$') || str_starts_with($value, '@')) {
+			return;
+		}
+
+		if ((new UrlValidator(['validSchemes' => ['https']]))->validate($value)) {
+			return;
+		}
+
+		$this->addError($attribute, Craft::t('craft-image-enhancer', '{attribute} must be an https:// URL or an environment variable.', [
+			'attribute' => $this->getAttributeLabel($attribute),
+		]));
+	}
+
+	/**
+	 * @inheritdoc
+	 */
+	protected function defineRules(): array
+	{
+		$enumAttributes = [
+			'chatGptResultLanguage' => array_column(self::chatGptResultLanguageOptions(), 'value'),
+			'imageEnhancementMode' => array_column(self::imageEnhancementModeOptions(), 'value'),
+			'imageEnhancementTrigger' => array_column(self::imageEnhancementTriggerOptions(), 'value'),
+			'imageEnhancementAction' => array_column(self::imageEnhancementActionOptions(), 'value'),
+			'imageEnhancementProvider' => array_column(self::imageEnhancementProviderOptions(), 'value'),
+			'imageEnhancementFaceHandling' => array_column(self::imageEnhancementFaceHandlingOptions(), 'value'),
+			'xAiImageEnhancementModel' => array_column(self::xAiImageEnhancementModelOptions(), 'value'),
+			'googleImageEnhancementModel' => array_column(self::googleImageEnhancementModelOptions(), 'value'),
+		];
+
+		$rules = [
+			[['chatGptApiKey', 'chatGptPrompt', 'slackWebhookUrl', 'slackChannel', 'slackErrorChannel', 'chatGptResultLanguage', 'slackBotToken', 'chatGptModel', 'emailNotificationRecipient', 'imageEnhancementMode', 'imageEnhancementTrigger', 'imageEnhancementAction', 'imageEnhancementProvider', 'imageEnhancementModel', 'xAiApiKey', 'xAiImageEnhancementModel', 'googleAiApiKey', 'googleImageEnhancementModel', 'imageEnhancementFaceHandling', 'creativeEnhancementPrompt', 'faceBlurDetectionPrompt'], 'string'],
 			[['slackNotification', 'slackErrorNotification', 'emailNotification', 'retryFailedEnhancementJobs', 'debugLogging', 'enableUploadRequirementAssistant'], 'boolean'],
-			[['safeEnhancementMaxWidth', 'safeEnhancementJpegQuality'], 'integer'],
+			[array_merge(array_keys($enumAttributes), ['chatGptModel', 'imageEnhancementModel']), 'required'],
+			['chatGptModel', 'validateChatGptModel'],
+			['imageEnhancementModel', 'validateImageEnhancementModel'],
+			[self::INTEGER_ATTRIBUTES, 'validateIntegerInput', 'skipOnEmpty' => false],
+			[['notificationThreshold'], 'integer', 'min' => 0, 'max' => 100],
+			[['safeEnhancementMaxWidth'], 'integer', 'min' => 1, 'max' => 10000],
+			[['safeEnhancementJpegQuality'], 'integer', 'min' => 1, 'max' => 100],
 			[['failedEnhancementRetryDelay'], 'integer', 'min' => 0, 'max' => 86400],
 			[['creativeEnhancementClarityLevel', 'creativeEnhancementContrastLevel', 'creativeEnhancementColorLevel', 'creativeEnhancementNoiseReductionLevel'], 'integer', 'min' => self::ENHANCEMENT_LEVEL_MIN, 'max' => self::ENHANCEMENT_LEVEL_MAX],
+			['emailNotificationRecipient', 'email'],
+			['slackWebhookUrl', 'validateSlackWebhookUrl'],
 			[['allowedAssetFieldHandles', 'cpEnhancerAssetFieldHandles'], 'safe'],
 		];
+
+		foreach ($enumAttributes as $attribute => $range) {
+			$rules[] = [$attribute, 'in', 'range' => $range, 'strict' => true];
+		}
+
+		return array_merge(parent::defineRules(), $rules);
+	}
+
+	/**
+	 * Returns why a raw integer setting value is unacceptable, or `null` when it is a valid integer.
+	 *
+	 * @param mixed $value
+	 * @return string|null `blank`, `invalid`, or `null`
+	 */
+	private static function integerInputProblem(mixed $value): ?string
+	{
+		if (is_int($value)) {
+			return null;
+		}
+
+		if ($value === null || (is_string($value) && trim($value) === '')) {
+			return 'blank';
+		}
+
+		if (is_string($value) && preg_match('/^\s*[+-]?\d+\s*$/', $value) === 1) {
+			return null;
+		}
+
+		if (is_float($value) && floor($value) === $value) {
+			return null;
+		}
+
+		return 'invalid';
 	}
 
 	public static function fallbackChatGptModels(): array
@@ -222,7 +416,23 @@ PROMPT;
 			}
 		}
 
+		// `-pro` models are Responses-API only and fail on chat completions.
+		if (str_ends_with($model, '-pro') || str_contains($model, '-pro-')) {
+			return false;
+		}
+
 		return true;
+	}
+
+	/**
+	 * Languages the quality analysis can be asked to answer in.
+	 */
+	public static function chatGptResultLanguageOptions(): array
+	{
+		return [
+			['label' => 'Nederlands', 'value' => 'Dutch'],
+			['label' => 'Engels', 'value' => 'English'],
+		];
 	}
 
 	public static function imageEnhancementModeOptions(): array
@@ -316,7 +526,10 @@ PROMPT;
 
 	private function resolveEnvValue(string $value): string
 	{
-		return trim((string) App::parseEnv($value));
+		$resolved = trim((string) App::parseEnv($value));
+
+		// Craft 4 returns an unset `$VAR` reference verbatim; Craft 5 returns null. Treat both as unset.
+		return preg_match('/^\$\w+$/', $resolved) === 1 ? '' : $resolved;
 	}
 
 	public function getCreativeEnhancementPromptForRequest(): string
@@ -441,5 +654,4 @@ PROMPT;
 
 		return 'Clean noise, grain, blur residue, and compression artifacts aggressively, but do not smooth faces into a plastic look or remove real texture.';
 	}
-	
 }

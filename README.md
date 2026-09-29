@@ -8,6 +8,10 @@ This plugin requires Craft CMS 4 or 5, and PHP 8.2 or later.
 
 You need an OpenAI API key to analyze images. AI enhancement also requires an API key for the selected enhancement provider.
 
+## Permissions
+
+Non-admin users need the **Image Enhancer → Use AI image tools** permission (`craft-image-enhancer:use-ai-tools`) to use the Enhance modal, the upload requirement assistant, and the AI action endpoints. Grant it to the relevant user groups after upgrading to 1.20.0. Replacing a file with a kept preview additionally requires Craft's own **Replace files** (and, for other users' uploads, **Replace files uploaded by other users**) permission on the volume. The notification test actions and runtime settings are admin-only.
+
 ## Configuration
 
 Configure the plugin from the Craft control panel plugin settings.
@@ -45,12 +49,12 @@ Enhancement runs only when an image score is below the notification threshold.
 - **Disabled**: Analyze and notify only.
 - **Imagick safe optimization**: Creates a locally enhanced version. This uses Imagick to improve clarity, sharpen the image, optionally upscale smaller images to the configured max width, strip metadata, and rewrite JPEG/PNG output without changing scene context.
 - **AI enhancement**: Creates a provider-generated edit using OpenAI, Grok Imagine, or Google Nano Banana. The AI face handling setting controls whether AI enhancement is allowed for images with visible faces, or whether those images fall back to Imagick safe optimization.
-- **AI image provider**: Choose the provider used for AI enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Grok Imagine and Google Nano Banana use their own API key fields. **Choose in frontend** lets editors choose the provider and model in the frontend enhancement component.
+- **AI image provider**: Choose the provider used for AI enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Grok Imagine and Google Nano Banana use their own API key fields. **Choose in frontend** lets editors choose the provider and model in the control-panel Enhance modal.
 - **AI tuning levels**: Use simple 1-10 settings for clarity/detail, contrast/depth, color intensity, and noise/artifact cleanup. The selected levels are added to the image prompt so editors can choose a more colorful/contrasty result or a softer, more restrained result.
 - **AI enhancement prompt**: Controls the default prompt used by all AI enhancement providers. This is stored in project config and can be overridden at runtime from the Utility screen.
 - **Custom edits**: Editors can enter a one-off instruction such as `Flip the image horizontally` or `Remove all persons`. A custom edit replaces the standard conservative enhancement prompt for that request, then follows the same queued preview and approval workflow. The prompt is limited to 4,000 characters.
 - **Create Video**: Editors can animate the current image with optional motion instructions. They choose Google Gemini Omni Flash or an available Grok Imagine video model before queueing a 720p MP4, and the browser remembers that video provider/model choice. The result is offered as a protected download and never creates, relates, or replaces a Craft asset.
-- **Face blur detection prompt**: Controls the default prompt used by the frontend **Blur faces** action to detect face/head boxes. The API only returns boxes; Imagick applies the anonymization locally. This is stored in project config and can be overridden at runtime from the Utility screen.
+- **Face blur detection prompt**: Controls the default prompt used by the **Blur faces** action to detect face/head boxes. The API only returns boxes; Imagick applies the anonymization locally. This is stored in project config and can be overridden at runtime from the Utility screen.
 - **Enhancement trigger**: Choose whether enhancement runs only when the quality score is below the threshold, or always runs immediately and skips the quality check.
 - **Enhanced image handling**: Choose whether the enhanced file replaces the original asset, or is added next to the original asset for manual review.
 
@@ -68,7 +72,7 @@ AI-enhanced replacements are cropped back to the original asset dimensions so th
 
 The same OpenAI key is used for quality analysis, face detection fallback, and OpenAI image enhancement.
 
-OpenAI model options are loaded from the [Models API](https://developers.openai.com/api/reference/resources/models/methods/list) using the saved API key and cached in Craft for **15 minutes**. The settings page and control-panel editor share this list, and frontend model validation uses the same options. New `gpt-image-*` models appear automatically when returned for your account, including dated snapshots; the `chatgpt-image-latest` alias is also supported. The selected model ID is sent unchanged to the image editing API. The ChatGPT settings selector reuses the cached discovery response.
+OpenAI model options are loaded from the [Models API](https://developers.openai.com/api/reference/resources/models/methods/list) using the saved API key and cached in Craft for **15 minutes**. The settings page and control-panel editor share this list, and request validation uses the same options. New `gpt-image-*` models appear automatically when returned for your account, including dated snapshots; the `chatgpt-image-latest` alias is also supported. The selected model ID is sent unchanged to the image editing API. The ChatGPT settings selector reuses the cached discovery response.
 
 With no key, an unavailable API, or no compatible models returned, the selector uses built-in fallback options, including GPT Image 2.5 Sunburst and Flare. Your saved compatible model stays selectable even if it is absent from discovery. Failed lookups are also cached for 15 minutes to avoid repeated delays. Fallback options do not guarantee model access for your account. After saving a new API key, reload settings; changing the resolved key uses a separate cache entry. An unchanged key picks up new models on the next page load after cache expiry (or after clearing Craft's data cache).
 
@@ -98,65 +102,24 @@ Google enhancement uses the Gemini `generateContent` image API with the source i
 
 The control-panel **Create Video** action lets the editor choose a separately configured video provider and model. Google sends the source image and optional instructions to `gemini-omni-1.1-flash`; xAI supports `grok-imagine-video-1.5` and `grok-imagine-video`. Only providers with configured API keys are offered when at least one key is available. The chosen pair is remembered in the browser for the next request. Generated MP4 files remain in protected temporary storage while available for download; choosing **Done** removes them immediately. See Google's [Gemini Omni Flash video documentation](https://ai.google.dev/gemini-api/docs/omni) and xAI's [image-to-video documentation](https://docs.x.ai/developers/model-capabilities/video/image-to-video) for access, safety restrictions, and billing details.
 
-#### Frontend provider choice
+#### Editor provider choice
 
 1. Add API keys for every provider editors should be allowed to use.
 2. In **Enhancement**, set **AI image provider** to **Choose in frontend**.
-3. Configure the frontend enhancement component to send `imageEnhancementProvider` and `imageEnhancementModel` when queueing enhancement.
 
-When this mode is enabled, the settings page shows all provider API key and model fields. Frontend requests are validated against the known provider/model options before a queue job is created.
-
-### Frontend Image Enhancer Component
-
-The repository includes `imageEnhancer.vue` as a copyable Vue component for article preview pages or headless frontend projects. It displays the image, lets permitted editors queue an enhancement, custom edit, or face-blur preview, polls the queue status, shows a before/after comparison slider, and lets the editor keep, discard, cancel, retry, reset, or hide the enhancement UI.
-
-The **Custom edit** action accepts a one-off generative instruction and uses the selected provider and model. Prompts remain in the currently open component or modal so a failed or canceled request can be adjusted and retried, but they are not stored in browser persistence or returned by the status endpoint. The queue job retains the prompt while it is needed to execute or retry the request.
-
-The **Blur faces** action uses the ChatGPT/OpenAI API key to detect face/head bounding boxes and then applies a fragmented oval anonymization mask locally with Imagick. The **Manual blur** action lets editors draw one or more oval regions on the image; those normalized coordinates are sent directly to the same Imagick blur job and skip AI detection entirely. Both paths create a preview asset first, so editors can compare and decide whether to keep or discard the blurred result.
-
-By default the component uses the existing Craft action endpoints, so it works with the current plugin controllers:
-
-```twig
-<image-enhancer
-	:asset-id="{{ articleThumbnail ? articleThumbnail.id : 'null' }}"
-	:show-enhancement-options="{{ isRedactie ? 'true' : 'false' }}"
-	:provider-choice-enabled="{{ craft.app.plugins.plugin('craft-image-enhancer').settings.imageEnhancementProvider == 'frontend' ? 'true' : 'false' }}"
-	:open-ai-image-enhancement-models="{{ craft.app.plugins.plugin('craft-image-enhancer').getImageEnhancementModelOptions()|json_encode|e('html_attr') }}"
-	src="{{ articleThumbnail and articleThumbnail.url ? articleThumbnail.url ~ '?v=' ~ cachebuster : '' }}"
-	alt="{{ entry.title ?? '' }}"
-	category="{{ articleCategory ?? '' }}"
-	credits="{{ imageCredits|striptags }}"
-	csrf-token-name="{{ craft.app.config.general.csrfTokenName }}"
-	csrf-token-value="{{ craft.app.request.csrfToken }}"
-></image-enhancer>
-```
-
-Current action endpoint mode assumes a logged-in Craft user, same-origin requests, CSRF, and asset save permissions. This is the right mode for Craft preview pages.
-
-Pass `open-ai-image-enhancement-models` as shown above to keep the copyable Vue component's OpenAI selector synchronized with the cached server list. Without this prop, the component uses its bundled model defaults.
-
-The component is also prepared for a future GraphQL transport. Keep `api-transport` unset for now. Once GraphQL mutations/queries are added to the backend, the same component can switch transports:
-
-```vue
-<image-enhancer
-	:asset-id="assetId"
-	:show-enhancement-options="canEnhance"
-	api-transport="graphql"
-	graphql-endpoint="/api"
-	graphql-token="..."
-	:graphql-operations="imageEnhancerGraphqlOperations"
-	:src="imageUrl"
-/>
-```
-
-GraphQL operations can be provided for `enhance`, `blurFaces`, `status`, `cancel`, `reset`, `keep`, and `discard`. Each operation may be a query/mutation string or an object with `query`, `operationName`, `variables`, and `dataPath`.
-When manual blur is used, the `blurFaces` payload includes `manualFaces`, an array of normalized face/head boxes with `x`, `y`, `width`, and `height` values from 0 to 1000.
+When this mode is enabled, the settings page shows all provider API key and model fields, and the control-panel modal shows provider and model selectors. Requests are validated against the known provider/model options before a queue job is created.
 
 ### Control Panel Asset Fields
 
 The plugin also adds a compact **Enhance** button below image assets inside Craft asset fields. Clicking it opens a control-panel modal that can queue a standard enhancement, a custom edit, automatic face blurring, a custom blur drawn over one or more selected areas, or a downloadable video. Custom blur supports undo and uses the same queued preview workflow as automatic blur. The modal polls the queue status, shows a before/after slider for image operations, and lets the editor save an image preview as the replacement file for the existing asset. Saving does not change the relation field value; it replaces the file behind the selected asset. Video generation has separate provider, model, and optional prompt controls and never replaces the image. The modal expands on larger browser windows, while keeping queue feedback and its action footer visible on short and mobile viewports. Field-requirement details are only shown when the modal was opened by the invalid-upload assistant.
 
 If **AI image provider** is set to **Choose in frontend**, the modal also shows provider and model selectors and remembers the last selected combination in the browser.
+
+The **Custom edit** action accepts a one-off generative instruction and uses the selected provider and model. Prompts stay in the open modal so a failed or canceled request can be adjusted and retried, but they are not stored in browser persistence or returned by the status endpoint. The queue job retains the prompt while it is needed to execute or retry the request.
+
+The **Blur faces** action uses the ChatGPT/OpenAI API key to detect face/head bounding boxes and then applies a fragmented oval anonymization mask locally with Imagick. The **Custom blur** action lets editors draw one or more oval regions on the image; those normalized coordinates go directly to the same Imagick blur job and skip AI detection. Both paths create a preview asset first, so editors can compare and decide whether to keep or discard the blurred result. Abandoned previews older than 24 hours are removed during Craft's garbage collection.
+
+The AI action endpoints are control-panel only and require the **Use AI image tools** permission.
 
 #### Upload Requirement Assistant
 
@@ -199,14 +162,21 @@ Debug output includes the PHP process user, original asset ownership, temporary 
 
 ## Development checks
 
-Run `php tests/openai-models.php` for dependency-free regression checks covering model discovery, cache expiry, credential changes, fallbacks, saved selections, and frontend request validation. These checks use framework and HTTP doubles; they do not replace testing in a running Craft installation with an OpenAI API key.
+Dependency-free regression checks (framework and HTTP doubles; they do not replace testing in a running Craft installation):
+
+```bash
+for t in tests/*.php; do php "$t"; done
+```
+
+- `tests/openai-models.php`: model discovery, cache expiry, credential changes, fallbacks, and request validation.
+- `tests/controllers-security.php`: status ownership, cancel scoping, and preview binding.
+- `tests/jobs-helpers.php`: score parsing, face boxes, file-size targets, retry classification, and download host checks.
+- `tests/settings-validation.php`: settings validation rules.
 
 ## Current Limitations
 
 - Only newly uploaded image assets are analyzed.
-- The current file lookup supports local JPEG and PNG files.
-- Remote filesystems may need additional handling before their assets can be analyzed.
-- The Vue component is GraphQL-ready, but the plugin currently ships Craft action endpoints only; GraphQL schema/resolvers still need to be added before `api-transport="graphql"` can be used.
+- Only JPEG and PNG files are analyzed. Files are read through Craft's filesystem API, so remote volumes work, but generated videos are kept in node-local temporary storage and are not shared across multiple web nodes.
 - AI enhancement can alter image details more than Imagick safe optimization, depending on the selected provider, configured prompt, and model output.
 - Custom edits are generative and can intentionally alter image content or composition. Always review the before/after preview before keeping the result.
 - The upload requirement assistant repairs numeric width, height, and file-size selection conditions while preserving the source aspect ratio. Other failed selection-condition rules remain non-repairable.

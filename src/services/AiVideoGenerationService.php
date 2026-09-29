@@ -2,6 +2,9 @@
 
 namespace arjanbrinkman\craftimageenhancer\services;
 
+use arjanbrinkman\craftimageenhancer\helpers\FileHelper as PluginFileHelper;
+use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
+use arjanbrinkman\craftimageenhancer\helpers\JobStatus;
 use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
 use craft\base\Component;
@@ -21,8 +24,12 @@ class AiVideoGenerationService extends Component
 	private const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 	private const XAI_API_BASE_URL = 'https://api.x.ai/v1';
 	private const MAX_PROVIDER_POLLS = 120;
+	/** Wall-clock cap on polling, independent of how long each status request takes. */
+	private const MAX_PROVIDER_WAIT_SECONDS = 900;
 	private const PROVIDER_POLL_INTERVAL_MICROSECONDS = 5000000;
-	private const VIDEO_RETENTION_SECONDS = 86400;
+	/** Videos are only reachable through the job status, so they live as long as it does (plus a margin). */
+	private const VIDEO_RETENTION_SECONDS = JobStatus::TTL + 900;
+	private const MAX_VIDEO_DOWNLOAD_BYTES = 314572800;
 
 	public static function providerOptions(): array
 	{
@@ -149,6 +156,7 @@ class AiVideoGenerationService extends Component
 				$onProgress,
 				$isCanceled,
 			),
+			default => throw new \RuntimeException('Unsupported video provider or model.'),
 		};
 	}
 
@@ -204,7 +212,7 @@ class AiVideoGenerationService extends Component
 		?callable $isCanceled,
 	): string {
 		$this->reportProgress($onProgress, 0.2, 'Generating video with Google');
-		$response = $client->post(self::GOOGLE_API_BASE_URL . '/interactions', [
+		$response = $client->request('POST', self::GOOGLE_API_BASE_URL . '/interactions', [
 			'headers' => [
 				'x-goog-api-key' => $apiKey,
 				'Content-Type' => 'application/json',
@@ -270,7 +278,7 @@ class AiVideoGenerationService extends Component
 		?callable $isCanceled,
 	): string {
 		$this->reportProgress($onProgress, 0.2, 'Generating video with Grok Imagine');
-		$response = $client->post(self::XAI_API_BASE_URL . '/videos/generations', [
+		$response = $client->request('POST', self::XAI_API_BASE_URL . '/videos/generations', [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $apiKey,
 				'Content-Type' => 'application/json',
@@ -357,9 +365,10 @@ class AiVideoGenerationService extends Component
 		?callable $onProgress,
 		?callable $isCanceled,
 	): void {
-		for ($attempt = 0; $attempt < self::MAX_PROVIDER_POLLS; $attempt++) {
+		$deadline = time() + self::MAX_PROVIDER_WAIT_SECONDS;
+		for ($attempt = 0; $attempt < self::MAX_PROVIDER_POLLS && time() < $deadline; $attempt++) {
 			$this->throwIfCanceled($isCanceled);
-			$response = $client->get(self::GOOGLE_API_BASE_URL . '/files/' . rawurlencode($fileId), [
+			$response = $client->request('GET', self::GOOGLE_API_BASE_URL . '/files/' . rawurlencode($fileId), [
 				'headers' => ['x-goog-api-key' => $apiKey],
 				'connect_timeout' => 15,
 				'timeout' => 60,
@@ -388,9 +397,10 @@ class AiVideoGenerationService extends Component
 		?callable $onProgress,
 		?callable $isCanceled,
 	): string {
-		for ($attempt = 0; $attempt < self::MAX_PROVIDER_POLLS; $attempt++) {
+		$deadline = time() + self::MAX_PROVIDER_WAIT_SECONDS;
+		for ($attempt = 0; $attempt < self::MAX_PROVIDER_POLLS && time() < $deadline; $attempt++) {
 			$this->throwIfCanceled($isCanceled);
-			$response = $client->get(self::XAI_API_BASE_URL . '/videos/' . rawurlencode($requestId), [
+			$response = $client->request('GET', self::XAI_API_BASE_URL . '/videos/' . rawurlencode($requestId), [
 				'headers' => ['Authorization' => 'Bearer ' . $apiKey],
 				'connect_timeout' => 15,
 				'timeout' => 60,
@@ -423,6 +433,7 @@ class AiVideoGenerationService extends Component
 
 	private function downloadGoogleVideo(ClientInterface $client, string $apiKey, string $fileId): string
 	{
+		// The API key header is dropped if Google redirects to another host (e.g. storage).
 		return $this->downloadRemoteVideo(
 			$client,
 			self::GOOGLE_API_BASE_URL . '/files/' . rawurlencode($fileId) . ':download',
@@ -431,17 +442,14 @@ class AiVideoGenerationService extends Component
 				'query' => ['alt' => 'media'],
 			],
 			'Could not download the generated video from Google.',
+			null,
+			['x-goog-api-key', 'Authorization'],
 		);
 	}
 
 	private function downloadXAiVideo(ClientInterface $client, string $videoUrl): string
 	{
-		$parts = parse_url($videoUrl);
-		$host = strtolower((string) ($parts['host'] ?? ''));
-		if (
-			strtolower((string) ($parts['scheme'] ?? '')) !== 'https' ||
-			($host !== 'x.ai' && !str_ends_with($host, '.x.ai'))
-		) {
+		if (!HttpHelper::isAllowedXaiUrl($videoUrl)) {
 			throw new \RuntimeException('xAI returned an invalid video download URL.');
 		}
 
@@ -450,32 +458,46 @@ class AiVideoGenerationService extends Component
 			$videoUrl,
 			[],
 			'Could not download the generated video from xAI.',
+			[HttpHelper::class, 'isAllowedXaiUrl'],
+			['Authorization'],
 		);
 	}
 
+	/**
+	 * Downloads to a managed video path. Redirects are followed manually: every hop must be
+	 * https (and pass $isAllowedUrl), and $sensitiveHeaders are not sent to other hosts.
+	 *
+	 * @param callable(string): bool|null $isAllowedUrl
+	 * @param string[] $sensitiveHeaders
+	 */
 	private function downloadRemoteVideo(
 		ClientInterface $client,
 		string $url,
 		array $requestOptions,
 		string $failureMessage,
+		?callable $isAllowedUrl = null,
+		array $sensitiveHeaders = [],
 	): string {
 		$path = $this->createVideoPath();
 
 		try {
-			$client->get($url, array_merge($requestOptions, [
-				'allow_redirects' => true,
-				'connect_timeout' => 30,
-				'timeout' => 300,
-				'sink' => $path,
-			]));
-			if (!is_file($path) || filesize($path) === 0) {
-				throw new \RuntimeException('The generated video download was empty.');
-			}
+			HttpHelper::downloadToFile(
+				$client,
+				$url,
+				$path,
+				self::MAX_VIDEO_DOWNLOAD_BYTES,
+				array_merge($requestOptions, [
+					'connect_timeout' => 30,
+					'timeout' => 300,
+				]),
+				$isAllowedUrl,
+				$sensitiveHeaders,
+			);
 			$this->assertValidMp4($path);
 
 			return $path;
 		} catch (\Throwable $e) {
-			@unlink($path);
+			PluginFileHelper::delete($path);
 			throw new \RuntimeException($failureMessage, 0, $e);
 		}
 	}

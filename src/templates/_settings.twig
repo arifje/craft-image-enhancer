@@ -33,18 +33,18 @@
 		id: 'chatGptModel',
 		instructions: 'Choose a fixed OpenAI model, or use the latest available model for this API key.',
 		value: settings.chatGptModel,
+		errors: settings.getErrors('chatGptModel'),
 		options: chatGptModelOptions,
 	}) }}
 	
 	{{ forms.selectField({
 		label: 'Language of the ChatGPT result',
-		instructions: 'Choose your language in which the result much be shown.',
+		instructions: 'Choose the language in which the result must be shown.',
 		name: 'chatGptResultLanguage',
+		id: 'chatGptResultLanguage',
 		value: settings.chatGptResultLanguage,
-		options: [
-			{ label: 'Nederlands', value: 'Dutch' },
-			{ label: 'Engels', value: 'English' }
-		]
+		options: settings.chatGptResultLanguageOptions(),
+		errors: settings.getErrors('chatGptResultLanguage'),
 	}) }}
 
 </div>
@@ -57,9 +57,15 @@
 		label: 'Threshold',
 		name: 'notificationThreshold',
 		id: 'notificationThreshold',
-		instructions: 'Only send notification when image quality score is below a specific value',
+		type: 'number',
+		min: 0,
+		max: 100,
+		step: 1,
+		size: 4,
+		instructions: 'Only send a notification when the image quality score (1-100) is at or below this value. Use 0 to never notify.',
 		value: settings.notificationThreshold,
-		placeholder: '',
+		placeholder: '50',
+		errors: settings.getErrors('notificationThreshold'),
 	}) }}
 	
 	{{ forms.lightswitchField({
@@ -78,22 +84,26 @@
 		instructions: "Send failed image enhancement queue jobs to Slack using the same Slack variables below.",
 	}) }}
 	
-	{{ forms.textField({
+	{{ forms.autosuggestField({
 		label: 'Slack Bot Token',
 		name: 'slackBotToken',
 		id: 'slackBotToken',
-		instructions: 'Enter your bot Token (see https://api.slack.com/apps, Oauth & permissions). Used when no webhook URL is configured.',
+		instructions: 'Enter your bot token (see https://api.slack.com/apps, OAuth & Permissions) or select an environment variable such as `$SLACK_BOT_TOKEN`. Used when no webhook URL is configured.',
 		value: settings.slackBotToken,
 		placeholder: 'xoxb-xxx',
+		suggestEnvVars: true,
+		errors: settings.getErrors('slackBotToken'),
 	}) }}
 	
-	{{ forms.textField({
+	{{ forms.autosuggestField({
 		label: 'Slack Webhook URL',
 		name: 'slackWebhookUrl',
 		id: 'slackWebhookUrl',
-		instructions: 'A Slack Webhook URL to receive notifications about image quality. If set, this is used before the bot token method.',
+		instructions: 'A Slack webhook URL, or an environment variable such as `$SLACK_WEBHOOK_URL`, to receive notifications about image quality. If set, this is used before the bot token method.',
 		value: settings.slackWebhookUrl,
 		placeholder: 'https://hooks.slack.com/services/...',
+		suggestEnvVars: true,
+		errors: settings.getErrors('slackWebhookUrl'),
 	}) }}
 	
 	{{ forms.textField({
@@ -136,7 +146,8 @@
 		id: 'emailNotificationRecipient',
 		instructions: 'Add the email address of the recipient besides the author that uploaded the image.',
 		value: settings.emailNotificationRecipient,
-		placeholder: 'user@email.com'
+		placeholder: 'user@email.com',
+		errors: settings.getErrors('emailNotificationRecipient'),
 	}) }}
 
 	<button type="button" class="btn" data-image-enhancer-test-action="craft-image-enhancer/notifications/test-email">
@@ -196,6 +207,7 @@
 		id: 'imageEnhancementMode',
 		instructions: 'Choose whether automatic upload enhancement uses Imagick or an AI image provider. When disabled, no automatic analysis or enhancement queue job is created for new uploads.',
 		value: settings.imageEnhancementMode,
+		errors: settings.getErrors('imageEnhancementMode'),
 		options: imageEnhancementModeOptions,
 	}) }}
 
@@ -205,6 +217,7 @@
 		id: 'imageEnhancementTrigger',
 		instructions: 'Choose whether enhancement only runs after the quality score reaches the threshold, or always runs immediately without the quality check.',
 		value: settings.imageEnhancementTrigger,
+		errors: settings.getErrors('imageEnhancementTrigger'),
 		options: imageEnhancementTriggerOptions,
 	}) }}
 
@@ -214,6 +227,7 @@
 		id: 'imageEnhancementAction',
 		instructions: 'Choose whether the enhanced file replaces the original asset or is added next to the original asset for manual review.',
 		value: settings.imageEnhancementAction,
+		errors: settings.getErrors('imageEnhancementAction'),
 		options: imageEnhancementActionOptions,
 	}) }}
 
@@ -223,6 +237,7 @@
 		id: 'imageEnhancementProvider',
 		instructions: 'Choose the platform used for AI image enhancement. OpenAI uses the ChatGPT API key from the ChatGPT tab. Choose in frontend lets editors pick the provider and model in the frontend enhancement component.',
 		value: settings.imageEnhancementProvider,
+		errors: settings.getErrors('imageEnhancementProvider'),
 		options: imageEnhancementProviderOptions,
 	}) }}
 
@@ -245,6 +260,7 @@
 					id: 'imageEnhancementModel',
 					instructions: 'Available OpenAI image models are refreshed every 15 minutes using the saved ChatGPT API key. Save a new key and reload settings to update the list.',
 					value: settings.imageEnhancementModel,
+					errors: settings.getErrors('imageEnhancementModel'),
 					options: imageEnhancementModelOptions,
 				}) }}
 			</div>
@@ -261,6 +277,7 @@
 					id: 'xAiImageEnhancementModel',
 					instructions: 'Used for Grok Imagine image enhancement.',
 					value: settings.xAiImageEnhancementModel,
+					errors: settings.getErrors('xAiImageEnhancementModel'),
 					options: xAiImageEnhancementModelOptions,
 				}) }}
 			</div>
@@ -277,6 +294,7 @@
 					id: 'googleImageEnhancementModel',
 					instructions: 'Used for Google Nano Banana image enhancement.',
 					value: settings.googleImageEnhancementModel,
+					errors: settings.getErrors('googleImageEnhancementModel'),
 					options: googleImageEnhancementModelOptions,
 				}) }}
 			</div>
@@ -440,6 +458,7 @@
 		id: 'imageEnhancementFaceHandling',
 		instructions: 'Choose whether AI enhancement can run when visible human faces are detected.',
 		value: settings.imageEnhancementFaceHandling,
+		errors: settings.getErrors('imageEnhancementFaceHandling'),
 		options: imageEnhancementFaceHandlingOptions,
 	}) }}
 
@@ -448,7 +467,7 @@
 		name: 'faceBlurDetectionPrompt',
 		id: 'faceBlurDetectionPrompt',
 		rows: 8,
-		instructions: 'Default prompt used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally. Production can override this from Utilities > Image Enhancer.',
+		instructions: 'Default prompt used by the Blur faces frontend action. The prompt must return JSON face/head boxes; Imagick applies the actual blur locally. Admins can override this in production from Utilities > Image Enhancer.',
 		value: settings.effectiveFaceBlurDetectionPrompt,
 	}) }}
 
@@ -476,6 +495,7 @@
 		unit: 'seconds',
 		instructions: 'How many seconds to wait before retrying a failed enhancement job.',
 		value: settings.failedEnhancementRetryDelay,
+		errors: settings.getErrors('failedEnhancementRetryDelay'),
 		placeholder: '60',
 	}) }}
 
@@ -494,6 +514,7 @@
 		size: 4,
 		instructions: '1 is very subtle, 5 is balanced, 10 is strong but still natural. Controls sharpness, deblurring, edge definition, and visible texture detail.',
 		value: settings.creativeEnhancementClarityLevel,
+		errors: settings.getErrors('creativeEnhancementClarityLevel'),
 		placeholder: '5',
 	}) }}
 
@@ -508,6 +529,7 @@
 		size: 4,
 		instructions: '1 is very subtle, 5 is balanced, 10 is strong but still natural. Controls contrast, dynamic range, and perceived depth.',
 		value: settings.creativeEnhancementContrastLevel,
+		errors: settings.getErrors('creativeEnhancementContrastLevel'),
 		placeholder: '5',
 	}) }}
 
@@ -522,6 +544,7 @@
 		size: 4,
 		instructions: '1 is muted, 5 is balanced, 10 is vivid but still natural. Controls saturation, vibrance, and color richness.',
 		value: settings.creativeEnhancementColorLevel,
+		errors: settings.getErrors('creativeEnhancementColorLevel'),
 		placeholder: '5',
 	}) }}
 
@@ -536,6 +559,7 @@
 		size: 4,
 		instructions: '1 is very light cleanup, 5 is balanced, 10 is aggressive but should still preserve real skin texture and natural grain.',
 		value: settings.creativeEnhancementNoiseReductionLevel,
+		errors: settings.getErrors('creativeEnhancementNoiseReductionLevel'),
 		placeholder: '5',
 	}) }}
 
@@ -543,18 +567,31 @@
 		label: 'Imagick safe optimization max width',
 		name: 'safeEnhancementMaxWidth',
 		id: 'safeEnhancementMaxWidth',
-		instructions: 'Imagick safe optimization can upscale smaller images up to this width while preserving the original aspect ratio.',
+		type: 'number',
+		min: 1,
+		max: 10000,
+		step: 1,
+		size: 6,
+		unit: 'px',
+		instructions: 'Imagick safe optimization can upscale smaller images up to this width (1-10000) while preserving the original aspect ratio.',
 		value: settings.safeEnhancementMaxWidth,
 		placeholder: '2400',
+		errors: settings.getErrors('safeEnhancementMaxWidth'),
 	}) }}
 
 	{{ forms.textField({
 		label: 'Imagick JPEG quality',
 		name: 'safeEnhancementJpegQuality',
 		id: 'safeEnhancementJpegQuality',
-		instructions: 'JPEG compression quality used when Imagick rewrites a JPEG file.',
+		type: 'number',
+		min: 1,
+		max: 100,
+		step: 1,
+		size: 4,
+		instructions: 'JPEG compression quality (1-100) used when Imagick rewrites a JPEG file.',
 		value: settings.safeEnhancementJpegQuality,
 		placeholder: '90',
+		errors: settings.getErrors('safeEnhancementJpegQuality'),
 	}) }}
 
 	{{ forms.textareaField({
@@ -562,7 +599,7 @@
 		name: 'creativeEnhancementPrompt',
 		id: 'creativeEnhancementPrompt',
 		rows: 16,
-		instructions: 'Default prompt used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details. Production can override this from Utilities > Image Enhancer.',
+		instructions: 'Default prompt used for AI enhancement mode across all providers. Keep this strict if context must be preserved. For visible faces, preserve identity over sharpness and avoid inventing details. Admins can override this in production from Utilities > Image Enhancer.',
 		value: settings.effectiveCreativeEnhancementPrompt,
 	}) }}
 

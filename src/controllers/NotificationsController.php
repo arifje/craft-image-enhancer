@@ -5,14 +5,37 @@ namespace arjanbrinkman\craftimageenhancer\controllers;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use Craft;
 use craft\web\Controller;
+use GuzzleHttp\Exception\RequestException;
 use yii\web\Response;
 
 class NotificationsController extends Controller
 {
+	/**
+	 * Test sends are admin-only CP actions. `requireAdmin(false)` keeps them usable when
+	 * allowAdminChanges is off, since they don't write project config.
+	 *
+	 * @inheritdoc
+	 * @throws \yii\web\BadRequestHttpException
+	 * @throws \yii\web\ForbiddenHttpException
+	 */
+	public function beforeAction($action): bool
+	{
+		if (!parent::beforeAction($action)) {
+			return false;
+		}
+
+		$this->requireCpRequest();
+		$this->requireAdmin(false);
+
+		return true;
+	}
+
 	public function actionTestSlack(): Response
 	{
 		$this->requirePostRequest();
 		$settings = ImageEnhancer::getInstance()->getSettings();
+		$webhookUrl = $settings->getResolvedSlackWebhookUrl();
+		$botToken = $settings->getResolvedSlackBotToken();
 
 		$primaryChannel = trim($settings->slackChannel);
 		$errorChannel = trim($settings->slackErrorChannel) ?: $primaryChannel;
@@ -36,20 +59,20 @@ class NotificationsController extends Controller
 			$client = Craft::createGuzzleClient();
 			$sent = 0;
 
-			if ($settings->slackWebhookUrl) {
+			if ($webhookUrl !== '') {
 				if ($sendPrimaryTest) {
-					$this->sendWebhookSlackTest($client, $settings->slackWebhookUrl, 'Beeldkwaliteit test', $primaryBlocks, $primaryChannel);
+					$this->sendWebhookSlackTest($client, $webhookUrl, 'Beeldkwaliteit test', $primaryBlocks, $primaryChannel);
 					$sent++;
 				}
 				if ($sendErrorTest && (!$sendPrimaryTest || $errorChannel !== $primaryChannel)) {
-					$this->sendWebhookSlackTest($client, $settings->slackWebhookUrl, 'Image enhancement error test', $errorBlocks, $errorChannel);
+					$this->sendWebhookSlackTest($client, $webhookUrl, 'Image enhancement error test', $errorBlocks, $errorChannel);
 					$sent++;
 				}
 
 				return $this->asTestSuccess($sent === 1 ? 'Slack test notification sent via webhook.' : 'Slack test notifications sent via webhook.');
 			}
 
-			if (!$settings->slackBotToken) {
+			if ($botToken === '') {
 				return $this->asTestFailure('Slack bot token or channel is missing.');
 			}
 
@@ -57,21 +80,28 @@ class NotificationsController extends Controller
 				if ($primaryChannel === '') {
 					return $this->asTestFailure('Slack channel is missing.');
 				}
-				$this->sendBotSlackTest($client, $settings->slackBotToken, $primaryChannel, 'Beeldkwaliteit test', $primaryBlocks);
+				$slackError = $this->sendBotSlackTest($client, $botToken, $primaryChannel, 'Beeldkwaliteit test', $primaryBlocks);
+				if ($slackError !== null) {
+					return $this->asSlackApiFailure($slackError);
+				}
 				$sent++;
 			}
 			if ($sendErrorTest && (!$sendPrimaryTest || $errorChannel !== $primaryChannel)) {
 				if ($errorChannel === '') {
 					return $this->asTestFailure('Slack error channel is missing.');
 				}
-				$this->sendBotSlackTest($client, $settings->slackBotToken, $errorChannel, 'Image enhancement error test', $errorBlocks);
+				$slackError = $this->sendBotSlackTest($client, $botToken, $errorChannel, 'Image enhancement error test', $errorBlocks);
+				if ($slackError !== null) {
+					return $this->asSlackApiFailure($slackError);
+				}
 				$sent++;
 			}
 
 			return $this->asTestSuccess($sent === 1 ? 'Slack test notification sent via bot token.' : 'Slack test notifications sent via bot token.');
 		} catch (\Throwable $e) {
-			Craft::error('ImageEnhancer: Slack test notification failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asTestFailure('Slack test notification failed: ' . $e->getMessage());
+			// Guzzle messages embed the request URI (the webhook URL is a secret); log a redacted summary.
+			Craft::error('ImageEnhancer: Slack test notification failed: ' . self::describeFailure($e), __METHOD__);
+			return $this->asTestFailure('Slack test notification failed. Check the Craft logs for details.');
 		}
 	}
 
@@ -99,8 +129,9 @@ class NotificationsController extends Controller
 
 			return $this->asTestSuccess('Email test notification sent to ' . $recipient . '.');
 		} catch (\Throwable $e) {
-			Craft::error('ImageEnhancer: Email test notification failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asTestFailure('Email test notification failed: ' . $e->getMessage());
+			// Transport messages can include SMTP host/credential details; log a redacted summary.
+			Craft::error('ImageEnhancer: Email test notification failed: ' . self::describeFailure($e), __METHOD__);
+			return $this->asTestFailure('Email test notification failed. Check the Craft logs for details.');
 		}
 	}
 
@@ -142,7 +173,10 @@ class NotificationsController extends Controller
 		]);
 	}
 
-	private function sendBotSlackTest($client, string $botToken, string $channel, string $text, array $blocks): void
+	/**
+	 * @return string|null The sanitized Slack error code, or null on success.
+	 */
+	private function sendBotSlackTest($client, string $botToken, string $channel, string $text, array $blocks): ?string
 	{
 		$response = $client->post('https://slack.com/api/chat.postMessage', [
 			'headers' => [
@@ -160,8 +194,43 @@ class NotificationsController extends Controller
 		$responseData = json_decode((string) $response->getBody(), true);
 
 		if (($responseData['ok'] ?? true) === false) {
-			throw new \RuntimeException('Slack API error: ' . ($responseData['error'] ?? 'unknown'));
+			return self::sanitizeSlackErrorCode($responseData['error'] ?? null);
 		}
+
+		return null;
+	}
+
+	/**
+	 * Slack error codes (e.g. `channel_not_found`) carry no secrets, so they are safe to log and show.
+	 */
+	private function asSlackApiFailure(string $errorCode): Response
+	{
+		Craft::error('ImageEnhancer: Slack test notification rejected, Slack error code: ' . $errorCode, __METHOD__);
+
+		return $this->asTestFailure('Slack rejected the test notification (' . $errorCode . ').');
+	}
+
+	/**
+	 * Builds a log-safe failure summary: exception class and HTTP status code only. Never
+	 * the message, which may contain the webhook URL, token, or transport credentials.
+	 */
+	private static function describeFailure(\Throwable $e): string
+	{
+		if ($e instanceof RequestException && $e->getResponse() !== null) {
+			return get_class($e) . ', HTTP ' . $e->getResponse()->getStatusCode();
+		}
+
+		return get_class($e);
+	}
+
+	/**
+	 * Slack error codes are snake_case identifiers (e.g. `channel_not_found`).
+	 */
+	private static function sanitizeSlackErrorCode(mixed $code): string
+	{
+		$code = is_string($code) ? (string) preg_replace('/[^a-z0-9_]/', '', strtolower($code)) : '';
+
+		return $code !== '' ? substr($code, 0, 64) : 'unknown';
 	}
 
 	private function asTestSuccess(string $message): Response
@@ -180,3 +249,4 @@ class NotificationsController extends Controller
 		]);
 	}
 }
+

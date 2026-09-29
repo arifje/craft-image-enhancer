@@ -8,10 +8,19 @@ use craft\db\Query;
 use craft\helpers\Db;
 use craft\helpers\StringHelper;
 use yii\base\Component;
+use yii\base\InvalidConfigException;
 
 class RuntimeSettingsService extends Component
 {
 	private const TABLE = '{{%imageenhancer_runtime_settings}}';
+	private const WRITTEN_COLUMNS = [
+		'qualityCheckEnabled',
+		'creativeEnhancementPromptOverride',
+		'faceBlurDetectionPromptOverride',
+		'dateCreated',
+		'dateUpdated',
+		'uid',
+	];
 
 	public function isQualityCheckEnabled(): bool
 	{
@@ -58,21 +67,36 @@ class RuntimeSettingsService extends Component
 		return $prompt !== '' ? $prompt : $settings->getEffectiveFaceBlurDetectionPrompt();
 	}
 
+	/**
+	 * @throws InvalidConfigException if the runtime settings table is missing or its migrations are pending
+	 * @throws \yii\db\Exception if the write fails
+	 */
 	public function setQualityCheckEnabled(bool $enabled): void
 	{
 		$this->setRuntimeSettings(
 			$enabled,
 			$this->getCreativeEnhancementPromptOverride(),
-			$this->getFaceBlurDetectionPromptOverride()
+			$this->getFaceBlurDetectionPromptOverride(),
 		);
 	}
 
+	/**
+	 * Persists the runtime settings row. The table is created by the plugin's install/upgrade
+	 * migrations; this method never alters the schema.
+	 *
+	 * @throws InvalidConfigException if the runtime settings table is missing or its migrations are pending
+	 * @throws \yii\db\Exception if the write fails
+	 */
 	public function setRuntimeSettings(
 		bool $enabled,
 		?string $creativeEnhancementPromptOverride,
-		?string $faceBlurDetectionPromptOverride
+		?string $faceBlurDetectionPromptOverride,
 	): void {
-		$this->ensureRuntimeSettingsSchema();
+		if (!$this->hasCurrentSchema()) {
+			$message = 'The Image Enhancer runtime settings table is missing or outdated. Run `php craft migrate/all` (or reinstall the plugin) to apply its migrations.';
+			Craft::error('ImageEnhancer: Could not save runtime settings: ' . $message, __METHOD__);
+			throw new InvalidConfigException($message);
+		}
 
 		$now = Db::prepareDateForDb(new \DateTime());
 		$db = Craft::$app->getDb();
@@ -101,10 +125,17 @@ class RuntimeSettingsService extends Component
 			->execute();
 	}
 
+	/**
+	 * Returns the single runtime settings row, or an empty array (defaults) when the table
+	 * is missing (plugin migrations not yet applied) or cannot be read.
+	 */
 	private function getRuntimeSettingsRow(): array
 	{
 		try {
-			$this->ensureRuntimeSettingsSchema();
+			if (!$this->tableExists()) {
+				Craft::warning('ImageEnhancer: Runtime settings table is missing; using defaults. Run pending plugin migrations.', __METHOD__);
+				return [];
+			}
 
 			$row = (new Query())
 				->from(self::TABLE)
@@ -117,38 +148,32 @@ class RuntimeSettingsService extends Component
 		return is_array($row) ? $row : [];
 	}
 
-	private function ensureRuntimeSettingsSchema(): void
+	/**
+	 * Checks for the table without issuing a failing query, which would abort an
+	 * enclosing PostgreSQL transaction (e.g. during an asset save).
+	 */
+	private function tableExists(): bool
 	{
-		$db = Craft::$app->getDb();
-		$schema = $db->getSchema();
-		$table = $db->getTableSchema(self::TABLE);
+		return Craft::$app->getDb()->tableExists(self::TABLE);
+	}
 
+	/**
+	 * Checks that the install/upgrade migrations have created every column this service writes.
+	 */
+	private function hasCurrentSchema(): bool
+	{
+		$table = Craft::$app->getDb()->getTableSchema(self::TABLE);
 		if ($table === null) {
-			$db->createCommand()
-				->createTable(self::TABLE, [
-					'id' => $schema->createColumnSchemaBuilder('pk'),
-					'qualityCheckEnabled' => $schema->createColumnSchemaBuilder('boolean')->notNull()->defaultValue(true),
-					'creativeEnhancementPromptOverride' => $schema->createColumnSchemaBuilder('text')->null(),
-					'faceBlurDetectionPromptOverride' => $schema->createColumnSchemaBuilder('text')->null(),
-					'dateCreated' => $schema->createColumnSchemaBuilder('datetime')->notNull(),
-					'dateUpdated' => $schema->createColumnSchemaBuilder('datetime')->notNull(),
-					'uid' => $schema->createColumnSchemaBuilder('char', 36),
-				])
-				->execute();
-			return;
+			return false;
 		}
 
-		if ($table->getColumn('creativeEnhancementPromptOverride') === null) {
-			$db->createCommand()
-				->addColumn(self::TABLE, 'creativeEnhancementPromptOverride', $schema->createColumnSchemaBuilder('text')->null())
-				->execute();
+		foreach (self::WRITTEN_COLUMNS as $column) {
+			if ($table->getColumn($column) === null) {
+				return false;
+			}
 		}
 
-		if ($table->getColumn('faceBlurDetectionPromptOverride') === null) {
-			$db->createCommand()
-				->addColumn(self::TABLE, 'faceBlurDetectionPromptOverride', $schema->createColumnSchemaBuilder('text')->null())
-				->execute();
-		}
+		return true;
 	}
 
 	private function normalizePromptOverride(?string $prompt): ?string

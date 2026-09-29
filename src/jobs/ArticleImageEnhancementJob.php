@@ -2,6 +2,12 @@
 
 namespace arjanbrinkman\craftimageenhancer\jobs;
 
+use arjanbrinkman\craftimageenhancer\helpers\AssetHelper;
+use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
+use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
+use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
+use arjanbrinkman\craftimageenhancer\helpers\JobStatus;
+use arjanbrinkman\craftimageenhancer\helpers\SlackHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\models\Settings;
 use Craft;
@@ -12,10 +18,22 @@ use craft\elements\Entry;
 use craft\helpers\Queue;
 use craft\queue\BaseJob;
 use GuzzleHttp\ClientInterface;
-use Imagick;
+use yii\queue\RetryableJobInterface;
 
-class ArticleImageEnhancementJob extends BaseJob
+/**
+ * Creates an enhanced (or custom-edited) preview asset for the CP article image tools.
+ *
+ * Transient provider failures (connection errors, 429, 5xx) can be retried once by pushing a
+ * new job, honouring Retry-After. Expected failures set the status to "failed" and return;
+ * only programming errors are rethrown.
+ */
+class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterface
 {
+	/** Image edit request (300s) + result download + local normalization. */
+	private const TTR = 600;
+	private const MAX_RETRY_ATTEMPTS = 1;
+	private const MAX_RETRY_DELAY = 3600;
+
 	public int $assetId;
 	public ?int $userId = null;
 	public string $token;
@@ -26,9 +44,26 @@ class ArticleImageEnhancementJob extends BaseJob
 	public ?int $targetWidth = null;
 	public ?int $targetHeight = null;
 
+	public function getTtr(): int
+	{
+		return self::TTR;
+	}
+
+	/**
+	 * Retries are pushed explicitly (see queueRetryIfEnabled()), never by the queue.
+	 */
+	public function canRetry($attempt, $error): bool
+	{
+		return false;
+	}
+
 	public function execute($queue): void
 	{
 		$settings = ImageEnhancer::getInstance()->getSettings();
+		$localPath = null;
+		$tempPath = null;
+		$previewAsset = null;
+
 		$this->updateStatus('running', 0.05, 'Loading asset');
 		$this->setProgress($queue, 0.05, 'Loading asset');
 
@@ -38,15 +73,12 @@ class ArticleImageEnhancementJob extends BaseJob
 				return;
 			}
 
-			$asset = Craft::$app->assets->getAssetById($this->assetId);
-			if (!$this->isSupportedImageAsset($asset)) {
+			$asset = Craft::$app->getAssets()->getAssetById($this->assetId);
+			if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
 				throw new \RuntimeException('Asset not found or unsupported.');
 			}
 
-			$localPath = $this->getFullAssetPath($asset);
-			if (!$localPath || !file_exists($localPath)) {
-				throw new \RuntimeException('Could not find the original asset file.');
-			}
+			$localPath = FileHelper::copyAssetToTemp($asset);
 
 			$providerOptions = $this->getProviderOptions();
 			$providerLabel = ImageEnhancer::getInstance()->aiImageEnhancement->getProviderLabel($settings, $providerOptions);
@@ -56,7 +88,6 @@ class ArticleImageEnhancementJob extends BaseJob
 			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $providerOptions);
 
 			if ($this->isCanceled()) {
-				@unlink($tempPath);
 				$this->finishCanceled($queue);
 				return;
 			}
@@ -64,15 +95,18 @@ class ArticleImageEnhancementJob extends BaseJob
 			$previewProgressLabel = $this->isCustomEnhancement() ? 'Saving custom edit preview' : 'Saving enhanced preview';
 			$this->updateStatus('running', 0.85, $previewProgressLabel);
 			$this->setProgress($queue, 0.85, $previewProgressLabel);
-			$previewAsset = $this->createPreviewAsset($asset, $tempPath);
+			$previewAsset = AssetHelper::createAssetFromFile(
+				$asset,
+				$tempPath,
+				AssetHelper::getPreviewFilename($asset, AssetHelper::ENHANCEMENT_PREVIEW_MARKER),
+				$this->userId ?: $asset->uploaderId,
+			);
 
 			if (!$previewAsset instanceof Asset) {
-				@unlink($tempPath);
 				throw new \RuntimeException('Could not save the enhanced preview asset.');
 			}
 
 			if ($this->isCanceled()) {
-				$this->deletePreviewAsset($previewAsset);
 				$this->finishCanceled($queue);
 				return;
 			}
@@ -81,6 +115,14 @@ class ArticleImageEnhancementJob extends BaseJob
 			$this->updateStatus('complete', 1, $completeLabel, [
 				'previewId' => $previewAsset->id,
 			]);
+
+			// A cancel that raced the "complete" write must not leave an orphaned preview.
+			if ($this->isCanceled()) {
+				$this->finishCanceled($queue);
+				return;
+			}
+
+			$previewAsset = null;
 			$this->setProgress($queue, 1, $completeLabel);
 		} catch (\Throwable $e) {
 			if ($this->isCanceled()) {
@@ -89,23 +131,39 @@ class ArticleImageEnhancementJob extends BaseJob
 			}
 
 			if ($this->queueRetryIfEnabled($settings, $e)) {
-				Craft::warning('ImageEnhancer: Article image enhancement failed; retry queued: ' . $e->getMessage(), __METHOD__);
-				throw $e;
+				Craft::warning('ImageEnhancer: Article image enhancement failed; retry queued: ' . HttpHelper::describe($e), __METHOD__);
+				$this->setProgress($queue, 1, 'Retry queued');
+				return;
 			}
 
 			$failedLabel = $this->isCustomEnhancement() ? 'Custom edit failed' : 'Enhancement failed';
 			$this->updateStatus('failed', 1, $failedLabel, [
-				'message' => $e->getMessage(),
+				'message' => HttpHelper::describeForUser($e),
 			]);
+			$this->setProgress($queue, 1, $failedLabel);
 			$this->sendSlackErrorNotification($settings, $e);
-			Craft::error('ImageEnhancer: Article image enhancement queue job failed: ' . $e->getMessage(), __METHOD__);
-			throw $e;
+			Craft::error('ImageEnhancer: Article image enhancement queue job failed: ' . HttpHelper::describe($e) . ' ' . HttpHelper::describeForUser($e), __METHOD__);
+
+			// Programming errors should stay visible as failed queue jobs.
+			if ($e instanceof \Error) {
+				throw $e;
+			}
+		} finally {
+			// Set to null once the preview is handed over; otherwise it is orphaned.
+			if ($previewAsset instanceof Asset) {
+				AssetHelper::deleteGeneratedAsset($previewAsset);
+			}
+			FileHelper::delete($localPath, $tempPath);
 		}
 	}
 
+	/**
+	 * @throws \RuntimeException
+	 * @throws \GuzzleHttp\Exception\GuzzleException
+	 */
 	private function enhanceToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, array $providerOptions = []): string
 	{
-		[$originalWidth, $originalHeight] = getimagesize($localPath) ?: [null, null];
+		[$originalWidth, $originalHeight] = ImageHelper::getOrientedSize($localPath) ?? [0, 0];
 		$tempPath = ImageEnhancer::getInstance()->aiImageEnhancement->enhanceToTempFile(
 			$client,
 			$settings,
@@ -115,10 +173,23 @@ class ArticleImageEnhancementJob extends BaseJob
 			$this->customPrompt,
 		);
 
-		$targetWidth = $this->targetWidth ?: $originalWidth;
-		$targetHeight = $this->targetHeight ?: $originalHeight;
-		if ($targetWidth && $targetHeight) {
-			$this->normalizeReplacementImageDimensions($asset, $tempPath, $targetWidth, $targetHeight);
+		try {
+			$error = ImageHelper::validateImageInfo(ImageHelper::getImageInfo($tempPath));
+			if ($error !== null) {
+				throw new \RuntimeException('The provider returned an unusable image (' . $error . ').');
+			}
+
+			$targetWidth = $this->targetWidth ?: $originalWidth;
+			$targetHeight = $this->targetHeight ?: $originalHeight;
+			if ($targetWidth > 0 && $targetHeight > 0) {
+				// The editor reviews this preview before keeping it, so filling the target size is fine.
+				ImageHelper::cropToSize($tempPath, (string) $asset->mimeType, $targetWidth, $targetHeight);
+			} else {
+				ImageHelper::fitWithin($tempPath, (string) $asset->mimeType, ImageHelper::MAX_DIMENSION, ImageHelper::MAX_DIMENSION);
+			}
+		} catch (\Throwable $e) {
+			FileHelper::delete($tempPath);
+			throw $e;
 		}
 
 		return $tempPath;
@@ -141,118 +212,10 @@ class ArticleImageEnhancementJob extends BaseJob
 		return trim((string) $this->customPrompt) !== '';
 	}
 
-	private function createPreviewAsset(Asset $originalAsset, string $tempPath): ?Asset
+	private function isSupportedImageAsset(Asset $asset): bool
 	{
-		$previewAsset = new Asset();
-		$previewAsset->tempFilePath = $tempPath;
-		$previewAsset->filename = $this->getPreviewFilename($originalAsset);
-		$previewAsset->newFolderId = $originalAsset->folderId;
-		$previewAsset->volumeId = $originalAsset->volumeId;
-		$previewAsset->uploaderId = $this->userId ?: $originalAsset->uploaderId;
-		$previewAsset->avoidFilenameConflicts = true;
-		$previewAsset->setScenario(Asset::SCENARIO_CREATE);
-
-		ImageEnhancer::$skipAssetQueue = true;
-		try {
-			$saved = Craft::$app->elements->saveElement($previewAsset);
-		} finally {
-			ImageEnhancer::$skipAssetQueue = false;
-		}
-
-		return $saved ? $previewAsset : null;
-	}
-
-	private function deletePreviewAsset(Asset $asset): void
-	{
-		ImageEnhancer::$skipAssetQueue = true;
-		try {
-			Craft::$app->elements->deleteElement($asset);
-		} finally {
-			ImageEnhancer::$skipAssetQueue = false;
-		}
-	}
-
-	private function normalizeReplacementImageDimensions(Asset $asset, string $path, int $targetWidth, int $targetHeight): void
-	{
-		if (!class_exists(Imagick::class)) {
-			$normalizedPath = $this->getTempReplacementPath($asset);
-			try {
-				$image = Craft::$app->getImages()->loadImage($path);
-				$image->scaleAndCrop($targetWidth, $targetHeight, true);
-				if (!$image->saveAs($normalizedPath) || !copy($normalizedPath, $path)) {
-					throw new \RuntimeException('Could not normalize the enhanced image dimensions.');
-				}
-			} finally {
-				if (file_exists($normalizedPath)) {
-					@unlink($normalizedPath);
-				}
-			}
-
-			return;
-		}
-
-		$image = new Imagick($path);
-		$image->setImageGravity(Imagick::GRAVITY_CENTER);
-		$image->cropThumbnailImage($targetWidth, $targetHeight);
-
-		if (in_array($asset->mimeType, ['image/jpeg', 'image/jpg'], true)) {
-			$image->setImageCompression(Imagick::COMPRESSION_JPEG);
-			$image->setImageCompressionQuality(90);
-			$image->setImageFormat('jpeg');
-		} elseif ($asset->mimeType === 'image/png') {
-			$image->setImageFormat('png');
-		}
-
-		$image->writeImage($path);
-		$image->clear();
-		$image->destroy();
-	}
-
-	private function isSupportedImageAsset(?Asset $asset): bool
-	{
-		return $asset instanceof Asset &&
-			$asset->kind === 'image' &&
+		return $asset->kind === Asset::KIND_IMAGE &&
 			in_array($asset->mimeType, ['image/jpeg', 'image/jpg', 'image/png'], true);
-	}
-
-	private function getTempReplacementPath(Asset $asset): string
-	{
-		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
-		if ($tempPath === false) {
-			throw new \RuntimeException('Could not create a temporary image file.');
-		}
-
-		if (!$extension) {
-			return $tempPath;
-		}
-
-		@unlink($tempPath);
-
-		return $tempPath . '.' . $extension;
-	}
-
-	private function getPreviewFilename(Asset $asset): string
-	{
-		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$baseName = pathinfo($asset->filename, PATHINFO_FILENAME);
-		$baseName = preg_replace('/[^A-Za-z0-9._-]+/', '-', $baseName) ?: 'image';
-
-		return $baseName . '-enhancement-preview-' . date('YmdHis') . ($extension ? '.' . $extension : '');
-	}
-
-	private function getFullAssetPath(Asset $asset): ?string
-	{
-		if (!$this->isSupportedImageAsset($asset)) {
-			return null;
-		}
-
-		$fsPath = Craft::getAlias($asset->getFs()->path);
-		if (!$fsPath) {
-			return null;
-		}
-
-		return $fsPath . DIRECTORY_SEPARATOR . $asset->folderPath . $asset->filename;
 	}
 
 	private function updateStatus(string $status, float $progress, string $progressLabel, array $extra = []): void
@@ -261,24 +224,19 @@ class ArticleImageEnhancementJob extends BaseJob
 			return;
 		}
 
-		$statusPayload = array_merge([
+		JobStatus::merge($this->token, $this->assetId, array_merge([
 			'status' => $status,
 			'assetId' => $this->assetId,
 			'token' => $this->token,
 			'operation' => $this->isCustomEnhancement() ? 'customEnhance' : 'enhance',
 			'progress' => $progress,
 			'progressLabel' => $progressLabel,
-		], $extra);
-
-		Craft::$app->getCache()->set($this->getStatusCacheKey(), $statusPayload, 3600);
-		Craft::$app->getCache()->set($this->getAssetStatusCacheKey(), $statusPayload, 3600);
+		], $extra));
 	}
 
 	private function isCanceled(): bool
 	{
-		$status = Craft::$app->getCache()->get($this->getStatusCacheKey());
-
-		return is_array($status) && ($status['status'] ?? null) === 'canceled';
+		return JobStatus::isCanceled($this->token);
 	}
 
 	private function finishCanceled($queue): void
@@ -287,13 +245,25 @@ class ArticleImageEnhancementJob extends BaseJob
 		$this->setProgress($queue, 1, 'Canceled');
 	}
 
+	/**
+	 * Pushes one retry for transient failures. Returns true when a retry was queued.
+	 */
 	private function queueRetryIfEnabled(Settings $settings, \Throwable $error): bool
 	{
-		if (!$settings->retryFailedEnhancementJobs || $this->retryAttempt >= 1 || $this->isCanceled()) {
+		if (
+			!$settings->retryFailedEnhancementJobs ||
+			$this->retryAttempt >= self::MAX_RETRY_ATTEMPTS ||
+			!HttpHelper::isRetryable($error) ||
+			$this->isCanceled()
+		) {
 			return false;
 		}
 
 		$delay = max(0, (int) $settings->failedEnhancementRetryDelay);
+		$retryAfter = HttpHelper::getRetryAfterSeconds($error);
+		if ($retryAfter !== null) {
+			$delay = max($delay, min($retryAfter, self::MAX_RETRY_DELAY));
+		}
 		$nextAttempt = $this->retryAttempt + 1;
 
 		try {
@@ -308,19 +278,19 @@ class ArticleImageEnhancementJob extends BaseJob
 				'targetWidth' => $this->targetWidth,
 				'targetHeight' => $this->targetHeight,
 			]), null, $delay);
-
-			$this->updateStatus('queued', 0, $delay > 0 ? 'Retrying in ' . $delay . ' seconds' : 'Retrying', [
-				'jobId' => $jobId,
-				'retryAttempt' => $nextAttempt,
-				'retryDelay' => $delay,
-				'previousError' => $error->getMessage(),
-			]);
-
-			return true;
 		} catch (\Throwable $e) {
-			Craft::error('ImageEnhancer: Could not queue retry for failed article image enhancement: ' . $e->getMessage(), __METHOD__);
+			Craft::error('ImageEnhancer: Could not queue retry for failed article image enhancement (' . get_class($e) . ').', __METHOD__);
 			return false;
 		}
+
+		$this->updateStatus('queued', 0, $delay > 0 ? 'Retrying in ' . $delay . ' seconds' : 'Retrying', [
+			'jobId' => $jobId,
+			'retryAttempt' => $nextAttempt,
+			'retryDelay' => $delay,
+			'previousError' => 'The image provider was temporarily unavailable.',
+		]);
+
+		return true;
 	}
 
 	private function sendSlackErrorNotification(Settings $settings, \Throwable $error): void
@@ -329,87 +299,39 @@ class ArticleImageEnhancementJob extends BaseJob
 			return;
 		}
 
-		$blocks = [
-			[
-				'type' => 'section',
-				'text' => [
-					'type' => 'mrkdwn',
-					'text' => $this->getSlackErrorText($error),
+		$errorChannel = trim($settings->slackErrorChannel) ?: trim($settings->slackChannel);
+
+		SlackHelper::send($settings, [
+			'text' => 'Image enhancement error',
+			'blocks' => [
+				[
+					'type' => 'section',
+					'text' => [
+						'type' => 'mrkdwn',
+						'text' => $this->getSlackErrorText($error),
+					],
 				],
 			],
-		];
-
-		try {
-			$client = Craft::createGuzzleClient();
-			$errorChannel = trim($settings->slackErrorChannel) ?: trim($settings->slackChannel);
-
-			if ($settings->slackWebhookUrl) {
-				$payload = [
-					'text' => 'Image enhancement error',
-					'blocks' => $blocks,
-					'unfurl_links' => false,
-					'unfurl_media' => false,
-				];
-				if ($errorChannel !== '') {
-					$payload['channel'] = $errorChannel;
-				}
-
-				$client->post($settings->slackWebhookUrl, [
-					'json' => $payload,
-				]);
-				return;
-			}
-
-			if (!$settings->slackBotToken || $errorChannel === '') {
-				Craft::warning('ImageEnhancer: Slack error notification skipped because bot token or channel is missing.', __METHOD__);
-				return;
-			}
-
-			$response = $client->post('https://slack.com/api/chat.postMessage', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $settings->slackBotToken,
-					'Content-Type' => 'application/json',
-				],
-				'json' => [
-					'channel' => $errorChannel,
-					'text' => 'Image enhancement error',
-					'blocks' => $blocks,
-					'unfurl_links' => false,
-					'unfurl_media' => false,
-				],
-			]);
-			$responseData = json_decode((string) $response->getBody(), true);
-			if (($responseData['ok'] ?? true) === false) {
-				Craft::warning('ImageEnhancer: Slack error notification API error: ' . ($responseData['error'] ?? 'unknown'), __METHOD__);
-			}
-		} catch (\Throwable $e) {
-			Craft::error('ImageEnhancer: Slack error notification failed: ' . $e->getMessage(), __METHOD__);
-		}
-	}
-
-	private function getStatusCacheKey(): string
-	{
-		return 'image-enhancer:article-image-enhancement:' . $this->token;
-	}
-
-	private function getAssetStatusCacheKey(): string
-	{
-		return 'image-enhancer:article-image-enhancement-asset:' . $this->assetId;
+			'unfurl_links' => false,
+			'unfurl_media' => false,
+		], $errorChannel, true);
 	}
 
 	private function getRelatedEntryForAsset(int $assetId): ?Entry
 	{
 		$sourceId = (new Query())
-			->select(['sourceId'])
-			->from(Table::RELATIONS)
-			->where(['targetId' => $assetId])
+			->select(['r.sourceId'])
+			->from(['r' => Table::RELATIONS])
+			->innerJoin(['e' => Table::ELEMENTS], '[[e.id]] = [[r.sourceId]]')
+			->where(['r.targetId' => $assetId])
+			->andWhere(['e.revisionId' => null, 'e.dateDeleted' => null])
 			->scalar();
 
 		if (!$sourceId) {
 			return null;
 		}
 
-		$element = Craft::$app->elements->getElementById((int) $sourceId, null, '*');
+		$element = Craft::$app->getElements()->getElementById((int) $sourceId, null, '*');
 		if (!$element) {
 			return null;
 		}
@@ -425,7 +347,9 @@ class ArticleImageEnhancementJob extends BaseJob
 
 		$owner = Entry::find()
 			->id($ownerId)
+			->site('*')
 			->status(null)
+			->drafts(null)
 			->one();
 
 		return $owner instanceof Entry ? $this->normalizeEntry($owner) : null;
@@ -443,7 +367,9 @@ class ArticleImageEnhancementJob extends BaseJob
 		if ($ownerId) {
 			$owner = Entry::find()
 				->id($ownerId)
+				->site('*')
 				->status(null)
+				->drafts(null)
 				->one();
 
 			if ($owner instanceof Entry) {
@@ -455,6 +381,7 @@ class ArticleImageEnhancementJob extends BaseJob
 		if ($canonicalId && (int) $canonicalId !== (int) $entry->id) {
 			$canonical = Entry::find()
 				->id($canonicalId)
+				->site('*')
 				->status(null)
 				->one();
 
@@ -466,19 +393,13 @@ class ArticleImageEnhancementJob extends BaseJob
 		return $entry;
 	}
 
-	private function truncateTitle(string $title, int $limit = 25): string
-	{
-		return $this->truncateText($title, $limit);
-	}
-
 	private function getSlackErrorText(\Throwable $error): string
 	{
 		$entry = $this->getRelatedEntryForAsset($this->assetId);
 		$title = $entry?->title ?: 'onbekend artikel';
-		$article = $entry?->getCpEditUrl()
-			? $this->formatSlackLink($entry->getCpEditUrl(), $title)
-			: $this->escapeSlackText($title);
-		$message = $this->escapeSlackText($this->truncateText($error->getMessage(), 700));
+		$editUrl = $entry?->getCpEditUrl();
+		$article = $editUrl ? SlackHelper::link($editUrl, $title) : SlackHelper::escape($title);
+		$message = SlackHelper::escape($this->truncateText(HttpHelper::describeForUser($error), 700));
 
 		return "⚠️ Image enhancement failed for article: {$article}\nAsset ID: {$this->assetId}\nError: {$message}";
 	}
@@ -486,39 +407,17 @@ class ArticleImageEnhancementJob extends BaseJob
 	private function truncateText(string $text, int $limit): string
 	{
 		$text = trim($text);
-		if ($text === '') {
-			return '';
-		}
-
-		$length = function_exists('mb_strlen') ? mb_strlen($text) : strlen($text);
-		if ($length <= $limit) {
+		if (mb_strlen($text) <= $limit) {
 			return $text;
 		}
 
-		$sliceLength = max(0, $limit - 3);
-		$slice = function_exists('mb_substr') ? mb_substr($text, 0, $sliceLength) : substr($text, 0, $sliceLength);
-
-		return rtrim($slice) . '...';
-	}
-
-	private function formatSlackLink(string $url, string $label): string
-	{
-		return '<' . str_replace('>', '%3E', $url) . '|' . $this->escapeSlackText($label) . '>';
-	}
-
-	private function escapeSlackText(string $text): string
-	{
-		return str_replace(
-			['&', '<', '>', '|'],
-			['&amp;', '&lt;', '&gt;', '/'],
-			$text
-		);
+		return rtrim(mb_substr($text, 0, max(0, $limit - 3))) . '...';
 	}
 
 	protected function defaultDescription(): string
 	{
 		$title = $this->getRelatedEntryForAsset($this->assetId)?->title ?? null;
-		$title = $title ? $this->truncateTitle($title) : null;
+		$title = $title ? $this->truncateText($title, 25) : null;
 
 		$prefix = $this->isCustomEnhancement() ? 'Custom edit article image preview' : 'Enhance article image preview';
 

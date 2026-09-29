@@ -10,6 +10,8 @@ use arjanbrinkman\craftimageenhancer\models\Settings;
 use arjanbrinkman\craftimageenhancer\services\AiVideoGenerationService;
 use Craft;
 use craft\elements\Asset;
+use craft\elements\User;
+use craft\helpers\FileHelper;
 use craft\helpers\UrlHelper;
 use craft\web\Controller;
 use yii\web\NotFoundHttpException;
@@ -17,6 +19,26 @@ use yii\web\Response;
 
 class ArticleImageController extends Controller
 {
+	/**
+	 * Every action here drives a paid AI provider (or its result), so gate the whole
+	 * controller on CP requests plus the plugin permission. Admins pass automatically.
+	 *
+	 * @inheritdoc
+	 * @throws \yii\web\BadRequestHttpException
+	 * @throws \yii\web\ForbiddenHttpException
+	 */
+	public function beforeAction($action): bool
+	{
+		if (!parent::beforeAction($action)) {
+			return false;
+		}
+
+		$this->requireCpRequest();
+		$this->requirePermission(ImageEnhancer::PERMISSION_USE_AI_TOOLS);
+
+		return true;
+	}
+
 	public function actionEnhance(): Response
 	{
 		$this->requireLogin();
@@ -47,7 +69,7 @@ class ArticleImageController extends Controller
 			$repairTarget = ImageEnhancer::getInstance()->assetRequirements->getRepairTargetDimensions(
 				$repairToken,
 				(int) $asset->id,
-				(int) Craft::$app->getUser()->getId(),
+				$this->getCurrentUserId(),
 			);
 			if ($repairTarget === null) {
 				return $this->asJsonFailure('This upload repair session is invalid or has expired.');
@@ -61,54 +83,31 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure($enhancementService->getProviderLabel($settings, $providerOptions) . ' API key is missing.');
 		}
 
-		$localPath = $this->getFullAssetPath($asset);
-		if (!$localPath || !file_exists($localPath)) {
+		if (!$this->assetFileExists($asset)) {
 			return $this->asJsonFailure('Could not find the original asset file.');
 		}
 
-		try {
-			$token = bin2hex(random_bytes(16));
-			$this->setEnhancementStatus($token, [
-				'status' => 'queued',
+		$userId = $this->getCurrentUserId();
+
+		return $this->startOperation(
+			$asset,
+			'enhancement',
+			['operation' => $operation],
+			static fn(string $token) => new ArticleImageEnhancementJob([
 				'assetId' => $asset->id,
-				'operation' => $operation,
-				'progress' => 0,
-				'progressLabel' => 'Queued',
-			]);
-			$jobId = Craft::$app->queue->push(new ArticleImageEnhancementJob([
-				'assetId' => $asset->id,
-				'userId' => Craft::$app->getUser()->getId(),
+				'userId' => $userId,
 				'token' => $token,
 				'imageEnhancementProvider' => $providerOptions['provider'] ?? null,
 				'imageEnhancementModel' => $providerOptions['model'] ?? null,
 				'customPrompt' => $customPrompt,
 				'targetWidth' => $repairTarget['width'] ?? null,
 				'targetHeight' => $repairTarget['height'] ?? null,
-			]));
-			$this->setEnhancementStatus($token, [
-				'status' => 'queued',
-				'assetId' => $asset->id,
-				'operation' => $operation,
-				'jobId' => $jobId,
-				'progress' => 0,
-				'progressLabel' => 'Queued',
-			]);
-
-			return $this->asJson([
-				'success' => true,
-				'queued' => true,
-				'assetId' => $asset->id,
-				'operation' => $operation,
-				'jobId' => $jobId,
-				'token' => $token,
-				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
+			]),
+			[
 				'imageEnhancementProvider' => $providerOptions['provider'] ?? $settings->imageEnhancementProvider,
 				'imageEnhancementModel' => $providerOptions['model'] ?? $enhancementService->getProviderModel($settings, $providerOptions),
-			]);
-		} catch (\Throwable $e) {
-			Craft::error('ImageEnhancer: Article image enhancement queueing failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asJsonFailure('Could not queue enhancement: ' . $e->getMessage());
-		}
+			],
+		);
 	}
 
 	private function getCustomEnhancementPromptForRequest(): string|false|null
@@ -172,57 +171,39 @@ class ArticleImageController extends Controller
 			);
 		}
 
-		$localPath = $this->getFullAssetPath($asset);
-		if (!$localPath || !file_exists($localPath)) {
+		if (!$this->assetFileExists($asset)) {
 			return $this->asJsonFailure('Could not find the source image file.');
 		}
 
 		try {
 			$videoService->cleanupExpiredVideos();
-			$token = bin2hex(random_bytes(16));
-			$this->setEnhancementStatus($token, [
-				'status' => 'queued',
-				'assetId' => $asset->id,
+		} catch (\Throwable $e) {
+			Craft::warning('ImageEnhancer: Could not clean up expired videos: ' . $e->getMessage(), __METHOD__);
+		}
+
+		$userId = $this->getCurrentUserId();
+
+		return $this->startOperation(
+			$asset,
+			'video generation',
+			[
 				'operation' => 'createVideo',
 				'videoProvider' => $providerOptions['provider'],
 				'videoModel' => $providerOptions['model'],
-				'progress' => 0,
-				'progressLabel' => 'Queued',
-			]);
-			$jobId = Craft::$app->queue->push(new ArticleImageVideoJob([
+			],
+			static fn(string $token) => new ArticleImageVideoJob([
 				'assetId' => $asset->id,
-				'userId' => Craft::$app->getUser()->getId(),
+				'userId' => $userId,
 				'token' => $token,
 				'videoPrompt' => $videoPrompt,
 				'videoProvider' => $providerOptions['provider'],
 				'videoModel' => $providerOptions['model'],
-			]));
-			$this->setEnhancementStatus($token, [
-				'status' => 'queued',
-				'assetId' => $asset->id,
-				'operation' => 'createVideo',
+			]),
+			[
 				'videoProvider' => $providerOptions['provider'],
 				'videoModel' => $providerOptions['model'],
-				'jobId' => $jobId,
-				'progress' => 0,
-				'progressLabel' => 'Queued',
-			]);
-
-			return $this->asJson([
-				'success' => true,
-				'queued' => true,
-				'assetId' => $asset->id,
-				'operation' => 'createVideo',
-				'jobId' => $jobId,
-				'token' => $token,
-				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
-				'videoProvider' => $providerOptions['provider'],
-				'videoModel' => $providerOptions['model'],
-			]);
-		} catch (\Throwable $e) {
-			Craft::error('ImageEnhancer: Article image video queueing failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asJsonFailure('Could not queue video generation: ' . $e->getMessage());
-		}
+			],
+		);
 	}
 
 	private function getVideoPromptForRequest(): string|false
@@ -266,53 +247,28 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('ChatGPT API key is missing.');
 		}
 
-		$localPath = $this->getFullAssetPath($asset);
-		if (!$localPath || !file_exists($localPath)) {
+		if (!$this->assetFileExists($asset)) {
 			return $this->asJsonFailure('Could not find the original asset file.');
 		}
 
-		try {
-			$token = bin2hex(random_bytes(16));
-			$this->setEnhancementStatus($token, [
-				'status' => 'queued',
-				'assetId' => $asset->id,
+		$userId = $this->getCurrentUserId();
+
+		return $this->startOperation(
+			$asset,
+			'face blur',
+			[
 				'operation' => 'blurFaces',
 				'blurMode' => $useManualFaces ? 'manual' : 'auto',
 				'manualFaceCount' => $useManualFaces ? count($manualFaces) : 0,
-				'progress' => 0,
-				'progressLabel' => 'Queued',
-			]);
-			$jobId = Craft::$app->queue->push(new ArticleImageFaceBlurJob([
+			],
+			static fn(string $token) => new ArticleImageFaceBlurJob([
 				'assetId' => $asset->id,
-				'userId' => Craft::$app->getUser()->getId(),
+				'userId' => $userId,
 				'token' => $token,
 				'useManualFaces' => $useManualFaces,
 				'manualFaces' => $manualFaces ?: [],
-			]));
-			$this->setEnhancementStatus($token, [
-				'status' => 'queued',
-				'assetId' => $asset->id,
-				'operation' => 'blurFaces',
-				'blurMode' => $useManualFaces ? 'manual' : 'auto',
-				'manualFaceCount' => $useManualFaces ? count($manualFaces) : 0,
-				'jobId' => $jobId,
-				'progress' => 0,
-				'progressLabel' => 'Queued',
-			]);
-
-			return $this->asJson([
-				'success' => true,
-				'queued' => true,
-				'assetId' => $asset->id,
-				'operation' => 'blurFaces',
-				'jobId' => $jobId,
-				'token' => $token,
-				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
-			]);
-		} catch (\Throwable $e) {
-			Craft::error('ImageEnhancer: Article image face blur queueing failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asJsonFailure('Could not queue face blur: ' . $e->getMessage());
-		}
+			]),
+		);
 	}
 
 	private function getManualBlurFacesForRequest(): array|false|null
@@ -392,7 +348,12 @@ class ArticleImageController extends Controller
 		$provider = (string) $request->getBodyParam('imageEnhancementProvider');
 		$model = (string) $request->getBodyParam('imageEnhancementModel');
 		$modelsByProvider = [
-			Settings::IMAGE_PROVIDER_OPENAI => array_column(ImageEnhancer::getInstance()->getImageEnhancementModelOptions(), 'value'),
+			// The CP renders the OpenAI list cache-only (curated fallback on a cold cache), so accept
+			// both the discovered list and the curated list here.
+			Settings::IMAGE_PROVIDER_OPENAI => array_merge(
+				array_column(ImageEnhancer::getInstance()->getImageEnhancementModelOptions(), 'value'),
+				array_column(Settings::imageEnhancementModelOptions(), 'value'),
+			),
 			Settings::IMAGE_PROVIDER_XAI => array_column(Settings::xAiImageEnhancementModelOptions(), 'value'),
 			Settings::IMAGE_PROVIDER_GOOGLE => array_column(Settings::googleImageEnhancementModelOptions(), 'value'),
 		];
@@ -448,7 +409,7 @@ class ArticleImageController extends Controller
 			return $this->asJsonFailure('Missing enhancement asset.');
 		}
 
-		$asset = Craft::$app->assets->getAssetById($assetId);
+		$asset = Craft::$app->getAssets()->getAssetById($assetId);
 		if (!$this->isSupportedImageAsset($asset) || !$this->canSaveAsset($asset)) {
 			return $this->asJsonFailure('You do not have permission to view this enhancement status.');
 		}
@@ -456,6 +417,12 @@ class ArticleImageController extends Controller
 		$status = $token !== ''
 			? Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token))
 			: Craft::$app->getCache()->get($this->getEnhancementAssetStatusCacheKey($assetId));
+
+		// The per-asset key is shared between users; only restore the caller's own operation.
+		if ($token === '' && !self::statusBelongsToUser($status, $this->getCurrentUserId())) {
+			$status = null;
+		}
+
 		if (!is_array($status)) {
 			return $this->asJson([
 				'success' => true,
@@ -466,21 +433,27 @@ class ArticleImageController extends Controller
 			]);
 		}
 
+		if (!self::statusBelongsToUser($status, $this->getCurrentUserId())) {
+			return $this->asJsonFailure('You do not have permission to view this enhancement status.');
+		}
+
 		if ((int) ($status['assetId'] ?? 0) !== $assetId) {
 			return $this->asJsonFailure('Enhancement status token does not match this asset.');
 		}
 
+		$statusKey = (string) ($status['token'] ?? $token);
 		$previewId = (int) ($status['previewId'] ?? 0);
 		if (($status['status'] ?? null) === 'complete' && $previewId) {
-			$previewAsset = Craft::$app->assets->getAssetById($previewId);
+			$previewAsset = Craft::$app->getAssets()->getAssetById($previewId);
 			if (
 				$previewAsset instanceof Asset &&
-				$this->isPreviewAssetForOriginal($previewAsset, $asset, (string) ($status['token'] ?? $token))
+				self::isPreviewBoundToStatus($status, $assetId, (int) $previewAsset->id)
 			) {
+				// `token` is Craft's reserved token param on GET requests, so use `statusKey`.
 				$status['enhancedUrl'] = UrlHelper::actionUrl('craft-image-enhancer/article-image/preview', [
 					'assetId' => $assetId,
 					'previewId' => $previewId,
-					'token' => (string) ($status['token'] ?? $token),
+					'statusKey' => $statusKey,
 					'uploadRepairToken' => (string) Craft::$app->getRequest()->getBodyParam('uploadRepairToken'),
 					'v' => time(),
 				]);
@@ -492,7 +465,7 @@ class ArticleImageController extends Controller
 			if (ImageEnhancer::getInstance()->aiVideoGeneration->isManagedVideoPath($videoPath)) {
 				$status['downloadUrl'] = UrlHelper::actionUrl('craft-image-enhancer/article-image/download-video', [
 					'assetId' => $assetId,
-					'token' => (string) ($status['token'] ?? $token),
+					'statusKey' => $statusKey,
 				]);
 			} else {
 				$status['status'] = 'failed';
@@ -501,55 +474,75 @@ class ArticleImageController extends Controller
 			}
 		}
 
-		unset($status['videoPath']);
+		unset($status['videoPath'], $status['userId']);
 
 		return $this->asJson(array_merge(['success' => true], $status));
 	}
 
+	/**
+	 * Streams an enhancement preview. Reads `statusKey` (not `token`, which Craft reserves).
+	 *
+	 * @throws NotFoundHttpException
+	 * @throws \yii\base\InvalidConfigException
+	 */
 	public function actionPreview(): Response
 	{
 		$this->requireLogin();
 
 		$request = Craft::$app->getRequest();
-		$asset = Craft::$app->assets->getAssetById((int) $request->getQueryParam('assetId'));
-		$previewAsset = Craft::$app->assets->getAssetById((int) $request->getQueryParam('previewId'));
-		$token = (string) $request->getQueryParam('token');
+		$assetId = (int) $request->getQueryParam('assetId');
+		$previewId = (int) $request->getQueryParam('previewId');
+		$asset = Craft::$app->getAssets()->getAssetById($assetId);
+		$previewAsset = Craft::$app->getAssets()->getAssetById($previewId);
+		$status = $this->getOwnedStatus((string) $request->getQueryParam('statusKey'));
+		$user = Craft::$app->getUser()->getIdentity();
 
 		if (
+			!$user ||
 			!$this->isSupportedImageAsset($asset) ||
 			!$this->isSupportedImageAsset($previewAsset) ||
-			$token === '' ||
+			$status === null ||
+			!self::isPreviewBoundToStatus($status, (int) $asset->id, (int) $previewAsset->id) ||
 			!$this->canSaveAsset($asset) ||
-			!$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)
+			!$previewAsset->canView($user)
 		) {
 			throw new NotFoundHttpException('Enhanced preview not found.');
 		}
 
-		$response = Craft::$app->getResponse();
-		$response->format = Response::FORMAT_RAW;
-		$response->headers->set('Content-Type', $previewAsset->mimeType ?: 'application/octet-stream');
+		try {
+			$stream = $previewAsset->getStream();
+		} catch (\Throwable $e) {
+			Craft::error('ImageEnhancer: Could not read enhanced preview: ' . $e->getMessage(), __METHOD__);
+			throw new NotFoundHttpException('Enhanced preview not found.');
+		}
+
+		$response = Craft::$app->getResponse()->sendStreamAsFile($stream, $previewAsset->filename, [
+			'mimeType' => $previewAsset->mimeType ?: 'application/octet-stream',
+			'inline' => true,
+		]);
 		$response->headers->set('Cache-Control', 'private, no-store, max-age=0');
-		$response->content = $previewAsset->getContents();
 
 		return $response;
 	}
 
+	/**
+	 * Downloads a generated video. Reads `statusKey` (not `token`, which Craft reserves).
+	 *
+	 * @throws NotFoundHttpException
+	 */
 	public function actionDownloadVideo(): Response
 	{
 		$this->requireLogin();
 
 		$request = Craft::$app->getRequest();
 		$assetId = (int) $request->getQueryParam('assetId');
-		$token = (string) $request->getQueryParam('token');
-		$asset = Craft::$app->assets->getAssetById($assetId);
-		$status = $token !== ''
-			? Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token))
-			: null;
+		$asset = Craft::$app->getAssets()->getAssetById($assetId);
+		$status = $this->getOwnedStatus((string) $request->getQueryParam('statusKey'));
 
 		if (
 			!$this->isSupportedImageAsset($asset) ||
 			!$this->canSaveAsset($asset) ||
-			!is_array($status) ||
+			$status === null ||
 			(int) ($status['assetId'] ?? 0) !== $assetId ||
 			($status['operation'] ?? null) !== 'createVideo' ||
 			($status['status'] ?? null) !== 'complete'
@@ -574,6 +567,10 @@ class ArticleImageController extends Controller
 		return $response;
 	}
 
+	/**
+	 * Cancels an operation. Only the job recorded in the status is released; any posted
+	 * `jobId` is ignored so a caller cannot release arbitrary queue jobs.
+	 */
 	public function actionCancel(): Response
 	{
 		$this->requireLogin();
@@ -582,9 +579,9 @@ class ArticleImageController extends Controller
 
 		$asset = $this->getPostedAsset();
 		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
-		$jobId = (string) Craft::$app->getRequest()->getBodyParam('jobId');
+		$user = Craft::$app->getUser()->getIdentity();
 
-		if (!$asset instanceof Asset || !$token) {
+		if (!$asset instanceof Asset || $token === '' || !$user) {
 			return $this->asJsonFailure('Missing enhancement cancellation details.');
 		}
 		if (!$this->canSaveAsset($asset)) {
@@ -592,32 +589,31 @@ class ArticleImageController extends Controller
 		}
 
 		$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
-		if (is_array($status) && (int) ($status['assetId'] ?? 0) !== (int) $asset->id) {
-			return $this->asJsonFailure('Enhancement status token does not match this asset.');
+		if (!is_array($status)) {
+			return $this->asJsonFailure('This enhancement is no longer active.');
+		}
+		if (!self::canManageStatus($status, (int) $asset->id, (int) $user->id, (bool) $user->admin)) {
+			return $this->asJsonFailure('You do not have permission to cancel this enhancement.');
 		}
 
-		$existingStatus = is_array($status) ? $status : [];
-		if (isset($existingStatus['videoPath'])) {
+		if (isset($status['videoPath'])) {
 			ImageEnhancer::getInstance()->aiVideoGeneration->deleteVideo(
-				is_string($existingStatus['videoPath']) ? $existingStatus['videoPath'] : null,
+				is_string($status['videoPath']) ? $status['videoPath'] : null,
 			);
-			unset($existingStatus['videoPath'], $existingStatus['videoFilename']);
+			unset($status['videoPath'], $status['videoFilename']);
 		}
-		$this->setEnhancementStatus($token, array_merge($existingStatus, [
+		$jobId = is_scalar($status['jobId'] ?? null) ? (string) $status['jobId'] : '';
+		$this->setEnhancementStatus($token, array_merge($status, [
 			'status' => 'canceled',
-			'assetId' => $asset->id,
-			'jobId' => $jobId !== '' ? $jobId : ($existingStatus['jobId'] ?? null),
 			'progress' => 1,
 			'progressLabel' => 'Canceled',
 		]));
 
-		if (!empty($existingStatus['previewId'])) {
-			$previewAsset = Craft::$app->assets->getAssetById((int) $existingStatus['previewId']);
-			if (
-				$previewAsset instanceof Asset &&
-				$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)
-			) {
-				$this->deleteElement($previewAsset);
+		$previewId = (int) ($status['previewId'] ?? 0);
+		if ($previewId && self::isPreviewBoundToStatus($status, (int) $asset->id, $previewId)) {
+			$previewAsset = Craft::$app->getAssets()->getAssetById($previewId);
+			if ($previewAsset instanceof Asset) {
+				$this->deletePreviewIfPermitted($previewAsset);
 			}
 		}
 
@@ -648,8 +644,9 @@ class ArticleImageController extends Controller
 
 		$asset = $this->getPostedAsset();
 		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
+		$user = Craft::$app->getUser()->getIdentity();
 
-		if (!$asset instanceof Asset) {
+		if (!$asset instanceof Asset || !$user) {
 			return $this->asJsonFailure('Missing enhancement asset.');
 		}
 		if (!$this->canSaveAsset($asset)) {
@@ -660,8 +657,22 @@ class ArticleImageController extends Controller
 			? Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token))
 			: Craft::$app->getCache()->get($this->getEnhancementAssetStatusCacheKey((int) $asset->id));
 
-		if (is_array($status) && (int) ($status['assetId'] ?? 0) !== (int) $asset->id) {
-			return $this->asJsonFailure('Enhancement status token does not match this asset.');
+		if (is_array($status)) {
+			if ((int) ($status['assetId'] ?? 0) !== (int) $asset->id) {
+				return $this->asJsonFailure('Enhancement status token does not match this asset.');
+			}
+			if (!self::canManageStatus($status, (int) $asset->id, (int) $user->id, (bool) $user->admin)) {
+				// Another user's operation: leave it alone, and report idle for the caller.
+				if ($token !== '') {
+					return $this->asJsonFailure('You do not have permission to reset this enhancement status.');
+				}
+
+				return $this->asJson([
+					'success' => true,
+					'status' => 'idle',
+					'assetId' => $asset->id,
+				]);
+			}
 		}
 
 		$this->deleteEnhancementStatus($token !== '' ? $token : ($status['token'] ?? null), (int) $asset->id);
@@ -673,6 +684,10 @@ class ArticleImageController extends Controller
 		]);
 	}
 
+	/**
+	 * Replaces the original file with the preview. Mirrors core AssetsController::actionReplaceFile
+	 * permissions (replaceFiles / replacePeerFiles), except for the caller's own repair upload.
+	 */
 	public function actionKeep(): Response
 	{
 		$this->requireLogin();
@@ -682,38 +697,36 @@ class ArticleImageController extends Controller
 		$asset = $this->getPostedAsset();
 		$previewAsset = $this->getPostedPreviewAsset();
 		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
+		$status = $this->getOwnedStatus($token);
+		$user = Craft::$app->getUser()->getIdentity();
 
-		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)) {
+		if (
+			!$user ||
+			!$asset instanceof Asset ||
+			!$previewAsset instanceof Asset ||
+			$status === null ||
+			!self::isPreviewBoundToStatus($status, (int) $asset->id, (int) $previewAsset->id)
+		) {
 			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
 		if (!$this->canSaveAsset($asset)) {
 			return $this->asJsonFailure('You do not have permission to keep this enhanced image.');
 		}
-
-		$previewPath = $this->getFullAssetPath($previewAsset);
-
-		if (!$previewPath || !file_exists($previewPath)) {
-			return $this->asJsonFailure('Could not find the enhanced preview file.');
+		if (!$this->canReplaceAssetFile($asset, $user)) {
+			return $this->asJsonFailure('You do not have permission to replace this file.');
 		}
 
-		$tempPath = $this->getTempReplacementPath($asset);
-
+		$tempPath = null;
 		try {
-			if (!copy($previewPath, $tempPath)) {
-				return $this->asJsonFailure('Could not prepare the enhanced file for replacement.');
-			}
+			$tempPath = $previewAsset->getCopyOfFile();
 
-			ImageEnhancer::$skipAssetQueue = true;
-			try {
-				Craft::$app->assets->replaceAssetFile($asset, $tempPath, $asset->filename);
-			} finally {
-				ImageEnhancer::$skipAssetQueue = false;
-			}
+			ImageEnhancer::suppressAssetQueue(
+				static fn() => Craft::$app->getAssets()->replaceAssetFile($asset, $tempPath, $asset->filename),
+			);
 
-			clearstatcache(true, $this->getFullAssetPath($asset) ?: '');
-			$updatedAsset = Craft::$app->assets->getAssetById((int) $asset->id) ?: $asset;
+			$updatedAsset = Craft::$app->getAssets()->getAssetById((int) $asset->id) ?: $asset;
 
-			$this->deleteElement($previewAsset);
+			$this->deletePreviewIfPermitted($previewAsset);
 			$this->deleteEnhancementStatus($token);
 
 			return $this->asJson([
@@ -723,10 +736,10 @@ class ArticleImageController extends Controller
 			]);
 		} catch (\Throwable $e) {
 			Craft::error('ImageEnhancer: Keeping enhanced article image failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asJsonFailure('Could not keep enhanced image: ' . $e->getMessage());
+			return $this->asJsonFailure('Could not keep the enhanced image.');
 		} finally {
-			if (isset($tempPath) && file_exists($tempPath)) {
-				@unlink($tempPath);
+			if ($tempPath !== null && file_exists($tempPath)) {
+				FileHelper::unlink($tempPath);
 			}
 		}
 	}
@@ -740,12 +753,23 @@ class ArticleImageController extends Controller
 		$asset = $this->getPostedAsset();
 		$previewAsset = $this->getPostedPreviewAsset();
 		$token = (string) Craft::$app->getRequest()->getBodyParam('token');
+		$status = $this->getOwnedStatus($token);
+		$user = Craft::$app->getUser()->getIdentity();
 
-		if (!$asset instanceof Asset || !$previewAsset instanceof Asset || !$this->isPreviewAssetForOriginal($previewAsset, $asset, $token)) {
+		if (
+			!$user ||
+			!$asset instanceof Asset ||
+			!$previewAsset instanceof Asset ||
+			$status === null ||
+			!self::isPreviewBoundToStatus($status, (int) $asset->id, (int) $previewAsset->id)
+		) {
 			return $this->asJsonFailure('Enhanced preview asset not found or invalid.');
 		}
 		if (!$this->canSaveAsset($asset)) {
 			return $this->asJsonFailure('You do not have permission to discard this enhanced image.');
+		}
+		if (!$previewAsset->canDelete($user)) {
+			return $this->asJsonFailure('You do not have permission to delete the enhanced preview.');
 		}
 
 		try {
@@ -758,7 +782,72 @@ class ArticleImageController extends Controller
 			]);
 		} catch (\Throwable $e) {
 			Craft::error('ImageEnhancer: Discarding enhanced article image failed: ' . $e->getMessage(), __METHOD__);
-			return $this->asJsonFailure('Could not discard enhanced image: ' . $e->getMessage());
+			return $this->asJsonFailure('Could not discard the enhanced image.');
+		}
+	}
+
+	/**
+	 * Queues an AI operation for an asset under a short per-asset lock, refusing to start
+	 * when the caller already has an active operation on it (repeated-click protection).
+	 *
+	 * @param string $label Human-readable operation label for messages.
+	 * @param array $statusFields Operation-specific status fields; must include `operation`.
+	 * @param callable(string): \craft\queue\BaseJob $jobFactory Builds the job for a status token.
+	 * @param array $responseFields Extra fields for the success response.
+	 */
+	private function startOperation(Asset $asset, string $label, array $statusFields, callable $jobFactory, array $responseFields = []): Response
+	{
+		$userId = $this->getCurrentUserId();
+		$mutex = Craft::$app->getMutex();
+		$lockName = 'image-enhancer:start-operation:' . $asset->id;
+		if (!$mutex->acquire($lockName)) {
+			return $this->asJsonFailure('Another operation is starting for this image. Try again in a moment.');
+		}
+
+		$token = null;
+		try {
+			$existing = Craft::$app->getCache()->get($this->getEnhancementAssetStatusCacheKey((int) $asset->id));
+			if (self::statusBelongsToUser($existing, $userId) && self::isActiveStatus($existing)) {
+				return $this->asJsonFailure('An operation is already running for this image. Wait for it to finish or cancel it first.');
+			}
+
+			$token = bin2hex(random_bytes(16));
+			$status = array_merge($statusFields, [
+				'status' => 'queued',
+				'assetId' => (int) $asset->id,
+				'userId' => $userId,
+				'progress' => 0,
+				'progressLabel' => 'Queued',
+			]);
+			$this->setEnhancementStatus($token, $status);
+			$jobId = Craft::$app->getQueue()->push($jobFactory($token));
+
+			// The job may already have updated the status; merge instead of overwriting it.
+			$current = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
+			$this->setEnhancementStatus($token, array_merge(is_array($current) ? $current : $status, [
+				'jobId' => $jobId,
+				'userId' => $userId,
+			]));
+
+			return $this->asJson(array_merge([
+				'success' => true,
+				'queued' => true,
+				'assetId' => $asset->id,
+				'operation' => $statusFields['operation'] ?? null,
+				'jobId' => $jobId,
+				'token' => $token,
+				'statusUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/status'),
+			], $responseFields));
+		} catch (\Throwable $e) {
+			Craft::error('ImageEnhancer: Article image ' . $label . ' queueing failed: ' . $e->getMessage(), __METHOD__);
+			if ($token !== null) {
+				// Don't leave a phantom "queued" status that would block the next attempt.
+				$this->deleteEnhancementStatus($token, (int) $asset->id);
+			}
+
+			return $this->asJsonFailure('Could not queue ' . $label . '.');
+		} finally {
+			$mutex->release($lockName);
 		}
 	}
 
@@ -769,7 +858,7 @@ class ArticleImageController extends Controller
 			return null;
 		}
 
-		$asset = Craft::$app->assets->getAssetById($assetId);
+		$asset = Craft::$app->getAssets()->getAssetById($assetId);
 		if (!$this->isSupportedImageAsset($asset)) {
 			return null;
 		}
@@ -784,7 +873,7 @@ class ArticleImageController extends Controller
 			return null;
 		}
 
-		$asset = Craft::$app->assets->getAssetById($previewId);
+		$asset = Craft::$app->getAssets()->getAssetById($previewId);
 		if (!$this->isSupportedImageAsset($asset)) {
 			return null;
 		}
@@ -807,85 +896,79 @@ class ArticleImageController extends Controller
 			return true;
 		}
 
+		return $user && $this->hasRepairContextForAsset($asset, (int) $user->id);
+	}
+
+	/**
+	 * Mirrors core AssetsController::actionReplaceFile: `replaceFiles:<volumeUid>`, plus
+	 * `replacePeerFiles:<volumeUid>` when someone else uploaded the file. The user's own
+	 * temporary upload (core idiom) and an authorized upload-repair session are exempt.
+	 */
+	private function canReplaceAssetFile(Asset $asset, User $user): bool
+	{
+		if ($this->hasRepairContextForAsset($asset, (int) $user->id)) {
+			return true;
+		}
+
+		$volumeId = $asset->getVolumeId();
+		if (!$volumeId) {
+			$userTemporaryFolder = Craft::$app->getAssets()->getUserTemporaryUploadFolder($user);
+
+			return (int) $userTemporaryFolder->id === (int) $asset->folderId;
+		}
+
+		$volumeUid = $asset->getVolume()->uid;
+		if (!$user->can("replaceFiles:$volumeUid")) {
+			return false;
+		}
+
+		return (int) $asset->uploaderId === (int) $user->id || $user->can("replacePeerFiles:$volumeUid");
+	}
+
+	private function hasRepairContextForAsset(Asset $asset, int $userId): bool
+	{
 		$repairToken = (string) Craft::$app->getRequest()->getParam('uploadRepairToken');
 
-		return $user &&
+		return $userId > 0 &&
 			$repairToken !== '' &&
 			ImageEnhancer::getInstance()->assetRequirements->getAuthorizedRepairContext(
 				$repairToken,
-				(int) $user->id,
+				$userId,
 				(int) $asset->id,
 			) !== null;
 	}
 
 	private function deleteElement(Asset $asset): void
 	{
-		ImageEnhancer::$skipAssetQueue = true;
+		ImageEnhancer::suppressAssetQueue(static fn() => Craft::$app->getElements()->deleteElement($asset));
+	}
+
+	/**
+	 * Deletes a preview asset only when the current user may delete it; otherwise it is left
+	 * for stale-preview cleanup.
+	 */
+	private function deletePreviewIfPermitted(Asset $previewAsset): void
+	{
+		$user = Craft::$app->getUser()->getIdentity();
+		if (!$user || !$previewAsset->canDelete($user)) {
+			Craft::warning('ImageEnhancer: Left enhancement preview asset ' . $previewAsset->id . ' in place; the user may not delete it.', __METHOD__);
+			return;
+		}
+
+		$this->deleteElement($previewAsset);
+	}
+
+	/**
+	 * Checks the file exists on its volume, for any filesystem type (honours Craft 5 volume subpaths).
+	 */
+	private function assetFileExists(Asset $asset): bool
+	{
 		try {
-			Craft::$app->elements->deleteElement($asset);
-		} finally {
-			ImageEnhancer::$skipAssetQueue = false;
+			return $asset->getVolume()->fileExists($asset->getPath());
+		} catch (\Throwable $e) {
+			Craft::warning('ImageEnhancer: Could not check asset file ' . $asset->id . ': ' . $e->getMessage(), __METHOD__);
+			return false;
 		}
-	}
-
-	private function getTempReplacementPath(Asset $asset): string
-	{
-		$extension = pathinfo($asset->filename, PATHINFO_EXTENSION);
-		$tempPath = tempnam(sys_get_temp_dir(), 'image-enhancer-');
-
-		if (!$extension) {
-			return $tempPath;
-		}
-
-		@unlink($tempPath);
-
-		return $tempPath . '.' . $extension;
-	}
-
-	private function isPreviewAssetForOriginal(Asset $previewAsset, Asset $originalAsset, ?string $token = null): bool
-	{
-		if ($token) {
-			$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
-			if (
-				is_array($status) &&
-				(int) ($status['assetId'] ?? 0) === (int) $originalAsset->id &&
-				(int) ($status['previewId'] ?? 0) === (int) $previewAsset->id
-			) {
-				return true;
-			}
-		}
-
-		$originalBaseName = preg_replace('/[^A-Za-z0-9._-]+/', '-', pathinfo($originalAsset->filename, PATHINFO_FILENAME)) ?: 'image';
-
-		$previewFilename = $previewAsset->filename;
-		$hasPreviewMarker = str_contains($previewFilename, '-enhancement-preview-') ||
-			str_contains($previewFilename, '-face-blur-preview-');
-
-		return $previewAsset->id !== $originalAsset->id &&
-			$previewAsset->volumeId === $originalAsset->volumeId &&
-			(
-				$previewAsset->folderId === $originalAsset->folderId ||
-				$hasPreviewMarker
-			) &&
-			(
-				str_starts_with($previewFilename, $originalBaseName . '-enhancement-preview-') ||
-				str_starts_with($previewFilename, $originalBaseName . '-face-blur-preview-') ||
-				$hasPreviewMarker
-			);
-	}
-
-	private function getFullAssetPath(Asset $asset): ?string
-	{
-		if (!$this->isSupportedImageAsset($asset)) {
-			return null;
-		}
-
-		$fsPath = Craft::getAlias($asset->getFs()->path);
-		if (!$fsPath) {
-			return null;
-		}
-
-		return $fsPath . DIRECTORY_SEPARATOR . $asset->folderPath . $asset->filename;
 	}
 
 	private function appendCacheBuster(?string $url): ?string
@@ -895,6 +978,68 @@ class ArticleImageController extends Controller
 		}
 
 		return $url . (str_contains($url, '?') ? '&' : '?') . 'v=' . time();
+	}
+
+	private function getCurrentUserId(): int
+	{
+		return (int) Craft::$app->getUser()->getId();
+	}
+
+	/**
+	 * Returns the cached status for a token only when it belongs to the current user.
+	 */
+	private function getOwnedStatus(string $token): ?array
+	{
+		if ($token === '') {
+			return null;
+		}
+
+		$status = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
+
+		return self::statusBelongsToUser($status, $this->getCurrentUserId()) ? $status : null;
+	}
+
+	/**
+	 * Whether a cached status was created by the given user. Statuses without a user are rejected.
+	 */
+	private static function statusBelongsToUser(mixed $status, int $userId): bool
+	{
+		return is_array($status) && $userId > 0 && (int) ($status['userId'] ?? 0) === $userId;
+	}
+
+	/**
+	 * Whether a cached status still represents queued or running work.
+	 */
+	private static function isActiveStatus(mixed $status): bool
+	{
+		return is_array($status) && in_array($status['status'] ?? null, ['queued', 'running', 'pending'], true);
+	}
+
+	/**
+	 * Whether a user may cancel/reset a status: it must belong to the asset, and to the user
+	 * unless they are an admin.
+	 */
+	private static function canManageStatus(mixed $status, int $assetId, int $userId, bool $isAdmin): bool
+	{
+		if (!is_array($status) || $assetId <= 0 || (int) ($status['assetId'] ?? 0) !== $assetId) {
+			return false;
+		}
+
+		return $isAdmin || self::statusBelongsToUser($status, $userId);
+	}
+
+	/**
+	 * Whether a preview asset was produced by the operation recorded in a status. This is
+	 * the only binding between an original and its preview (no filename heuristics).
+	 */
+	private static function isPreviewBoundToStatus(mixed $status, int $assetId, int $previewId): bool
+	{
+		return is_array($status) &&
+			$assetId > 0 &&
+			$previewId > 0 &&
+			$previewId !== $assetId &&
+			(int) ($status['assetId'] ?? 0) === $assetId &&
+			(int) ($status['previewId'] ?? 0) === $previewId;
 	}
 
 	private function setEnhancementStatus(string $token, array $status): void
