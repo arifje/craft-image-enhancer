@@ -42,7 +42,10 @@
 				{ label: 'GPT Image 1', value: 'gpt-image-1' },
 			],
 			xai: [
+				{ label: 'Grok Imagine Image 2.0', value: 'grok-imagine-image-2.0' },
+				{ label: 'Grok Imagine Image', value: 'grok-imagine-image' },
 				{ label: 'Grok Imagine Image Quality', value: 'grok-imagine-image-quality' },
+				{ label: 'Grok Imagine Image Pro (Quality alias)', value: 'grok-imagine-image-pro' },
 			],
 			google: [
 				{ label: 'Gemini 3.1 Flash Image (Nano Banana 2)', value: 'gemini-3.1-flash-image' },

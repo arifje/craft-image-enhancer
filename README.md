@@ -83,7 +83,7 @@ API key fields support Craft environment-variable references. Add keys to `.env`
 1. Create an xAI API key in the xAI console.
 2. In **Enhancement**, set **AI image provider** to **Grok Imagine (xAI)**.
 3. Enter the key under **Enhancement → Video generation and shared credentials → xAI API key**.
-4. Keep the model set to `grok-imagine-image-quality` unless xAI adds another compatible image-editing model.
+4. Choose `grok-imagine-image-2.0`, `grok-imagine-image`, `grok-imagine-image-quality`, or `grok-imagine-image-pro` (an alias of Quality). These options are also available in the editor when **Choose in frontend** is enabled. Existing installations keep their selected model.
 
 Grok Imagine enhancement uses xAI's image editing API with the source image sent as a base64 data URI.
 The same xAI key makes Grok Imagine available in the control-panel **Create Video** selector, regardless of the selected still-image provider.
@@ -181,7 +181,7 @@ for t in tests/*.php; do php "$t"; done
 node tests/editor-document.js
 ```
 
-- `tests/openai-models.php`: model discovery, cache expiry, credential changes, fallbacks, and request validation.
+- `tests/openai-models.php`: OpenAI model discovery, cache expiry, credential changes, fallbacks, and OpenAI/Grok request validation.
 - `tests/controllers-security.php`: status ownership, cancel scoping, and preview binding.
 - `tests/jobs-helpers.php`: score parsing, face boxes, file-size targets, retry classification, and download host checks.
 - `tests/settings-validation.php`: settings validation rules.

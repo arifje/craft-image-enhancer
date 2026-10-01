@@ -216,5 +216,21 @@ namespace {
     check(in_array('gpt-image-4', array_column($plugin->getImageEnhancementModelOptions(), 'value'), true), 'Discovery must recover after an outage.');
     putenv('IMAGE_ENHANCER_TEST_KEY');
 
-    echo "Passed {$checks} OpenAI model regression checks.\n";
+    // Grok options must work end-to-end, not merely appear in a dropdown.
+    $grokModels = ['grok-imagine-image-2.0', 'grok-imagine-image', 'grok-imagine-image-quality', 'grok-imagine-image-pro'];
+    check(array_column(Settings::xAiImageEnhancementModelOptions(), 'value') === $grokModels, 'Offer every supported Grok image model and the Pro alias.');
+    foreach ($grokModels as $model) {
+        $request->body = ['imageEnhancementProvider' => 'xai', 'imageEnhancementModel' => $model];
+        $options = $validate->invoke($controller, $settings);
+        check(is_array($options), "Grok model $model must pass request validation.");
+        check((new AiImageEnhancementService())->getProviderModel($settings, $options) === $model, 'Send the selected Grok model ID unchanged.');
+        $settings->xAiImageEnhancementModel = $model;
+        check((new AiImageEnhancementService())->getProviderModel($settings, ['provider' => 'xai']) === $model, 'Use the saved Grok choice when no per-request model is supplied.');
+    }
+    foreach (['grok-imagine-video', 'grok-4', 'grok-imagine-image-bogus', ''] as $model) {
+        $request->body = ['imageEnhancementProvider' => 'xai', 'imageEnhancementModel' => $model];
+        check($validate->invoke($controller, $settings) === false, "Reject incompatible Grok model '$model'.");
+    }
+
+    echo "Passed {$checks} image model regression checks.\n";
 }

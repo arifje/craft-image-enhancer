@@ -26,7 +26,10 @@ class Settings extends Model
 	public const IMAGE_PROVIDER_XAI = 'xai';
 	public const IMAGE_PROVIDER_GOOGLE = 'google';
 	public const IMAGE_PROVIDER_FRONTEND = 'frontend';
+	public const XAI_IMAGE_MODEL_GROK_IMAGINE_2 = 'grok-imagine-image-2.0';
+	public const XAI_IMAGE_MODEL_GROK_IMAGINE = 'grok-imagine-image';
 	public const XAI_IMAGE_MODEL_GROK_IMAGINE_QUALITY = 'grok-imagine-image-quality';
+	public const XAI_IMAGE_MODEL_GROK_IMAGINE_PRO = 'grok-imagine-image-pro';
 	public const GOOGLE_IMAGE_MODEL_GEMINI_3_1_FLASH_IMAGE = 'gemini-3.1-flash-image';
 	public const GOOGLE_IMAGE_MODEL_GEMINI_3_PRO_IMAGE = 'gemini-3-pro-image';
 	public const GOOGLE_IMAGE_MODEL_GEMINI_2_5_FLASH_IMAGE = 'gemini-2.5-flash-image';
@@ -489,7 +492,10 @@ PROMPT;
 	public static function xAiImageEnhancementModelOptions(): array
 	{
 		return [
+			['label' => 'Grok Imagine Image 2.0', 'value' => self::XAI_IMAGE_MODEL_GROK_IMAGINE_2],
+			['label' => 'Grok Imagine Image', 'value' => self::XAI_IMAGE_MODEL_GROK_IMAGINE],
 			['label' => 'Grok Imagine Image Quality', 'value' => self::XAI_IMAGE_MODEL_GROK_IMAGINE_QUALITY],
+			['label' => 'Grok Imagine Image Pro (Quality alias)', 'value' => self::XAI_IMAGE_MODEL_GROK_IMAGINE_PRO],
 		];
 	}
 
