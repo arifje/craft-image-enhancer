@@ -17,10 +17,13 @@ class ImageEnhancerAsset extends AssetBundle
             CpAsset::class,
         ];
         $this->js = [
+            'js/editor-document.js',
+            'js/image-editor.js',
             'js/cp-field-enhancer.js',
         ];
         $this->css = [
             'css/cp-field-enhancer.css',
+            'css/image-editor.css',
         ];
 
         parent::init();

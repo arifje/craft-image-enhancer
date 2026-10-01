@@ -26,6 +26,7 @@
 			uploadFinalize: 'craft-image-enhancer/upload-assistant/finalize',
 			uploadDiscard: 'craft-image-enhancer/upload-assistant/discard',
 			assetInfo: 'craft-image-enhancer/article-image/asset-info',
+			saveEditor: 'craft-image-enhancer/article-image/save-editor',
 			enhance: 'craft-image-enhancer/article-image/enhance',
 			createVideo: 'craft-image-enhancer/article-image/create-video',
 			blurFaces: 'craft-image-enhancer/article-image/blur-faces',
@@ -592,6 +593,8 @@
 			if (window.Garnish && window.jQuery && Garnish.$bod) {
 				this.$root = window.jQuery(this.root).appendTo(Garnish.$bod);
 				const modalSettings = {
+					hideOnEsc: !this.editor,
+					hideOnShadeClick: !this.editor,
 					onHide: () => this.destroy(),
 				};
 				// Return focus to the button that opened the modal once it closes.
@@ -614,12 +617,13 @@
 				const response = await this.request('assetInfo', {
 					assetId: this.assetId,
 				});
+				this.assetInfo = response;
 				const assetUrl = response.url || response.assetUrl || response.imageUrl || '';
 				if (assetUrl) {
 					this.originalUrl = assetUrl;
 				}
 			} catch (error) {
-				if (!this.originalUrl) {
+				if (!this.originalUrl || !this.uploadRepair) {
 					throw error;
 				}
 			}
@@ -817,6 +821,7 @@
 			this.setActionState('idle');
 			this.updateComparison();
 			if (!this.uploadRepair) {
+				this.editor = new window.ImageEnhancerEditor(this);
 				this.restoreStatus();
 			}
 		}
@@ -939,6 +944,7 @@
 		}
 
 		async requestClose() {
+			if (this.editor && !this.editor.canClose()) return;
 			if (!this.uploadRepair || this.uploadFinalized || this.uploadDiscarded) {
 				this.close();
 				return;
@@ -1733,6 +1739,10 @@
 		}
 
 		async keep() {
+			if (this.editor) {
+				await this.editor.acceptPreview();
+				return;
+			}
 			if (!this.previewId) {
 				this.showError(new Error('Preview asset not found.'));
 				return;
@@ -1800,6 +1810,11 @@
 					token: this.token,
 					uploadRepairToken: this.repairToken,
 				});
+				if (this.editor) {
+					this.previewId = ''; this.enhancedUrl = ''; this.token = '';
+					this.setPreviewProcessing(false); this.setPreviewMode(false); this.setStatus('', false);
+					return;
+				}
 				if (this.uploadRepair) {
 					this.previewId = '';
 					this.enhancedUrl = '';
@@ -1908,6 +1923,7 @@
 		}
 
 		setActionState(state) {
+			this.actionState = state;
 			if (this.uploadRepair) {
 				this.toggleButton(this.localRepairButton, state !== 'idle');
 				this.toggleButton(this.enhanceButton, state !== 'idle');
@@ -1948,6 +1964,7 @@
 			this.toggleButton(this.cancelButton, state !== 'busy');
 			this.toggleButton(this.keepButton, state !== 'preview');
 			this.toggleButton(this.discardButton, state !== 'preview');
+			this.editor?.setState(state);
 		}
 
 		resolveOperation(response) {
@@ -2200,6 +2217,10 @@
 				throw new Error('Craft action requests are unavailable.');
 			}
 
+			// Multipart uploads must carry CSRF explicitly on both Craft 4 and 5.
+			if (payload instanceof FormData && Craft.csrfTokenName && Craft.csrfTokenValue) {
+				payload.set(Craft.csrfTokenName, Craft.csrfTokenValue);
+			}
 			const response = await Craft.sendActionRequest('POST', route, {
 				data: payload,
 			});
@@ -2212,7 +2233,12 @@
 		}
 
 		showError(error) {
-			const message = error instanceof Error ? error.message : 'Image enhancement failed.';
+			const status = error?.response?.status;
+			const message = status === 401 || status === 403
+				? (this.editor
+					? 'Your session expired or access was denied. Your edits are still here; download them before signing in again.'
+					: 'Your session expired or access was denied. Sign in again or check your permissions.')
+				: error instanceof Error ? error.message : 'Image enhancement failed.';
 			this.error.textContent = message;
 			this.error.hidden = false;
 			if (window.Craft?.cp) {
@@ -2237,11 +2263,18 @@
 			this.destroy();
 		}
 
+		editorSaved(response) {
+			refreshAssetFieldImage(this.assetId, withCacheBuster(response.imageUrl || this.originalUrl), this.card);
+			Craft.cp?.displayNotice('Edited image saved.');
+			this.close();
+		}
+
 		destroy() {
 			if (this.destroyed) {
 				return;
 			}
 			this.destroyed = true;
+			this.editor?.destroy();
 			void this.cleanupPendingUpload();
 			this.invalidateOperation();
 			window.clearInterval(this.statusTickTimer);

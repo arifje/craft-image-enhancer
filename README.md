@@ -111,7 +111,19 @@ When this mode is enabled, the settings page shows all provider API key and mode
 
 ### Control Panel Asset Fields
 
-The plugin also adds a compact **Enhance** button below image assets inside Craft asset fields. Clicking it opens a control-panel modal that can queue a standard enhancement, a custom edit, automatic face blurring, a custom blur drawn over one or more selected areas, or a downloadable video. Custom blur supports undo and uses the same queued preview workflow as automatic blur. The modal polls the queue status, shows a before/after slider for image operations, and lets the editor save an image preview as the replacement file for the existing asset. Saving does not change the relation field value; it replaces the file behind the selected asset. Video generation has separate provider, model, and optional prompt controls and never replaces the image. The modal expands on larger browser windows, while keeping queue feedback and its action footer visible on short and mobile viewports. Field-requirement details are only shown when the modal was opened by the invalid-upload assistant.
+The plugin adds a compact **Enhance** button below JPEG/PNG assets in enabled Craft asset fields. It opens a resizable image editor with a dark workspace, a tool rail, a layer list, and a transform inspector.
+
+- Draw rectangles, ellipses, and local pixelated blur regions; add text and PNG/JPEG/WebP image layers.
+- Drag layers to move them or use the inspector for exact position, size, rotation, color, and opacity. Drag the corner handle to resize; hold Shift to preserve proportions.
+- Duplicate, reorder, hide, lock, or delete layers, with undo/redo for document changes. Blur affects the image and visible layers beneath it.
+- Zoom, fit, pan, maximize, or drag the bottom-right corner to resize the modal. Keyboard shortcuts include V/H/R/O/T/B for tools, arrows to nudge (Shift for 10 pixels), and Cmd/Ctrl+Z, Shift+Z, D, and S for undo, redo, duplicate, and save.
+- **Download image** exports the current composition. **Save image** flattens it into the original JPEG/PNG format and replaces the existing Craft asset file. Asset IDs, relations, and image dimensions are preserved. Layers are temporary and are not retained after saving or closing.
+
+The **AI tools** tab retains enhancement, custom edits, face blur, drawn custom blur, and video generation. These queued tools work on the saved base image. Image operations show a before/after comparison; **Use result in editor** places the preview beneath your editable layers. Save the composition to commit it. Save an applied AI result before starting another AI operation. Video results remain download-only.
+
+Local drawing and composition need no provider API key. The editor accepts base images up to 24 megapixels and 8192 pixels per edge, up to 40 layers, and imported image files up to 10 MB/24 megapixels each. Flattened saves are limited to 25 MB; PHP and the web server must permit that upload size (`upload_max_filesize`, `post_max_size`, and the request-body limit). No database migration or frontend build step is required for 2.0.0.
+
+The editor streams the source through an authenticated, uncached endpoint and checks Craft's asset and replacement permissions on every save. Invalid uploads, running operations, and stale asset versions are rejected while the edits remain in the modal. Closing with unsaved changes asks for confirmation. The invalid-upload assistant keeps its dedicated repair workflow and field-requirement details.
 
 If **AI image provider** is set to **Choose in frontend**, the modal also shows provider and model selectors and remembers the last selected combination in the browser.
 
@@ -162,10 +174,11 @@ Debug output includes the PHP process user, original asset ownership, temporary 
 
 ## Development checks
 
-Dependency-free regression checks (framework and HTTP doubles; they do not replace testing in a running Craft installation):
+Regression checks (some use framework classes from Composer; run against both supported Craft versions):
 
 ```bash
 for t in tests/*.php; do php "$t"; done
+node tests/editor-document.js
 ```
 
 - `tests/openai-models.php`: model discovery, cache expiry, credential changes, fallbacks, and request validation.
@@ -180,3 +193,16 @@ for t in tests/*.php; do php "$t"; done
 - AI enhancement can alter image details more than Imagick safe optimization, depending on the selected provider, configured prompt, and model output.
 - Custom edits are generative and can intentionally alter image content or composition. Always review the before/after preview before keeping the result.
 - The upload requirement assistant repairs numeric width, height, and file-size selection conditions while preserving the source aspect ratio. Other failed selection-condition rules remain non-repairable.
+
+- `tests/editor-images.php`: composite format, byte-size, dimension, and pixel bounds.
+- `tests/editor-document.js`: layers, transformed hit testing, locks, visibility, history, and document limits.
+- `tests/editor-http.py`: real authenticated source and upload checks, including CSRF, stale versions, invalid bytes, preview ownership, and a successful native asset replacement.
+
+Run the HTTP checks only on a disposable test asset (the final assertion replaces its file):
+
+```bash
+EDITOR_TEST_PASSWORD='local-test-password' python3 tests/editor-http.py http://localhost:8404 ASSET_ID admin
+EDITOR_TEST_PASSWORD='local-test-password' python3 tests/editor-http.py http://localhost:8405 ASSET_ID admin
+```
+
+Use separate browser sessions or distinct hostnames when testing the two Docker sites: localhost ports share cookies. Manual coverage should include drawing and transforming layers, image import, blur, visibility/locking/order, undo/redo, unsaved-close protection, resize/maximize and mobile layout, AI preview acceptance/discard, save/reopen, and denied replacement permissions. Test AI responses with a local HTTP mock when provider keys are unavailable; do not confuse simulated responses with live provider verification.

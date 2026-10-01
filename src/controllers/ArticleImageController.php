@@ -2,6 +2,9 @@
 
 namespace arjanbrinkman\craftimageenhancer\controllers;
 
+use arjanbrinkman\craftimageenhancer\helpers\EditorImageHelper;
+use arjanbrinkman\craftimageenhancer\helpers\FileHelper as EditorFileHelper;
+use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\jobs\ArticleImageEnhancementJob;
 use arjanbrinkman\craftimageenhancer\jobs\ArticleImageFaceBlurJob;
@@ -16,11 +19,12 @@ use craft\helpers\UrlHelper;
 use craft\web\Controller;
 use yii\web\NotFoundHttpException;
 use yii\web\Response;
+use yii\web\UploadedFile;
 
 class ArticleImageController extends Controller
 {
 	/**
-	 * Every action here drives a paid AI provider (or its result), so gate the whole
+	 * Image editing and provider actions share the same CP permission, so gate the whole
 	 * controller on CP requests plus the plugin permission. Admins pass automatically.
 	 *
 	 * @inheritdoc
@@ -393,7 +397,105 @@ class ArticleImageController extends Controller
 			'filename' => $asset->filename,
 			'width' => $asset->width,
 			'height' => $asset->height,
+			'editorSourceUrl' => UrlHelper::actionUrl('craft-image-enhancer/article-image/editor-source', ['assetId' => $asset->id]),
+			'editorVersion' => $asset->dateUpdated?->format('U.u'),
+			'mimeType' => $asset->mimeType,
+			'canReplace' => $this->canReplaceAssetFile($asset, Craft::$app->getUser()->getIdentity()),
 		]);
+	}
+
+	/** Same-origin, permission-checked pixels, including assets on remote volumes. */
+	public function actionEditorSource(): Response
+	{
+		$this->requireLogin();
+		$asset = Craft::$app->getAssets()->getAssetById((int) Craft::$app->getRequest()->getQueryParam('assetId'));
+		$user = Craft::$app->getUser()->getIdentity();
+		if (!$user || !$this->isSupportedImageAsset($asset) || !$asset->canView($user) || !$asset->canSave($user)) {
+			throw new NotFoundHttpException('Image not found.');
+		}
+		$response = Craft::$app->getResponse()->sendStreamAsFile($asset->getStream(), $asset->filename, [
+			'mimeType' => $asset->mimeType,
+			'inline' => true,
+		]);
+		$response->headers->set('Cache-Control', 'private, no-store, max-age=0');
+		$response->headers->set('X-Content-Type-Options', 'nosniff');
+
+		return $response;
+	}
+
+	/** Saves a flattened editor document through Craft's normal replacement service. */
+	public function actionSaveEditor(): Response
+	{
+		$this->requireLogin();
+		$this->requirePostRequest();
+		$this->requireAcceptsJson();
+		$asset = $this->getPostedAsset();
+		$user = Craft::$app->getUser()->getIdentity();
+		if (!$asset || !$user || !$asset->canSave($user) || !$this->canReplaceAssetFile($asset, $user)) {
+			return $this->asJsonFailure('You do not have permission to replace this image.');
+		}
+		$request = Craft::$app->getRequest();
+		$upload = UploadedFile::getInstanceByName('image');
+		if (!$upload || $upload->error !== UPLOAD_ERR_OK) {
+			return $this->asJsonFailure('The edited image could not be uploaded. Check the server upload limit.');
+		}
+		$info = ImageHelper::getImageInfo($upload->tempName);
+		$error = EditorImageHelper::validate(
+			$info, (int) filesize($upload->tempName), (int) $asset->width, (int) $asset->height, $asset->mimeType,
+		);
+		if ($error !== null) {
+			return $this->asJsonFailure($error);
+		}
+		$mutex = Craft::$app->getMutex();
+		$lock = 'image-enhancer:start-operation:' . $asset->id;
+		if (!$mutex->acquire($lock)) {
+			return $this->asJsonFailure('Another operation is changing this image. Try again in a moment.');
+		}
+		$tempPath = null;
+		try {
+			$asset = Craft::$app->getAssets()->getAssetById((int) $asset->id);
+			if (!$asset || !$asset->canSave($user) || !$this->canReplaceAssetFile($asset, $user)) {
+				return $this->asJsonFailure('Image is no longer available for replacement.');
+			}
+			$version = (string) $request->getBodyParam('version');
+			if ($version === '' || $version !== $asset->dateUpdated?->format('U.u')) {
+				return $this->asJsonFailure('This asset changed while you were editing. Download your edit, then reopen the editor.');
+			}
+			$active = Craft::$app->getCache()->get($this->getEnhancementAssetStatusCacheKey((int) $asset->id));
+			if (self::isActiveStatus($active)) {
+				return $this->asJsonFailure('Wait for the running image operation to finish before saving.');
+			}
+			$token = (string) $request->getBodyParam('token');
+			$preview = null;
+			if ($token !== '') {
+				$status = $this->getOwnedStatus($token);
+				$preview = $this->getPostedPreviewAsset();
+				if (!$preview || !self::isPreviewBoundToStatus($status, (int) $asset->id, (int) $preview->id)) {
+					return $this->asJsonFailure('The AI preview expired. Download your edit and reopen the editor.');
+				}
+			}
+			$tempPath = EditorFileHelper::createTempPathForAsset($asset);
+			if (!$upload->saveAs($tempPath)) {
+				throw new \RuntimeException('Could not store the editor upload.');
+			}
+			// Decode and re-encode instead of trusting browser bytes or file metadata.
+			ImageHelper::fitWithin($tempPath, $asset->mimeType, $info['width'], $info['height'], 95);
+			ImageEnhancer::suppressAssetQueue(
+				static fn() => Craft::$app->getAssets()->replaceAssetFile($asset, $tempPath, $asset->filename),
+			);
+			if ($preview !== null) {
+				$this->deletePreviewIfPermitted($preview);
+				$this->deleteEnhancementStatus($token);
+			}
+
+			return $this->asJson(['success' => true, 'assetId' => $asset->id, 'imageUrl' => $this->appendCacheBuster($asset->getUrl())]);
+		} catch (\Throwable $e) {
+			Craft::error('ImageEnhancer: Editor save failed (' . get_class($e) . ').', __METHOD__);
+			return $this->asJsonFailure('Could not save the edited image. Your changes remain in the editor.');
+		} finally {
+			EditorFileHelper::delete($tempPath);
+			$mutex->release($lock);
+		}
 	}
 
 	public function actionStatus(): Response
