@@ -5,6 +5,7 @@ namespace arjanbrinkman\craftimageenhancer\controllers;
 use arjanbrinkman\craftimageenhancer\helpers\EditorImageHelper;
 use arjanbrinkman\craftimageenhancer\helpers\FileHelper as EditorFileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
+use arjanbrinkman\craftimageenhancer\helpers\ReformatHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\jobs\ArticleImageEnhancementJob;
 use arjanbrinkman\craftimageenhancer\jobs\ArticleImageFaceBlurJob;
@@ -111,6 +112,85 @@ class ArticleImageController extends Controller
 				'imageEnhancementProvider' => $providerOptions['provider'] ?? $settings->imageEnhancementProvider,
 				'imageEnhancementModel' => $providerOptions['model'] ?? $enhancementService->getProviderModel($settings, $providerOptions),
 			],
+		);
+	}
+
+	/** Queues a format change (crop, blurred fit or AI extend) to a new size and aspect ratio. */
+	public function actionReformat(): Response
+	{
+		$this->requireLogin();
+		$this->requirePostRequest();
+		$this->requireAcceptsJson();
+
+		$asset = $this->getPostedAsset();
+		$user = Craft::$app->getUser()->getIdentity();
+		if (!$asset instanceof Asset || !$user) {
+			return $this->asJsonFailure('Asset not found or unsupported.');
+		}
+		if (!$this->canSaveAsset($asset) || !$this->canReplaceAssetFile($asset, $user)) {
+			return $this->asJsonFailure('You do not have permission to replace this image.');
+		}
+
+		$request = Craft::$app->getRequest();
+		$method = (string) $request->getBodyParam('method');
+		$width = (int) $request->getBodyParam('width');
+		$height = (int) $request->getBodyParam('height');
+		$error = ReformatHelper::validateTarget($width, $height, $method);
+		if ($error !== null) {
+			return $this->asJsonFailure($error);
+		}
+		if ($method !== ReformatHelper::METHOD_CROP && !class_exists(\Imagick::class)) {
+			return $this->asJsonFailure('Imagick is required for this format option.');
+		}
+
+		$instructions = null;
+		$providerOptions = [];
+		$responseFields = [];
+		if ($method === ReformatHelper::METHOD_AI) {
+			$value = $request->getBodyParam('prompt', '');
+			$instructions = is_string($value) ? trim($value) : '';
+			$length = function_exists('mb_strlen') ? mb_strlen($instructions) : strlen($instructions);
+			if ($length > ReformatHelper::MAX_PROMPT_LENGTH) {
+				return $this->asJsonFailure('Keep the extension instructions under 2000 characters.');
+			}
+
+			$settings = ImageEnhancer::getInstance()->getSettings();
+			$enhancementService = ImageEnhancer::getInstance()->aiImageEnhancement;
+			$providerOptions = $this->getProviderOptionsForRequest($settings);
+			if ($providerOptions === false) {
+				return $this->asJsonFailure('Invalid AI image provider or model.');
+			}
+			if ($enhancementService->getConfiguredApiKey($settings, $providerOptions) === '') {
+				return $this->asJsonFailure($enhancementService->getProviderLabel($settings, $providerOptions) . ' API key is missing.');
+			}
+			$responseFields = [
+				'imageEnhancementProvider' => $providerOptions['provider'] ?? $settings->imageEnhancementProvider,
+				'imageEnhancementModel' => $providerOptions['model'] ?? $enhancementService->getProviderModel($settings, $providerOptions),
+			];
+		}
+
+		if (!$this->assetFileExists($asset)) {
+			return $this->asJsonFailure('Could not find the original asset file.');
+		}
+
+		$userId = $this->getCurrentUserId();
+
+		return $this->startOperation(
+			$asset,
+			'format change',
+			['operation' => 'reformat', 'reformatMethod' => $method, 'targetWidth' => $width, 'targetHeight' => $height],
+			static fn(string $token) => new ArticleImageEnhancementJob([
+				'assetId' => $asset->id,
+				'userId' => $userId,
+				'token' => $token,
+				'imageEnhancementProvider' => $providerOptions['provider'] ?? null,
+				'imageEnhancementModel' => $providerOptions['model'] ?? null,
+				'targetWidth' => $width,
+				'targetHeight' => $height,
+				'reformatMethod' => $method,
+				'reformatPrompt' => $instructions !== '' ? $instructions : null,
+			]),
+			$responseFields,
 		);
 	}
 

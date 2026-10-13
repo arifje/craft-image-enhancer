@@ -7,6 +7,7 @@ use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
 use arjanbrinkman\craftimageenhancer\helpers\JobStatus;
+use arjanbrinkman\craftimageenhancer\helpers\ReformatHelper;
 use arjanbrinkman\craftimageenhancer\helpers\SlackHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\models\Settings;
@@ -21,7 +22,7 @@ use GuzzleHttp\ClientInterface;
 use yii\queue\RetryableJobInterface;
 
 /**
- * Creates an enhanced (or custom-edited) preview asset for the CP article image tools.
+ * Creates an enhanced, custom-edited or reformatted preview asset for the CP article image tools.
  *
  * Transient provider failures (connection errors, 429, 5xx) can be retried once by pushing a
  * new job, honouring Retry-After. Expected failures set the status to "failed" and return;
@@ -43,6 +44,10 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 	public ?string $customPrompt = null;
 	public ?int $targetWidth = null;
 	public ?int $targetHeight = null;
+	/** Set to a ReformatHelper::METHOD_* to change the format to targetWidth x targetHeight. */
+	public ?string $reformatMethod = null;
+	/** Optional instructions for the areas an AI extension adds. */
+	public ?string $reformatPrompt = null;
 
 	public function getTtr(): int
 	{
@@ -82,17 +87,24 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 
 			$providerOptions = $this->getProviderOptions();
 			$providerLabel = ImageEnhancer::getInstance()->aiImageEnhancement->getProviderLabel($settings, $providerOptions);
-			$progressLabel = $this->isCustomEnhancement() ? 'Applying custom edit with ' . $providerLabel : 'Sending image to ' . $providerLabel;
+			$progressLabel = match (true) {
+				$this->isReformat() && $this->reformatMethod === ReformatHelper::METHOD_AI => 'Extending image with ' . $providerLabel,
+				$this->isReformat() => 'Changing format',
+				$this->isCustomEnhancement() => 'Applying custom edit with ' . $providerLabel,
+				default => 'Sending image to ' . $providerLabel,
+			};
 			$this->updateStatus('running', 0.2, $progressLabel);
 			$this->setProgress($queue, 0.2, $progressLabel);
-			$tempPath = $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $providerOptions);
+			$tempPath = $this->isReformat()
+				? $this->reformatToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $providerOptions)
+				: $this->enhanceToTempFile(Craft::createGuzzleClient(), $settings, $asset, $localPath, $providerOptions);
 
 			if ($this->isCanceled()) {
 				$this->finishCanceled($queue);
 				return;
 			}
 
-			$previewProgressLabel = $this->isCustomEnhancement() ? 'Saving custom edit preview' : 'Saving enhanced preview';
+			$previewProgressLabel = $this->isReformat() ? 'Saving new format preview' : ($this->isCustomEnhancement() ? 'Saving custom edit preview' : 'Saving enhanced preview');
 			$this->updateStatus('running', 0.85, $previewProgressLabel);
 			$this->setProgress($queue, 0.85, $previewProgressLabel);
 			$previewAsset = AssetHelper::createAssetFromFile(
@@ -111,7 +123,7 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 				return;
 			}
 
-			$completeLabel = $this->isCustomEnhancement() ? 'Custom edit preview ready' : 'Enhanced preview ready';
+			$completeLabel = $this->isReformat() ? 'New format preview ready' : ($this->isCustomEnhancement() ? 'Custom edit preview ready' : 'Enhanced preview ready');
 			$this->updateStatus('complete', 1, $completeLabel, [
 				'previewId' => $previewAsset->id,
 			]);
@@ -136,7 +148,7 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 				return;
 			}
 
-			$failedLabel = $this->isCustomEnhancement() ? 'Custom edit failed' : 'Enhancement failed';
+			$failedLabel = $this->isReformat() ? 'Format change failed' : ($this->isCustomEnhancement() ? 'Custom edit failed' : 'Enhancement failed');
 			$this->updateStatus('failed', 1, $failedLabel, [
 				'message' => HttpHelper::describeForUser($e),
 			]);
@@ -195,6 +207,63 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 		return $tempPath;
 	}
 
+	/**
+	 * @throws \RuntimeException
+	 * @throws \GuzzleHttp\Exception\GuzzleException
+	 */
+	private function reformatToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, array $providerOptions = []): string
+	{
+		$width = (int) $this->targetWidth;
+		$height = (int) $this->targetHeight;
+		$method = (string) $this->reformatMethod;
+		$error = ReformatHelper::validateTarget($width, $height, $method);
+		if ($error !== null) {
+			throw new \RuntimeException($error);
+		}
+
+		$mimeType = (string) $asset->mimeType;
+		$tempPath = FileHelper::createTempPathForAsset($asset);
+		$canvasPath = null;
+		$maskPath = null;
+		$aiPath = null;
+
+		try {
+			if ($method === ReformatHelper::METHOD_CROP) {
+				$focalPoint = $asset->getFocalPoint();
+				ReformatHelper::crop(
+					$localPath, $tempPath, $mimeType, $width, $height,
+					(float) ($focalPoint['x'] ?? 0.5), (float) ($focalPoint['y'] ?? 0.5),
+				);
+			} elseif ($method === ReformatHelper::METHOD_FIT) {
+				ReformatHelper::fitWithBlur($localPath, $tempPath, $mimeType, $width, $height);
+			} else {
+				$canvasPath = FileHelper::createTempPathForAsset($asset);
+				$maskPath = FileHelper::createTempPath('png');
+				ReformatHelper::writeExtendInput($localPath, $canvasPath, $maskPath, $mimeType, $width, $height);
+				$aiPath = ImageEnhancer::getInstance()->aiImageEnhancement->extendToTempFile(
+					$client, $settings, $asset, $canvasPath, $maskPath, $width, $height, $providerOptions, $this->reformatPrompt,
+				);
+				$error = ImageHelper::validateImageInfo(ImageHelper::getImageInfo($aiPath));
+				if ($error !== null) {
+					throw new \RuntimeException('The provider returned an unusable image (' . $error . ').');
+				}
+				ReformatHelper::compositeExtension($aiPath, $localPath, $tempPath, $mimeType, $width, $height);
+			}
+		} catch (\Throwable $e) {
+			FileHelper::delete($tempPath);
+			throw $e;
+		} finally {
+			FileHelper::delete($canvasPath, $maskPath, $aiPath);
+		}
+
+		return $tempPath;
+	}
+
+	private function isReformat(): bool
+	{
+		return $this->reformatMethod !== null && $this->reformatMethod !== '';
+	}
+
 	private function getProviderOptions(): array
 	{
 		if (!$this->imageEnhancementProvider || !$this->imageEnhancementModel) {
@@ -228,7 +297,7 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 			'status' => $status,
 			'assetId' => $this->assetId,
 			'token' => $this->token,
-			'operation' => $this->isCustomEnhancement() ? 'customEnhance' : 'enhance',
+			'operation' => $this->isReformat() ? 'reformat' : ($this->isCustomEnhancement() ? 'customEnhance' : 'enhance'),
 			'progress' => $progress,
 			'progressLabel' => $progressLabel,
 		], $extra));
@@ -277,6 +346,8 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 				'customPrompt' => $this->customPrompt,
 				'targetWidth' => $this->targetWidth,
 				'targetHeight' => $this->targetHeight,
+				'reformatMethod' => $this->reformatMethod,
+				'reformatPrompt' => $this->reformatPrompt,
 			]), null, $delay);
 		} catch (\Throwable $e) {
 			Craft::error('ImageEnhancer: Could not queue retry for failed article image enhancement (' . get_class($e) . ').', __METHOD__);

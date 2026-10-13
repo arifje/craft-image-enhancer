@@ -103,6 +103,8 @@
 .image-enhancer-upload-summary[hidden],
 .image-enhancer-cp-provider[hidden],
 .image-enhancer-cp-custom-edit[hidden],
+.image-enhancer-cp-format[hidden],
+.image-enhancer-cp-format-prompt[hidden],
 .image-enhancer-cp-video[hidden],
 .image-enhancer-cp-manual-blur-layer[hidden],
 .image-enhancer-cp-status[hidden],
@@ -496,4 +498,84 @@
 	.image-enhancer-cp-compare img {
 		height: clamp(180px, 36dvh, 280px);
 	}
+}
+
+/* Change format panel */
+.image-enhancer-cp-format {
+	display: grid;
+	gap: 12px;
+	padding: 12px 0;
+}
+
+.image-enhancer-cp-format-presets {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.image-enhancer-cp-format-presets .btn.active {
+	background: var(--gray-500, #596673);
+	color: var(--white, #fff);
+}
+
+.image-enhancer-cp-format-size {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
+}
+
+.image-enhancer-cp-format-size label,
+.image-enhancer-cp-format-prompt label {
+	display: grid;
+	gap: 4px;
+	font-size: 12px;
+	color: var(--light-text-color, #596673);
+}
+
+.image-enhancer-cp-format-size input {
+	width: 100%;
+}
+
+.image-enhancer-cp-format-methods {
+	display: grid;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.image-enhancer-cp-format-methods legend {
+	margin-bottom: 6px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.image-enhancer-cp-format-methods label {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 8px;
+	align-items: start;
+	font-size: 12px;
+	line-height: 1.4;
+	cursor: pointer;
+}
+
+.image-enhancer-cp-format-methods input {
+	margin-top: 2px;
+}
+
+.image-enhancer-cp-format-methods strong {
+	display: block;
+}
+
+.image-enhancer-cp-format p {
+	margin: 0;
+	font-size: 12px;
+	color: var(--light-text-color, #596673);
+}
+
+.image-enhancer-cp-compare.is-reformat [data-compare-original],
+.image-enhancer-cp-compare.is-reformat .image-enhancer-cp-divider,
+.image-enhancer-cp-compare.is-reformat input[type="range"] {
+	visibility: hidden;
 }

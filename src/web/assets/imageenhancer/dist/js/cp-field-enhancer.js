@@ -27,6 +27,7 @@
 			uploadDiscard: 'craft-image-enhancer/upload-assistant/discard',
 			assetInfo: 'craft-image-enhancer/article-image/asset-info',
 			saveEditor: 'craft-image-enhancer/article-image/save-editor',
+			reformat: 'craft-image-enhancer/article-image/reformat',
 			enhance: 'craft-image-enhancer/article-image/enhance',
 			createVideo: 'craft-image-enhancer/article-image/create-video',
 			blurFaces: 'craft-image-enhancer/article-image/blur-faces',
@@ -68,6 +69,47 @@
 		},
 	};
 	const config = mergeConfig(defaults, window.ImageEnhancerCp || {});
+
+	const FORMAT_PRESETS = [
+		{ label: '16:9', ratio: [16, 9] },
+		{ label: '4:5', ratio: [4, 5] },
+		{ label: '1:1', ratio: [1, 1] },
+		{ label: '9:16', ratio: [9, 16] },
+		{ label: '3:2', ratio: [3, 2] },
+		{ label: 'Custom', ratio: null },
+	];
+	const FORMAT_MAX_EDGE = 8192;
+	const FORMAT_MAX_PIXELS = 24000000;
+
+	// Mirrors ReformatHelper::cropBox() (centred; the server crops around the focal point).
+	function formatCropBox(sourceWidth, sourceHeight, targetWidth, targetHeight) {
+		const ratio = targetWidth / targetHeight;
+		if (sourceWidth / sourceHeight > ratio) {
+			return { width: Math.min(sourceWidth, Math.round(sourceHeight * ratio)), height: sourceHeight };
+		}
+		return { width: sourceWidth, height: Math.min(sourceHeight, Math.round(sourceWidth / ratio)) };
+	}
+
+	// Mirrors ReformatHelper::defaultSize(): crop never upscales; fit and AI extend contain the whole image.
+	function defaultFormatSize(sourceWidth, sourceHeight, ratioWidth, ratioHeight, method) {
+		const ratio = ratioWidth / ratioHeight;
+		let width;
+		let height;
+		if (method === 'crop') {
+			({ width, height } = formatCropBox(sourceWidth, sourceHeight, ratioWidth, ratioHeight));
+		} else if (sourceWidth / sourceHeight > ratio) {
+			width = sourceWidth;
+			height = sourceWidth / ratio;
+		} else {
+			height = sourceHeight;
+			width = sourceHeight * ratio;
+		}
+		const scale = Math.min(1, FORMAT_MAX_EDGE / Math.max(width, height), Math.sqrt(FORMAT_MAX_PIXELS / (width * height)));
+		return {
+			width: Math.max(64, Math.floor(width * scale)),
+			height: Math.max(64, Math.floor(height * scale)),
+		};
+	}
 	const providerStorageKey = 'craft-image-enhancer:cp:provider-preference';
 	const videoProviderStorageKey = 'craft-image-enhancer:cp:video-provider-preference';
 	const scanSelector = [
@@ -665,6 +707,24 @@
 				'    <textarea id="image-enhancer-custom-prompt" class="text fullwidth" rows="3" maxlength="4000" placeholder="For example: Flip the image horizontally, or remove all persons." data-custom-prompt></textarea>',
 				'    <p>Only the requested edit is applied. The original dimensions and unrelated content are preserved where possible.</p>',
 				'  </div>',
+				'  <div class="image-enhancer-cp-format" data-format-panel hidden>',
+				'    <div class="image-enhancer-cp-format-presets" role="group" aria-label="Format" data-format-presets></div>',
+				'    <div class="image-enhancer-cp-format-size">',
+				'      <label><span>Width</span><input type="number" class="text" min="64" max="8192" step="1" data-format-width></label>',
+				'      <label><span>Height</span><input type="number" class="text" min="64" max="8192" step="1" data-format-height></label>',
+				'    </div>',
+				'    <fieldset class="image-enhancer-cp-format-methods">',
+				'      <legend>Fill the new format</legend>',
+				'      <label><input type="radio" value="crop" data-format-method checked><span><strong>Crop</strong>Cuts to the new format around the focal point. Instant, no AI.</span></label>',
+				'      <label><input type="radio" value="fit" data-format-method><span><strong>Fit with blurred background</strong>Keeps the whole image and fills the sides with a blurred copy. Instant, no AI.</span></label>',
+				'      <label><input type="radio" value="ai" data-format-method><span><strong>AI extend</strong>The AI continues the scene into the new area; the original stays sharp in the centre.</span></label>',
+				'    </fieldset>',
+				'    <div class="image-enhancer-cp-format-prompt" data-format-ai hidden>',
+				'      <label for="image-enhancer-format-prompt">Instructions for the new area <span>(optional)</span></label>',
+				'      <textarea id="image-enhancer-format-prompt" class="text fullwidth" rows="2" maxlength="2000" placeholder="For example: continue the beach and the sky." data-format-prompt></textarea>',
+				'    </div>',
+				'    <p data-format-summary></p>',
+				'  </div>',
 				'  <div class="image-enhancer-cp-video" data-video-panel hidden>',
 				'    <div class="image-enhancer-cp-video-provider">',
 				'      <label><span>Provider</span><select data-video-provider></select></label>',
@@ -701,11 +761,14 @@
 				'      <button type="button" class="btn submit image-enhancer-cp-is-hidden" data-local-repair>Resize locally</button>',
 				'      <button type="button" class="btn submit" data-enhance>Enhance</button>',
 				'      <button type="button" class="btn" data-open-custom-edit>Custom edit</button>',
+				'      <button type="button" class="btn" data-open-format>Change format</button>',
 				'      <button type="button" class="btn" data-blur-faces>Blur faces</button>',
 				'      <button type="button" class="btn" data-custom-blur>Custom blur</button>',
 				'      <button type="button" class="btn" data-open-video>Create Video</button>',
 				'      <button type="button" class="btn submit image-enhancer-cp-is-hidden" data-apply-custom-edit>Apply edit</button>',
 				'      <button type="button" class="btn image-enhancer-cp-is-hidden" data-cancel-custom-edit>Cancel</button>',
+				'      <button type="button" class="btn submit image-enhancer-cp-is-hidden" data-apply-format>Apply format</button>',
+				'      <button type="button" class="btn image-enhancer-cp-is-hidden" data-cancel-format>Cancel</button>',
 				'      <button type="button" class="btn submit image-enhancer-cp-is-hidden" data-create-video>Generate video</button>',
 				'      <button type="button" class="btn image-enhancer-cp-is-hidden" data-cancel-video>Cancel</button>',
 				'      <a class="btn submit image-enhancer-cp-is-hidden" href="#" download data-download-video>Download video</a>',
@@ -743,6 +806,17 @@
 			this.cancelCustomEditButton = root.querySelector('[data-cancel-custom-edit]');
 			this.customEditPanel = root.querySelector('[data-custom-edit-panel]');
 			this.customPromptInput = root.querySelector('[data-custom-prompt]');
+			this.openFormatButton = root.querySelector('[data-open-format]');
+			this.applyFormatButton = root.querySelector('[data-apply-format]');
+			this.cancelFormatButton = root.querySelector('[data-cancel-format]');
+			this.formatPanel = root.querySelector('[data-format-panel]');
+			this.formatPresets = root.querySelector('[data-format-presets]');
+			this.formatWidthInput = root.querySelector('[data-format-width]');
+			this.formatHeightInput = root.querySelector('[data-format-height]');
+			this.formatMethodInputs = [...root.querySelectorAll('[data-format-method]')];
+			this.formatAiPanel = root.querySelector('[data-format-ai]');
+			this.formatPromptInput = root.querySelector('[data-format-prompt]');
+			this.formatSummary = root.querySelector('[data-format-summary]');
 			this.openVideoButton = root.querySelector('[data-open-video]');
 			this.createVideoButton = root.querySelector('[data-create-video]');
 			this.cancelVideoButton = root.querySelector('[data-cancel-video]');
@@ -776,6 +850,10 @@
 			root.querySelector('[data-open-custom-edit]').addEventListener('click', () => this.startCustomEditMode());
 			root.querySelector('[data-apply-custom-edit]').addEventListener('click', () => this.applyCustomEdit());
 			root.querySelector('[data-cancel-custom-edit]').addEventListener('click', () => this.cancelCustomEditMode());
+			this.openFormatButton.addEventListener('click', () => this.startFormatMode());
+			this.applyFormatButton.addEventListener('click', () => this.applyFormat());
+			this.cancelFormatButton.addEventListener('click', () => this.cancelFormatMode());
+			this.setupFormatControls();
 			root.querySelector('[data-open-video]').addEventListener('click', () => this.startVideoMode());
 			root.querySelector('[data-create-video]').addEventListener('click', () => this.createVideo());
 			root.querySelector('[data-cancel-video]').addEventListener('click', () => this.cancelVideoMode());
@@ -1195,6 +1273,7 @@
 			this.clearError();
 			this.hideVideoMode(false);
 			this.hideManualBlurMode(true, false);
+			this.hideFormatMode();
 			if (!preservePrompt) {
 				this.customPromptInput.value = '';
 			}
@@ -1283,6 +1362,185 @@
 			}
 		}
 
+		setupFormatControls() {
+			// Radios share one name per modal so several modals never interfere.
+			const name = `image-enhancer-format-method-${Math.random().toString(36).slice(2)}`;
+			for (const input of this.formatMethodInputs) {
+				input.name = name;
+				input.addEventListener('change', () => this.updateFormatSize());
+			}
+			this.formatPreset = FORMAT_PRESETS[0];
+			for (const preset of FORMAT_PRESETS) {
+				const button = document.createElement('button');
+				button.type = 'button';
+				button.className = 'btn small';
+				button.textContent = preset.label;
+				button.dataset.formatPreset = preset.label;
+				button.addEventListener('click', () => {
+					this.formatPreset = preset;
+					this.updateFormatSize();
+				});
+				this.formatPresets.append(button);
+			}
+			this.formatWidthInput.addEventListener('input', () => this.syncFormatSize('width'));
+			this.formatHeightInput.addEventListener('input', () => this.syncFormatSize('height'));
+		}
+
+		get formatMethod() {
+			return this.formatMethodInputs.find((input) => input.checked)?.value || 'crop';
+		}
+
+		formatSourceSize() {
+			const doc = this.editor?.doc;
+			if (doc) {
+				return { width: doc.width, height: doc.height };
+			}
+			return {
+				width: Number(this.assetInfo?.width) || Number(this.originalImage.naturalWidth) || 0,
+				height: Number(this.assetInfo?.height) || Number(this.originalImage.naturalHeight) || 0,
+			};
+		}
+
+		updateFormatSize() {
+			const source = this.formatSourceSize();
+			const preset = this.formatPreset;
+			for (const button of this.formatPresets.querySelectorAll('button')) {
+				const active = button.dataset.formatPreset === preset.label;
+				button.classList.toggle('active', active);
+				button.setAttribute('aria-pressed', String(active));
+			}
+			if (preset.ratio && source.width && source.height) {
+				const size = defaultFormatSize(source.width, source.height, preset.ratio[0], preset.ratio[1], this.formatMethod);
+				this.formatWidthInput.value = size.width;
+				this.formatHeightInput.value = size.height;
+			} else if (!this.formatWidthInput.value && source.width) {
+				this.formatWidthInput.value = source.width;
+				this.formatHeightInput.value = source.height;
+			}
+			this.formatAiPanel.hidden = this.formatMethod !== 'ai';
+			this.providerControls.hidden = !(config.providerChoiceEnabled && this.formatMethod === 'ai');
+			this.updateFormatSummary();
+		}
+
+		syncFormatSize(changed) {
+			const ratio = this.formatPreset.ratio;
+			if (ratio) {
+				const width = Number(this.formatWidthInput.value);
+				const height = Number(this.formatHeightInput.value);
+				if (changed === 'width' && width > 0) {
+					this.formatHeightInput.value = Math.max(1, Math.round(width * ratio[1] / ratio[0]));
+				} else if (changed === 'height' && height > 0) {
+					this.formatWidthInput.value = Math.max(1, Math.round(height * ratio[0] / ratio[1]));
+				}
+			}
+			this.updateFormatSummary();
+		}
+
+		updateFormatSummary() {
+			const source = this.formatSourceSize();
+			const width = Number(this.formatWidthInput.value);
+			const height = Number(this.formatHeightInput.value);
+			let summary = source.width ? `${source.width} × ${source.height} px → ${width || '?'} × ${height || '?'} px.` : '';
+			if (this.formatMethod === 'crop' && width && height && source.width) {
+				const box = formatCropBox(source.width, source.height, width, height);
+				if (width > box.width * 1.01) {
+					summary += ` The cropped area is ${box.width} × ${box.height} px, so it will be enlarged.`;
+				}
+			}
+			summary += ' The result replaces this image after you approve the preview.';
+			this.formatSummary.textContent = summary;
+		}
+
+		startFormatMode(preserve = false) {
+			if (this.uploadRepair) {
+				return;
+			}
+
+			this.clearError();
+			this.hideVideoMode(false);
+			this.hideManualBlurMode(true, false);
+			this.hideCustomEditMode(false);
+			if (!preserve) {
+				this.formatPromptInput.value = '';
+			}
+			this.isFormatMode = true;
+			this.formatPanel.hidden = false;
+			this.updateFormatSize();
+			this.setActionState('format');
+			this.setStatus('', false);
+			this.formatPresets.querySelector('button.active')?.focus();
+		}
+
+		cancelFormatMode() {
+			if (!this.isFormatMode) {
+				return;
+			}
+
+			this.clearError();
+			this.hideFormatMode();
+			this.setActionState('idle');
+			this.setStatus('', false);
+		}
+
+		hideFormatMode() {
+			this.isFormatMode = false;
+			this.formatPanel.hidden = true;
+			this.providerControls.hidden = !config.providerChoiceEnabled;
+		}
+
+		async applyFormat() {
+			if (this.uploadRepair) {
+				return;
+			}
+
+			const width = Math.round(Number(this.formatWidthInput.value));
+			const height = Math.round(Number(this.formatHeightInput.value));
+			if (!(width >= 64 && height >= 64 && width <= 8192 && height <= 8192)) {
+				this.showError(new Error('Enter a width and height between 64 and 8192 pixels.'));
+				this.formatWidthInput.focus();
+				return;
+			}
+
+			const method = this.formatMethod;
+			const operationSequence = this.beginOperation();
+			this.clearError();
+			this.operation = 'reformat';
+			this.token = '';
+			this.jobId = '';
+			this.previewId = '';
+			this.enhancedUrl = '';
+			this.hideFormatMode();
+			this.setPreviewMode(false);
+			this.setBusy(true, 'Queued...');
+
+			try {
+				const payload = { assetId: this.assetId, method, width, height };
+				if (method === 'ai') {
+					payload.prompt = this.formatPromptInput.value.trim();
+					if (config.providerChoiceEnabled) {
+						payload.imageEnhancementProvider = this.selectedProvider;
+						payload.imageEnhancementModel = this.selectedModel;
+						this.persistProviderPreference();
+					}
+				}
+
+				const response = await this.request('reformat', payload);
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
+				this.token = response.token || '';
+				this.jobId = response.jobId || '';
+				this.poll();
+			} catch (error) {
+				if (!this.isCurrentOperation(operationSequence)) {
+					return;
+				}
+				this.setBusy(false);
+				this.startFormatMode(true);
+				this.showError(error);
+			}
+		}
+
 		startVideoMode(preservePrompt = false) {
 			if (this.uploadRepair) {
 				return;
@@ -1291,6 +1549,7 @@
 			this.clearError();
 			this.operation = 'createVideo';
 			this.hideCustomEditMode(false);
+			this.hideFormatMode();
 			this.hideManualBlurMode(true, false);
 			if (!preservePrompt) {
 				this.videoPromptInput.value = '';
@@ -1623,6 +1882,7 @@
 			let shouldResumeManualBlur = false;
 			let shouldResumeCustomEdit = false;
 			let shouldResumeVideo = false;
+			let shouldResumeFormat = false;
 
 			try {
 				const response = await this.request('status', {
@@ -1652,11 +1912,12 @@
 					shouldResumeManualBlur = this.operation === 'manualBlurFaces';
 					shouldResumeCustomEdit = this.operation === 'customEnhance';
 					shouldResumeVideo = this.operation === 'createVideo';
+					shouldResumeFormat = this.operation === 'reformat';
 					const fallback = this.isVideoOperation()
 						? 'Video generation failed.'
 						: (this.isBlurOperation()
 						? 'Face blur failed.'
-						: (this.isCustomEnhancement() ? 'Custom edit failed.' : 'Enhancement failed.'));
+						: (this.operation === 'reformat' ? 'Format change failed.' : (this.isCustomEnhancement() ? 'Custom edit failed.' : 'Enhancement failed.')));
 					throw new Error(response.message || response.previousError || fallback);
 				}
 
@@ -1664,6 +1925,8 @@
 					this.setBusy(false);
 					if (this.operation === 'customEnhance') {
 						this.startCustomEditMode(true);
+					} else if (this.operation === 'reformat') {
+						this.startFormatMode(true);
 					} else if (this.operation === 'createVideo') {
 						this.startVideoMode(true);
 					} else if (!this.resumeManualBlurMode()) {
@@ -1686,6 +1949,8 @@
 					this.resumeManualBlurMode();
 				} else if (shouldResumeCustomEdit) {
 					this.startCustomEditMode(true);
+				} else if (shouldResumeFormat) {
+					this.startFormatMode(true);
 				} else if (shouldResumeVideo) {
 					this.startVideoMode(true);
 				}
@@ -1703,6 +1968,7 @@
 			const shouldResumeManualBlur = this.operation === 'manualBlurFaces';
 			const shouldResumeCustomEdit = this.operation === 'customEnhance';
 			const shouldResumeVideo = this.operation === 'createVideo';
+			const shouldResumeFormat = this.operation === 'reformat';
 			// Stop polling while canceling so a late status response can't reopen the busy state.
 			this.invalidateOperation();
 			const operationSequence = this.operationSequence;
@@ -1722,6 +1988,8 @@
 				this.setBusy(false);
 				if (shouldResumeCustomEdit) {
 					this.startCustomEditMode(true);
+				} else if (shouldResumeFormat) {
+					this.startFormatMode(true);
 				} else if (shouldResumeVideo) {
 					this.startVideoMode(true);
 				} else if (!shouldResumeManualBlur || !this.resumeManualBlurMode()) {
@@ -1742,7 +2010,8 @@
 		}
 
 		async keep() {
-			if (this.editor) {
+			// A new format has different dimensions than the editor canvas, so it is saved directly.
+			if (this.editor && this.operation !== 'reformat') {
 				await this.editor.acceptPreview();
 				return;
 			}
@@ -1783,7 +2052,7 @@
 				if (window.Craft?.cp) {
 					const notice = this.isBlurOperation()
 						? 'Blurred image saved.'
-						: (this.isCustomEnhancement() ? 'Custom edit saved.' : 'Enhanced image saved.');
+						: (this.operation === 'reformat' ? 'Image format changed.' : (this.isCustomEnhancement() ? 'Custom edit saved.' : 'Enhanced image saved.'));
 					Craft.cp.displayNotice(notice);
 				}
 				this.close();
@@ -1845,8 +2114,14 @@
 			this.enhancedImage.src = enhancedUrl;
 			this.hideManualBlurMode(true);
 			this.hideCustomEditMode(false);
+			this.hideFormatMode();
 			this.hideVideoMode(false);
 			this.setBusy(false);
+			// A new format has a different shape, so show only the result instead of a comparison.
+			this.compare.classList.toggle('is-reformat', this.operation === 'reformat');
+			if (this.operation === 'reformat') {
+				this.range.value = 100;
+			}
 			this.setPreviewMode(true);
 			this.updateComparison();
 		}
@@ -1860,6 +2135,9 @@
 		setBusy(isBusy, label = '', includeCounter = false) {
 			this.enhanceButton.disabled = isBusy;
 			this.customEditButton.disabled = isBusy;
+			this.openFormatButton.disabled = isBusy;
+			this.applyFormatButton.disabled = isBusy;
+			this.cancelFormatButton.disabled = isBusy;
 			this.applyCustomEditButton.disabled = isBusy;
 			this.cancelCustomEditButton.disabled = isBusy;
 			this.openVideoButton.disabled = isBusy;
@@ -1884,6 +2162,9 @@
 			this.localRepairButton.disabled = isProcessing || !this.uploadRepair?.repairable;
 			this.enhanceButton.disabled = isProcessing;
 			this.customEditButton.disabled = true;
+			this.openFormatButton.disabled = true;
+			this.applyFormatButton.disabled = true;
+			this.cancelFormatButton.disabled = true;
 			this.applyCustomEditButton.disabled = true;
 			this.cancelCustomEditButton.disabled = true;
 			this.openVideoButton.disabled = true;
@@ -1907,6 +2188,9 @@
 			this.closeButton.disabled = isProcessing;
 			this.enhanceButton.disabled = true;
 			this.customEditButton.disabled = true;
+			this.openFormatButton.disabled = true;
+			this.applyFormatButton.disabled = true;
+			this.cancelFormatButton.disabled = true;
 			this.applyCustomEditButton.disabled = true;
 			this.cancelCustomEditButton.disabled = true;
 			this.openVideoButton.disabled = true;
@@ -1933,6 +2217,9 @@
 				this.toggleButton(this.customEditButton, true);
 				this.toggleButton(this.applyCustomEditButton, true);
 				this.toggleButton(this.cancelCustomEditButton, true);
+				this.toggleButton(this.openFormatButton, true);
+				this.toggleButton(this.applyFormatButton, true);
+				this.toggleButton(this.cancelFormatButton, true);
 				this.toggleButton(this.openVideoButton, true);
 				this.toggleButton(this.createVideoButton, true);
 				this.toggleButton(this.cancelVideoButton, true);
@@ -1954,6 +2241,9 @@
 			this.toggleButton(this.customEditButton, state !== 'idle');
 			this.toggleButton(this.applyCustomEditButton, state !== 'customEdit');
 			this.toggleButton(this.cancelCustomEditButton, state !== 'customEdit');
+			this.toggleButton(this.openFormatButton, state !== 'idle');
+			this.toggleButton(this.applyFormatButton, state !== 'format');
+			this.toggleButton(this.cancelFormatButton, state !== 'format');
 			this.toggleButton(this.openVideoButton, state !== 'idle');
 			this.toggleButton(this.createVideoButton, state !== 'video');
 			this.toggleButton(this.cancelVideoButton, state !== 'video');
@@ -1968,6 +2258,9 @@
 			this.toggleButton(this.keepButton, state !== 'preview');
 			this.toggleButton(this.discardButton, state !== 'preview');
 			this.editor?.setState(state);
+			if (state === 'preview' && this.operation === 'reformat') {
+				this.keepButton.textContent = 'Save new format';
+			}
 		}
 
 		resolveOperation(response) {

@@ -5,6 +5,7 @@ namespace arjanbrinkman\craftimageenhancer\services;
 use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
+use arjanbrinkman\craftimageenhancer\helpers\ReformatHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\models\Settings;
 use craft\base\Component;
@@ -68,6 +69,76 @@ class AiImageEnhancementService extends Component
 		};
 	}
 
+	/**
+	 * Outpaints a prepared canvas (see ReformatHelper::writeExtendInput()) to a new aspect ratio.
+	 * OpenAI also receives the mask and an output size; xAI and Google keep the canvas's aspect
+	 * ratio, so they need no size parameter.
+	 */
+	public function extendToTempFile(
+		ClientInterface $client,
+		Settings $settings,
+		Asset $asset,
+		string $canvasPath,
+		string $maskPath,
+		int $targetWidth,
+		int $targetHeight,
+		array $providerOptions = [],
+		?string $instructions = null,
+	): string
+	{
+		$provider = $this->resolveProvider($settings, $providerOptions);
+		$model = $this->getProviderModel($settings, $providerOptions);
+		$apiKey = $this->getConfiguredApiKey($settings, $providerOptions);
+		if ($apiKey === '') {
+			throw new \RuntimeException($this->getProviderLabel($settings, $providerOptions) . ' API key is missing.');
+		}
+
+		$prompt = $this->getExtendPrompt($targetWidth, $targetHeight, $instructions);
+
+		return match ($provider) {
+			Settings::IMAGE_PROVIDER_XAI => $this->enhanceWithXai($client, $asset, $canvasPath, $apiKey, $model, $prompt),
+			Settings::IMAGE_PROVIDER_GOOGLE => $this->enhanceWithGoogle($client, $asset, $canvasPath, $apiKey, $model, $prompt),
+			default => $this->enhanceWithOpenAi(
+				$client, $asset, $canvasPath, $apiKey, $model, $prompt,
+				$maskPath, ReformatHelper::openAiSize($model, $targetWidth, $targetHeight),
+			),
+		};
+	}
+
+	private function getExtendPrompt(int $width, int $height, ?string $instructions): string
+	{
+		$ratio = $this->describeRatio($width, $height);
+		$prompt = "Outpainting request. This photo was placed in the centre of a larger {$ratio} canvas. " .
+			'The sharp area in the centre is the original photo. The blurred, darker areas around it are only placeholders. ' .
+			'Replace every placeholder area with a seamless, photorealistic continuation of the scene: extend the background, ' .
+			'surfaces, lighting, perspective and colours naturally beyond the original edges. ' .
+			'Keep the original centre content unchanged: do not move, redraw, crop, zoom or restyle the people, objects or text in it. ' .
+			'Do not add new text, logos, watermarks, borders or frames, and keep the full canvas size and aspect ratio.';
+
+		$instructions = trim((string) $instructions);
+		if ($instructions !== '') {
+			$prompt .= "\n\nAdditional instructions for the extended areas:\n" . $instructions;
+		}
+
+		return $prompt;
+	}
+
+	/**
+	 * A readable ratio such as "16:9" for sizes that only approximate it (e.g. 3413x1920).
+	 */
+	private function describeRatio(int $width, int $height): string
+	{
+		$ratio = $width / $height;
+		for ($denominator = 1; $denominator <= 32; $denominator++) {
+			$numerator = (int) round($ratio * $denominator);
+			if ($numerator > 0 && abs($numerator / $denominator - $ratio) / $ratio < 0.01) {
+				return $numerator . ':' . $denominator;
+			}
+		}
+
+		return round($ratio, 2) . ':1';
+	}
+
 	private function getCustomEditPrompt(string $customPrompt): string
 	{
 		return "Custom image editing request:\n" . trim($customPrompt) . "\n\n" .
@@ -89,49 +160,78 @@ class AiImageEnhancementService extends Component
 		], true) ? $provider : Settings::IMAGE_PROVIDER_OPENAI;
 	}
 
-	private function enhanceWithOpenAi(ClientInterface $client, Asset $asset, string $localPath, string $apiKey, string $model, string $prompt): string
+	private function enhanceWithOpenAi(
+		ClientInterface $client,
+		Asset $asset,
+		string $localPath,
+		string $apiKey,
+		string $model,
+		string $prompt,
+		?string $maskPath = null,
+		string $size = 'auto',
+	): string
 	{
 		$handle = fopen($localPath, 'rb');
 		if ($handle === false) {
 			throw new \RuntimeException('Could not open the original asset file.');
 		}
+		$maskHandle = null;
+		if ($maskPath !== null) {
+			$maskHandle = fopen($maskPath, 'rb');
+			if ($maskHandle === false) {
+				fclose($handle);
+				throw new \RuntimeException('Could not open the outpainting mask.');
+			}
+		}
 
 		try {
+			$multipart = [
+				[
+					'name' => 'model',
+					'contents' => $model,
+				],
+				[
+					'name' => 'image',
+					'contents' => $handle,
+					'filename' => $asset->filename,
+				],
+				[
+					'name' => 'prompt',
+					'contents' => $prompt,
+				],
+				[
+					'name' => 'size',
+					'contents' => $size,
+				],
+				[
+					'name' => 'quality',
+					'contents' => 'auto',
+				],
+				[
+					'name' => 'output_format',
+					'contents' => $asset->mimeType === 'image/png' ? 'png' : 'jpeg',
+				],
+			];
+			if ($maskHandle !== null) {
+				$multipart[] = [
+					'name' => 'mask',
+					'contents' => $maskHandle,
+					'filename' => 'mask.png',
+				];
+			}
+
 			$response = $client->request('POST', 'https://api.openai.com/v1/images/edits', HttpHelper::withTimeouts(HttpHelper::IMAGE_TIMEOUT, [
 				'headers' => [
 					'Authorization' => 'Bearer ' . $apiKey,
 				],
-				'multipart' => [
-					[
-						'name' => 'model',
-						'contents' => $model,
-					],
-					[
-						'name' => 'image',
-						'contents' => $handle,
-						'filename' => $asset->filename,
-					],
-					[
-						'name' => 'prompt',
-						'contents' => $prompt,
-					],
-					[
-						'name' => 'size',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'quality',
-						'contents' => 'auto',
-					],
-					[
-						'name' => 'output_format',
-						'contents' => $asset->mimeType === 'image/png' ? 'png' : 'jpeg',
-					],
-				],
+				'multipart' => $multipart,
 			]));
 		} finally {
 			if (is_resource($handle)) {
 				fclose($handle);
+			}
+			if (is_resource($maskHandle)) {
+				fclose($maskHandle);
 			}
 		}
 

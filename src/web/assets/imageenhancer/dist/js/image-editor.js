@@ -90,7 +90,7 @@
 			this.inspector = el('div', 'ie-inspector'); this.buildInspector(); this.layersPanel.append(this.inspector);
 			this.aiPanel.append(el('h3', '', 'Enhance your base image'));
 			this.aiNote = el('p', 'ie-help', 'AI works on the base image. Your layers stay editable above it.'); this.aiPanel.append(this.aiNote);
-			for (const node of [this.host.providerControls, this.host.customEditPanel, this.host.videoPanel]) this.aiPanel.append(node);
+			for (const node of [this.host.providerControls, this.host.customEditPanel, this.host.formatPanel, this.host.videoPanel]) this.aiPanel.append(node);
 			this.aiPanel.append(this.root.querySelector('.image-enhancer-cp-actions'));
 			sidebar.append(tabs, this.layersPanel, this.aiPanel); this.aiPanel.hidden = true;
 			workspace.append(rail, center, sidebar); body.replaceChildren(workspace);
@@ -276,7 +276,9 @@
 			for (const [tool, control] of Object.entries(this.toolButtons)) { control.disabled = !this.editable; control.classList.toggle('is-active', tool === this.tool); control.setAttribute('aria-pressed', String(tool === this.tool)); }
 			this.artboard.dataset.tool = this.tool;
 			this.aiNote.textContent = this.pendingAi ? 'AI result applied. Save this image before starting another AI operation.' : 'AI works on the base image. Your layers stay editable above it.';
-			if (this.state === 'idle') for (const control of [this.host.enhanceButton, this.host.customEditButton, this.host.blurFacesButton, this.host.customBlurButton, this.host.openVideoButton]) control.disabled = !this.doc || this.pendingAi || this.saving || this.importing;
+			if (this.state === 'idle') for (const control of [this.host.enhanceButton, this.host.customEditButton, this.host.openFormatButton, this.host.blurFacesButton, this.host.customBlurButton, this.host.openVideoButton]) control.disabled = !this.doc || this.pendingAi || this.saving || this.importing;
+			// A new format replaces the saved image, so unsaved layers must be saved (or discarded) first.
+			if (this.state === 'idle' && this.doc?.dirty) { this.host.openFormatButton.disabled = true; this.host.openFormatButton.title = 'Save your edits before changing the format.'; } else this.host.openFormatButton.title = '';
 			if (!this.doc) {
 				this.propertyGrid.hidden = true;
 				for (const control of this.layerButtons) control.disabled = true;

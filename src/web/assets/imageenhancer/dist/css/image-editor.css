@@ -102,3 +102,10 @@
 .ie-close-prompt > span { flex: 1; }
 .ie-close-prompt .ie-discard-edits { width: auto; white-space: nowrap; color: #f1d7b4; }
 .ie-modal .ie-export-link { color: var(--ie-accent); display: inline-block; margin-left: 12px; font-size: 11px; text-decoration: underline; }
+.ie-modal .ie-ai-panel .image-enhancer-cp-format { padding: 10px 0; }
+.ie-modal .ie-ai-panel .image-enhancer-cp-format input[type='number'] { min-width: 0; width: 100%; color: var(--ie-text); background: #191c23; border: 1px solid #424754; border-radius: 5px; padding: 6px 8px; box-shadow: none; }
+.ie-modal .ie-ai-panel .image-enhancer-cp-format-presets .btn { padding: 5px 9px; font-size: 11px; }
+.ie-modal .ie-ai-panel .image-enhancer-cp-format-presets .btn.active { background: #755831 !important; border-color: #a27c49; color: #ffe2b4; }
+.ie-modal .ie-ai-panel .image-enhancer-cp-format-methods legend, .ie-modal .ie-ai-panel .image-enhancer-cp-format-methods label { color: var(--ie-text); font-size: 11px; }
+.ie-modal .ie-ai-panel .image-enhancer-cp-format-methods label span { color: var(--ie-muted); }
+.ie-modal .ie-ai-panel .image-enhancer-cp-format-methods strong { color: var(--ie-text); font-weight: 600; }

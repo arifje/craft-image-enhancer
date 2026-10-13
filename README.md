@@ -121,7 +121,7 @@ The plugin adds a compact **Enhance** button below JPEG/PNG assets in enabled Cr
 
 The **AI tools** tab retains enhancement, custom edits, face blur, drawn custom blur, and video generation. These queued tools work on the saved base image. Image operations show a before/after comparison; **Use result in editor** places the preview beneath your editable layers. Save the composition to commit it. Save an applied AI result before starting another AI operation. Video results remain download-only.
 
-Local drawing and composition need no provider API key. The editor accepts base images up to 24 megapixels and 8192 pixels per edge, up to 40 layers, and imported image files up to 10 MB/24 megapixels each. Flattened saves are limited to 25 MB; PHP and the web server must permit that upload size (`upload_max_filesize`, `post_max_size`, and the request-body limit). No database migration or frontend build step is required for 2.0.0.
+Local drawing and composition need no provider API key. The editor accepts base images up to 24 megapixels and 8192 pixels per edge, up to 40 layers, and imported image files up to 10 MB/24 megapixels each. Flattened saves are limited to 25 MB; PHP and the web server must permit that upload size (`upload_max_filesize`, `post_max_size`, and the request-body limit). No database migration or frontend build step is required for 2.0.0 or 2.1.0.
 
 The editor streams the source through an authenticated, uncached endpoint and checks Craft's asset and replacement permissions on every save. Invalid uploads, running operations, and stale asset versions are rejected while the edits remain in the modal. Closing with unsaved changes asks for confirmation. The invalid-upload assistant keeps its dedicated repair workflow and field-requirement details.
 
@@ -132,6 +132,16 @@ The **Custom edit** action accepts a one-off generative instruction and uses the
 The **Blur faces** action uses the ChatGPT/OpenAI API key to detect face/head bounding boxes and then applies a fragmented oval anonymization mask locally with Imagick. The **Custom blur** action lets editors draw one or more oval regions on the image; those normalized coordinates go directly to the same Imagick blur job and skip AI detection. Both paths create a preview asset first, so editors can compare and decide whether to keep or discard the blurred result. Abandoned previews older than 24 hours are removed during Craft's garbage collection.
 
 The AI action endpoints are control-panel only and require the **Use AI image tools** permission.
+
+#### Change format
+
+**AI tools → Change format** turns an image into another aspect ratio and size, for example a 9:16 phone photo into a 16:9 header image. Choose a preset (**16:9**, **4:5**, **1:1**, **9:16**, **3:2**) or **Custom**, adjust the width and height if needed, and pick how the new format is filled:
+
+- **Crop** cuts the image to the new ratio around the asset's focal point. Instant and local (no AI). The suggested size keeps the cropped pixels without upscaling.
+- **Fit with blurred background** keeps the whole image and fills the new area with a blurred, enlarged copy of it. Instant and local; requires Imagick.
+- **AI extend** asks the selected provider to continue the scene into the new area, with optional instructions such as `continue the beach and the sky`. The plugin sends a canvas with the image in the centre; OpenAI also receives a mask so only the new area is painted, with an exact size for `gpt-image-2` and the closest standard size for older GPT image models. Afterwards the original's own pixels are placed back in the centre with a soft edge, so the subject stays sharp and unchanged with every provider. Requires Imagick and the provider's API key.
+
+The result is shown as a preview first. **Save new format** replaces the asset file (same asset ID and relations, new dimensions) and requires Craft's **Replace files** permission. Save or discard layer edits before changing the format. Formats must be 64–8192 pixels per edge, at most 24 megapixels, and between 1:4 and 4:1 (1:3 to 3:1 for AI extend). Check field requirements such as minimum width after changing the format of an existing asset.
 
 #### Upload Requirement Assistant
 
@@ -195,6 +205,7 @@ node tests/editor-document.js
 - The upload requirement assistant repairs numeric width, height, and file-size selection conditions while preserving the source aspect ratio. Other failed selection-condition rules remain non-repairable.
 
 - `tests/editor-images.php`: composite format, byte-size, dimension, and pixel bounds.
+- `tests/reformat-geometry.php`: format validation, focal-point crop boxes, canvas placement, default sizes, and OpenAI output sizes.
 - `tests/editor-document.js`: layers, transformed hit testing, locks, visibility, history, and document limits.
 - `tests/editor-http.py`: real authenticated source and upload checks, including CSRF, stale versions, invalid bytes, preview ownership, and a successful native asset replacement.
 

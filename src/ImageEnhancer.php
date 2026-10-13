@@ -311,6 +311,8 @@ class ImageEnhancer extends Plugin
 				'uploadFinalize' => 'craft-image-enhancer/upload-assistant/finalize',
 				'uploadDiscard' => 'craft-image-enhancer/upload-assistant/discard',
 				'assetInfo' => 'craft-image-enhancer/article-image/asset-info',
+				'saveEditor' => 'craft-image-enhancer/article-image/save-editor',
+				'reformat' => 'craft-image-enhancer/article-image/reformat',
 				'enhance' => 'craft-image-enhancer/article-image/enhance',
 				'createVideo' => 'craft-image-enhancer/article-image/create-video',
 				'blurFaces' => 'craft-image-enhancer/article-image/blur-faces',
