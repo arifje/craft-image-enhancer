@@ -481,6 +481,8 @@ class ArticleImageController extends Controller
 			'editorVersion' => $asset->dateUpdated?->format('U.u'),
 			'mimeType' => $asset->mimeType,
 			'canReplace' => $this->canReplaceAssetFile($asset, Craft::$app->getUser()->getIdentity()),
+			// Used by the format preview, which crops around the same point as the server.
+			'focalPoint' => $asset->getFocalPoint(),
 		]);
 	}
 

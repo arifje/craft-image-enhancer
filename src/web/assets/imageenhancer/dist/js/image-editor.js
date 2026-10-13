@@ -93,7 +93,15 @@
 			for (const node of [this.host.providerControls, this.host.customEditPanel, this.host.formatPanel, this.host.videoPanel]) this.aiPanel.append(node);
 			this.aiPanel.append(this.root.querySelector('.image-enhancer-cp-actions'));
 			sidebar.append(tabs, this.layersPanel, this.aiPanel); this.aiPanel.hidden = true;
-			workspace.append(rail, center, sidebar); body.replaceChildren(workspace);
+			this.workspace = workspace; this.sidebarHandle = el('div', 'ie-sidebar-resizer');
+			this.sidebarHandle.setAttribute('role', 'separator'); this.sidebarHandle.setAttribute('aria-orientation', 'vertical'); this.sidebarHandle.setAttribute('aria-label', 'Resize side panel'); this.sidebarHandle.tabIndex = 0;
+			this.sidebarHandle.title = 'Drag to resize the side panel · double-click to reset';
+			this.sidebarHandle.addEventListener('pointerdown', (event) => this.startSidebarResize(event));
+			this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null));
+			this.sidebarHandle.addEventListener('keydown', (event) => { if (['ArrowLeft', 'ArrowRight'].includes(event.key)) { event.preventDefault(); event.stopPropagation(); this.setSidebarWidth(this.sidebarWidth() + (event.key === 'ArrowLeft' ? 16 : -16)); } });
+			workspace.append(rail, center, sidebar, this.sidebarHandle); body.replaceChildren(workspace);
+			let storedWidth = null; try { storedWidth = Number(window.localStorage.getItem('imageEnhancerSidebarWidth')) || null; } catch (error) { storedWidth = null; }
+			if (storedWidth) this.setSidebarWidth(storedWidth, false);
 			this.fileInput = el('input'); this.fileInput.type = 'file'; this.fileInput.accept = 'image/png,image/jpeg,image/webp'; this.fileInput.multiple = true; this.fileInput.hidden = true;
 			this.fileInput.addEventListener('change', () => { this.importFiles([...this.fileInput.files]); this.fileInput.value = ''; }); this.root.append(this.fileInput);
 			const footer = this.root.querySelector('.image-enhancer-cp-footer');
@@ -377,6 +385,27 @@
 			else if (['Delete', 'Backspace'].includes(event.key)) { event.preventDefault(); this.remove(); }
 			else if (event.key.startsWith('Arrow') && this.selected && !this.selected.locked) { event.preventDefault(); const delta = event.shiftKey ? 10 : 1; this.selected.x += event.key === 'ArrowLeft' ? -delta : event.key === 'ArrowRight' ? delta : 0; this.selected.y += event.key === 'ArrowUp' ? -delta : event.key === 'ArrowDown' ? delta : 0; this.doc.commit(); this.refresh(); }
 			else if (!command && { v: 'move', h: 'hand', r: 'rect', o: 'ellipse', t: 'text', b: 'blur' }[key]) this.setTool({ v: 'move', h: 'hand', r: 'rect', o: 'ellipse', t: 'text', b: 'blur' }[key]);
+		}
+		sidebarWidth() { return this.workspace.querySelector('.ie-sidebar').getBoundingClientRect().width || 272; }
+		setSidebarWidth(width, persist = true) {
+			if (width === null) { this.workspace.style.removeProperty('--ie-sidebar-width'); try { window.localStorage.removeItem('imageEnhancerSidebarWidth'); } catch (error) { /* storage unavailable */ } }
+			else {
+				// Keep the canvas usable: leave at least 320px for the workspace centre.
+				const available = this.workspace.getBoundingClientRect().width;
+				const max = available ? Math.max(220, Math.min(720, available - 66 - 320)) : 720;
+				width = Math.round(clamp(width, 220, max)); this.workspace.style.setProperty('--ie-sidebar-width', width + 'px');
+				if (persist) try { window.localStorage.setItem('imageEnhancerSidebarWidth', String(width)); } catch (error) { /* storage unavailable */ }
+			}
+			this.sidebarHandle.setAttribute('aria-valuenow', String(Math.round(this.sidebarWidth())));
+			if (this.fitted) this.fit();
+		}
+		startSidebarResize(event) {
+			if (event.button !== 0) return;
+			event.preventDefault(); this.sidebarHandle.setPointerCapture(event.pointerId); this.sidebarHandle.classList.add('is-dragging');
+			const startX = event.clientX, startWidth = this.sidebarWidth();
+			const move = (next) => this.setSidebarWidth(startWidth - (next.clientX - startX), false);
+			const end = () => { this.sidebarHandle.classList.remove('is-dragging'); this.setSidebarWidth(this.sidebarWidth()); this.sidebarHandle.removeEventListener('pointermove', move); this.sidebarHandle.removeEventListener('pointerup', end); this.sidebarHandle.removeEventListener('pointercancel', end); };
+			this.sidebarHandle.addEventListener('pointermove', move); this.sidebarHandle.addEventListener('pointerup', end); this.sidebarHandle.addEventListener('pointercancel', end);
 		}
 		startModalResize(event, grip) {
 			event.preventDefault(); this.root.classList.remove('ie-maximized'); grip.setPointerCapture(event.pointerId);

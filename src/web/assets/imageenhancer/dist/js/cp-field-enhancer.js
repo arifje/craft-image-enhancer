@@ -81,13 +81,30 @@
 	const FORMAT_MAX_EDGE = 8192;
 	const FORMAT_MAX_PIXELS = 24000000;
 
-	// Mirrors ReformatHelper::cropBox() (centred; the server crops around the focal point).
-	function formatCropBox(sourceWidth, sourceHeight, targetWidth, targetHeight) {
+	// Mirrors ReformatHelper::cropBox(): the largest box at the target ratio, centred on the focal point.
+	function formatCropBox(sourceWidth, sourceHeight, targetWidth, targetHeight, focalX = 0.5, focalY = 0.5) {
 		const ratio = targetWidth / targetHeight;
+		let width = sourceWidth;
+		let height = Math.max(1, Math.min(sourceHeight, Math.round(sourceWidth / ratio)));
 		if (sourceWidth / sourceHeight > ratio) {
-			return { width: Math.min(sourceWidth, Math.round(sourceHeight * ratio)), height: sourceHeight };
+			height = sourceHeight;
+			width = Math.max(1, Math.min(sourceWidth, Math.round(sourceHeight * ratio)));
 		}
-		return { width: sourceWidth, height: Math.min(sourceHeight, Math.round(sourceWidth / ratio)) };
+		const clamp = (value, max) => Math.min(Math.max(0, value), max);
+		return {
+			x: clamp(Math.round(clamp(focalX, 1) * sourceWidth - width / 2), sourceWidth - width),
+			y: clamp(Math.round(clamp(focalY, 1) * sourceHeight - height / 2), sourceHeight - height),
+			width,
+			height,
+		};
+	}
+
+	// Mirrors ReformatHelper::containRect(): the whole source, centred and scaled to fit the target.
+	function formatContainRect(sourceWidth, sourceHeight, targetWidth, targetHeight) {
+		const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+		const width = Math.max(1, Math.min(targetWidth, Math.round(sourceWidth * scale)));
+		const height = Math.max(1, Math.min(targetHeight, Math.round(sourceHeight * scale)));
+		return { x: Math.floor((targetWidth - width) / 2), y: Math.floor((targetHeight - height) / 2), width, height };
 	}
 
 	// Mirrors ReformatHelper::defaultSize(): crop never upscales; fit and AI extend contain the whole image.
@@ -737,6 +754,7 @@
 				'  <div class="image-enhancer-cp-stage">',
 				'    <div class="image-enhancer-cp-single" data-single>',
 				'      <img data-original alt="">',
+				'      <canvas class="image-enhancer-cp-format-preview" data-format-preview aria-label="Preview of the new format" hidden></canvas>',
 				'      <div class="image-enhancer-cp-manual-blur-layer" data-manual-blur-layer title="Drag around each face or area to blur" hidden></div>',
 				'    </div>',
 				'    <div class="image-enhancer-cp-compare" data-compare hidden>',
@@ -817,6 +835,7 @@
 			this.formatAiPanel = root.querySelector('[data-format-ai]');
 			this.formatPromptInput = root.querySelector('[data-format-prompt]');
 			this.formatSummary = root.querySelector('[data-format-summary]');
+			this.formatPreviewCanvas = root.querySelector('[data-format-preview]');
 			this.openVideoButton = root.querySelector('[data-open-video]');
 			this.createVideoButton = root.querySelector('[data-create-video]');
 			this.cancelVideoButton = root.querySelector('[data-cancel-video]');
@@ -1384,6 +1403,129 @@
 			}
 			this.formatWidthInput.addEventListener('input', () => this.syncFormatSize('width'));
 			this.formatHeightInput.addEventListener('input', () => this.syncFormatSize('height'));
+			this.originalImage.addEventListener('load', () => {
+				if (this.isFormatMode) {
+					this.renderFormatPreview();
+				}
+			});
+		}
+
+		formatPreviewSource() {
+			const image = this.editor?.images?.get('original');
+			if (image?.naturalWidth) {
+				return image;
+			}
+			return this.originalImage.complete && this.originalImage.naturalWidth ? this.originalImage : null;
+		}
+
+		/**
+		 * Draws the new format locally while the panel is open: the exact crop, the blurred fit, or
+		 * for AI extend the layout with the areas the provider will fill marked.
+		 */
+		renderFormatPreview() {
+			window.cancelAnimationFrame(this.formatPreviewFrame);
+			this.formatPreviewFrame = window.requestAnimationFrame(() => {
+				const canvas = this.formatPreviewCanvas;
+				const source = this.formatPreviewSource();
+				const width = Number(this.formatWidthInput.value);
+				const height = Number(this.formatHeightInput.value);
+				if (!this.isFormatMode || !source || !(width >= 1 && height >= 1)) {
+					this.showFormatPreview(false);
+					return;
+				}
+
+				const scale = Math.min(1, 1600 / Math.max(width, height));
+				const canvasWidth = Math.max(1, Math.round(width * scale));
+				const canvasHeight = Math.max(1, Math.round(height * scale));
+				canvas.width = canvasWidth;
+				canvas.height = canvasHeight;
+				const ctx = canvas.getContext('2d');
+				ctx.imageSmoothingEnabled = true;
+				ctx.imageSmoothingQuality = 'high';
+				const sourceWidth = source.naturalWidth;
+				const sourceHeight = source.naturalHeight;
+				const method = this.formatMethod;
+
+				if (method === 'crop') {
+					const focal = this.assetInfo?.focalPoint || {};
+					const box = formatCropBox(sourceWidth, sourceHeight, width, height, Number(focal.x ?? 0.5), Number(focal.y ?? 0.5));
+					ctx.drawImage(source, box.x, box.y, box.width, box.height, 0, 0, canvasWidth, canvasHeight);
+				} else {
+					this.drawBlurredCover(ctx, source, canvasWidth, canvasHeight);
+					const rect = formatContainRect(sourceWidth, sourceHeight, canvasWidth, canvasHeight);
+					ctx.drawImage(source, rect.x, rect.y, rect.width, rect.height);
+					if (method === 'ai') {
+						this.drawExtendAreas(ctx, rect, canvasWidth, canvasHeight);
+					}
+				}
+				this.showFormatPreview(true);
+			});
+		}
+
+		showFormatPreview(visible) {
+			this.formatPreviewCanvas.hidden = !visible;
+			this.originalImage.hidden = visible;
+		}
+
+		drawBlurredCover(ctx, source, width, height) {
+			// Like the server: shrink a cover crop, then scale it back up for a soft blur.
+			const small = document.createElement('canvas');
+			const longEdge = Math.max(16, Math.round(Math.max(width, height) / 16));
+			small.width = Math.max(1, Math.round(longEdge * width / Math.max(width, height)));
+			small.height = Math.max(1, Math.round(longEdge * height / Math.max(width, height)));
+			const cover = formatCropBox(source.naturalWidth, source.naturalHeight, small.width, small.height);
+			const smallCtx = small.getContext('2d');
+			smallCtx.imageSmoothingQuality = 'high';
+			smallCtx.drawImage(source, cover.x, cover.y, cover.width, cover.height, 0, 0, small.width, small.height);
+			ctx.drawImage(small, 0, 0, width, height);
+			ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+			ctx.fillRect(0, 0, width, height);
+		}
+
+		drawExtendAreas(ctx, rect, width, height) {
+			ctx.save();
+			const outside = new Path2D();
+			outside.rect(0, 0, width, height);
+			outside.rect(rect.x, rect.y, rect.width, rect.height);
+			ctx.clip(outside, 'evenodd');
+			ctx.fillStyle = 'rgba(20, 22, 28, 0.45)';
+			ctx.fillRect(0, 0, width, height);
+			ctx.strokeStyle = 'rgba(255, 196, 120, 0.35)';
+			ctx.lineWidth = Math.max(1, Math.round(Math.max(width, height) / 400));
+			const step = Math.max(10, Math.round(Math.max(width, height) / 60));
+			ctx.beginPath();
+			for (let offset = -height; offset < width; offset += step) {
+				ctx.moveTo(offset, height);
+				ctx.lineTo(offset + height, 0);
+			}
+			ctx.stroke();
+			ctx.restore();
+
+			ctx.save();
+			ctx.setLineDash([8, 6]);
+			ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+			ctx.lineWidth = Math.max(1, Math.round(Math.max(width, height) / 600));
+			ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1);
+			ctx.restore();
+
+			// Label the largest new area.
+			const areas = [
+				{ x: 0, y: 0, width: rect.x, height },
+				{ x: rect.x + rect.width, y: 0, width: width - rect.x - rect.width, height },
+				{ x: 0, y: 0, width, height: rect.y },
+				{ x: 0, y: rect.y + rect.height, width, height: height - rect.y - rect.height },
+			].sort((a, b) => b.width * b.height - a.width * a.height);
+			const area = areas[0];
+			const fontSize = Math.round(Math.min(Math.max(width, height) / 32, area.width / 9, area.height / 2.5));
+			if (fontSize >= 8) {
+				ctx.save();
+				ctx.font = `600 ${fontSize}px system-ui, sans-serif`;
+				ctx.fillStyle = 'rgba(255, 226, 180, 0.95)';
+				ctx.textAlign = 'center';
+				ctx.textBaseline = 'middle';
+				ctx.fillText('AI fills this area', area.x + area.width / 2, area.y + area.height / 2, area.width * 0.9);
+				ctx.restore();
+			}
 		}
 
 		get formatMethod() {
@@ -1447,8 +1589,11 @@
 					summary += ` The cropped area is ${box.width} × ${box.height} px, so it will be enlarged.`;
 				}
 			}
-			summary += ' The result replaces this image after you approve the preview.';
+			summary += this.formatMethod === 'ai'
+				? ' The marked area is filled by AI; you approve the result before it replaces this image.'
+				: ' The result replaces this image after you approve the preview.';
 			this.formatSummary.textContent = summary;
+			this.renderFormatPreview();
 		}
 
 		startFormatMode(preserve = false) {
@@ -1485,6 +1630,8 @@
 		hideFormatMode() {
 			this.isFormatMode = false;
 			this.formatPanel.hidden = true;
+			window.cancelAnimationFrame(this.formatPreviewFrame);
+			this.showFormatPreview(false);
 			this.providerControls.hidden = !config.providerChoiceEnabled;
 		}
 

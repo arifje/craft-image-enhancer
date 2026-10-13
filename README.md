@@ -116,7 +116,7 @@ The plugin adds a compact **Enhance** button below JPEG/PNG assets in enabled Cr
 - Draw rectangles, ellipses, and local pixelated blur regions; add text and PNG/JPEG/WebP image layers.
 - Drag layers to move them or use the inspector for exact position, size, rotation, color, and opacity. Drag the corner handle to resize; hold Shift to preserve proportions.
 - Duplicate, reorder, hide, lock, or delete layers, with undo/redo for document changes. Blur affects the image and visible layers beneath it.
-- Zoom, fit, pan, maximize, or drag the bottom-right corner to resize the modal. Keyboard shortcuts include V/H/R/O/T/B for tools, arrows to nudge (Shift for 10 pixels), and Cmd/Ctrl+Z, Shift+Z, D, and S for undo, redo, duplicate, and save.
+- Zoom, fit, pan, maximize, or drag the bottom-right corner to resize the modal. Drag the left edge of the side panel to make it wider or narrower (arrow keys work when the edge is focused; double-click resets it); the width is remembered in the browser. Keyboard shortcuts include V/H/R/O/T/B for tools, arrows to nudge (Shift for 10 pixels), and Cmd/Ctrl+Z, Shift+Z, D, and S for undo, redo, duplicate, and save.
 - **Download image** exports the current composition. **Save image** flattens it into the original JPEG/PNG format and replaces the existing Craft asset file. Asset IDs, relations, and image dimensions are preserved. Layers are temporary and are not retained after saving or closing.
 
 The **AI tools** tab retains enhancement, custom edits, face blur, drawn custom blur, and video generation. These queued tools work on the saved base image. Image operations show a before/after comparison; **Use result in editor** places the preview beneath your editable layers. Save the composition to commit it. Save an applied AI result before starting another AI operation. Video results remain download-only.
@@ -140,6 +140,8 @@ The AI action endpoints are control-panel only and require the **Use AI image to
 - **Crop** cuts the image to the new ratio around the asset's focal point. Instant and local (no AI). The suggested size keeps the cropped pixels without upscaling.
 - **Fit with blurred background** keeps the whole image and fills the new area with a blurred, enlarged copy of it. Instant and local; requires Imagick.
 - **AI extend** asks the selected provider to continue the scene into the new area, with optional instructions such as `continue the beach and the sky`. The plugin sends a canvas with the image in the centre; OpenAI also receives a mask so only the new area is painted, with an exact size for `gpt-image-2` and the closest standard size for older GPT image models. Afterwards the original's own pixels are placed back in the centre with a soft edge, so the subject stays sharp and unchanged with every provider. Requires Imagick and the provider's API key.
+
+While the panel is open, the stage shows a live preview of the new format: the exact crop around the focal point, the blurred fit, or for AI extend the layout with the areas the AI will fill marked. The AI result itself appears after the queued job finishes.
 
 The result is shown as a preview first. **Save new format** replaces the asset file (same asset ID and relations, new dimensions) and requires Craft's **Replace files** permission. Save or discard layer edits before changing the format. Formats must be 64–8192 pixels per edge, at most 24 megapixels, and between 1:4 and 4:1 (1:3 to 3:1 for AI extend). Check field requirements such as minimum width after changing the format of an existing asset.
 

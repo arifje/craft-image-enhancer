@@ -579,3 +579,15 @@
 .image-enhancer-cp-compare.is-reformat input[type="range"] {
 	visibility: hidden;
 }
+
+.image-enhancer-cp-format-preview {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.image-enhancer-cp-format-preview[hidden],
+.image-enhancer-cp-single img[hidden] {
+	display: none;
+}
