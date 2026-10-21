@@ -13,52 +13,52 @@ use Psr\Http\Message\StreamInterface;
  */
 class SizeLimitedStream implements StreamInterface
 {
-	// Traits
-	// =========================================================================
+    // Traits
+    // =========================================================================
 
-	use StreamDecoratorTrait;
+    use StreamDecoratorTrait;
 
-	// Private Properties
-	// =========================================================================
+    // Private Properties
+    // =========================================================================
 
-	/**
-	 * @var StreamInterface The decorated stream
-	 */
-	private StreamInterface $stream;
+    /**
+     * @var StreamInterface The decorated stream
+     */
+    private StreamInterface $stream;
 
-	private int $_maxBytes;
-	private int $_written = 0;
-	private bool $_exceeded = false;
+    private int $_maxBytes;
+    private int $_written = 0;
+    private bool $_exceeded = false;
 
-	// Public Methods
-	// =========================================================================
+    // Public Methods
+    // =========================================================================
 
-	public function __construct(StreamInterface $stream, int $maxBytes)
-	{
-		$this->stream = $stream;
-		$this->_maxBytes = $maxBytes;
-	}
+    public function __construct(StreamInterface $stream, int $maxBytes)
+    {
+        $this->stream = $stream;
+        $this->_maxBytes = $maxBytes;
+    }
 
-	/**
-	 * @param string $string
-	 */
-	public function write($string): int
-	{
-		$length = strlen($string);
-		if ($this->_exceeded || $this->_written + $length > $this->_maxBytes) {
-			$this->_exceeded = true;
+    /**
+     * @param string $string
+     */
+    public function write($string): int
+    {
+        $length = strlen($string);
+        if ($this->_exceeded || $this->_written + $length > $this->_maxBytes) {
+            $this->_exceeded = true;
 
-			return 0;
-		}
+            return 0;
+        }
 
-		$written = $this->stream->write($string);
-		$this->_written += $written;
+        $written = $this->stream->write($string);
+        $this->_written += $written;
 
-		return $written;
-	}
+        return $written;
+    }
 
-	public function hasExceededLimit(): bool
-	{
-		return $this->_exceeded;
-	}
+    public function hasExceededLimit(): bool
+    {
+        return $this->_exceeded;
+    }
 }

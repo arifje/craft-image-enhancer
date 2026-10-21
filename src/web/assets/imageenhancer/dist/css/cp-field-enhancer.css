@@ -1,8 +1,8 @@
 /*
  * Hand-authored, no build step. Colors use Craft CP custom properties that exist
- * in both Craft 4 and Craft 5 (--text-color, --light-text-color, --hairline-color,
+ * in Craft 5 (--text-color, --light-text-color, --hairline-color,
  * --medium-hairline-color, --error-color, --gray-050/100, --red-050, --white), with
- * the previous hex values as fallbacks. --modal-bg is Craft 5 only and falls back
+ * the previous hex values as fallbacks. --modal-bg and falls back
  * to --white. The dark image stage, white compare divider, and orange accent are
  * intentional and theme-independent.
  */

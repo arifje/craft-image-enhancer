@@ -4,7 +4,11 @@ Checks newly uploaded image assets for quality issues such as blur, noise, motio
 
 ## Requirements
 
-This plugin requires Craft CMS 4 or 5, and PHP 8.2 or later.
+Image Enhancer 3 requires Craft CMS 5.11.0 or later (within Craft 5), and PHP 8.2 or later (within PHP 8).
+
+### Upgrading from 2.x
+
+Version 3.0.0 removes Craft 4 support. Keep Image Enhancer 2.x on Craft 4. Upgrade the application to PHP 8.2+ and Craft 5.11.0+ first, then update this plugin to `^3.0`, run `php craft up`, restart queue workers, and reload the control panel. Existing settings, runtime prompt overrides, assets and relations are retained; this release adds no schema migration. The Craft minimum also avoids the older SVG Sanitizer 0.22 dependency line.
 
 You need an OpenAI API key to analyze images. AI enhancement also requires an API key for the selected enhancement provider.
 

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 // Dependency-free regression checks. Only framework/HTTP boundaries are doubled;
 // model discovery, option construction, and request validation use production code.
-namespace craft\base {
+namespace ImageEnhancerModelDoubles\craft\base {
     class Component {}
     class Model {}
     class Plugin
@@ -18,7 +18,7 @@ namespace craft\base {
     }
 }
 
-namespace craft\helpers {
+namespace ImageEnhancerModelDoubles\craft\helpers {
     class App
     {
         public static function parseEnv(string $value): string
@@ -28,18 +28,30 @@ namespace craft\helpers {
     }
 }
 
-namespace craft\web {
+namespace ImageEnhancerModelDoubles\craft\web {
     class Controller {}
 }
 
 namespace {
+    // Process-local framework boundaries; analysis continues to see the real Craft types.
+    foreach ([
+        'craft\base\Component' => \ImageEnhancerModelDoubles\craft\base\Component::class,
+        'craft\base\Model' => \ImageEnhancerModelDoubles\craft\base\Model::class,
+        'craft\base\Plugin' => \ImageEnhancerModelDoubles\craft\base\Plugin::class,
+        'craft\helpers\App' => \ImageEnhancerModelDoubles\craft\helpers\App::class,
+        'craft\web\Controller' => \ImageEnhancerModelDoubles\craft\web\Controller::class,
+        'Craft' => ImageEnhancerModelCraftDouble::class,
+    ] as $contract => $double) {
+        class_alias($double, $contract);
+    }
+
     use arjanbrinkman\craftimageenhancer\controllers\ArticleImageController;
     use arjanbrinkman\craftimageenhancer\ImageEnhancer;
     use arjanbrinkman\craftimageenhancer\models\Settings;
     use arjanbrinkman\craftimageenhancer\services\AiImageEnhancementService;
     use arjanbrinkman\craftimageenhancer\services\OpenAiModelService;
 
-    class Craft
+    class ImageEnhancerModelCraftDouble
     {
         public static $app;
         public static $client;
@@ -115,22 +127,23 @@ namespace {
         public array $body = [];
         public function getBodyParam(string $name): mixed { return $this->body[$name] ?? null; }
     };
-    Craft::$app = new class($cache, $request) {
+    ImageEnhancerModelCraftDouble::$app = new class($cache, $request) {
         public function __construct(private object $cache, private object $request) {}
         public function getCache(): object { return $this->cache; }
         public function getRequest(): object { return $this->request; }
     };
-    Craft::$client = $client;
+    ImageEnhancerModelCraftDouble::$client = $client;
     $settings = new Settings();
     $service = new OpenAiModelService();
     $plugin = new class extends ImageEnhancer {
+        public function __construct() {}
         public Settings $settings;
         public OpenAiModelService $openAiModels;
         public function getSettings(): Settings { return $this->settings; }
     };
     $plugin->settings = $settings;
     $plugin->openAiModels = $service;
-    \craft\base\Plugin::$instance = $plugin;
+    \ImageEnhancerModelDoubles\craft\base\Plugin::$instance = $plugin;
 
     $values = array_column($plugin->getImageEnhancementModelOptions(), 'value');
     check(in_array('gpt-image-2.5-sunburst', $values, true), 'Missing Sunburst fallback.');
@@ -176,7 +189,7 @@ namespace {
     $settings->imageEnhancementProvider = Settings::IMAGE_PROVIDER_FRONTEND;
     $request->body = ['imageEnhancementProvider' => 'openai', 'imageEnhancementModel' => 'gpt-image-2.5-sunburst'];
     $validate = new ReflectionMethod(ArticleImageController::class, 'getProviderOptionsForRequest');
-    $controller = new ArticleImageController();
+    $controller = (new ReflectionClass(ArticleImageController::class))->newInstanceWithoutConstructor();
     $providerOptions = $validate->invoke($controller, $settings);
     check(is_array($providerOptions), 'Discovered models must pass frontend request validation.');
     check((new AiImageEnhancementService())->getProviderModel($settings, $providerOptions) === 'gpt-image-2.5-sunburst', 'Do not rewrite the selected model.');
@@ -203,7 +216,7 @@ namespace {
     check(in_array('gpt-image-3', $values, true) && in_array('gpt-image-2.5-sunburst', $values, true), 'Outages must preserve selection and provide fallbacks.');
     $plugin->getImageEnhancementModelOptions();
     check(count($client->requests) === 4, 'Cache failures to prevent repeated slow requests.');
-    check(!str_contains(implode(' ', Craft::$warnings), 'Sensitive'), 'Do not log exception details.');
+    check(!str_contains(implode(' ', ImageEnhancerModelCraftDouble::$warnings), 'Sensitive'), 'Do not log exception details.');
 
     $client->fail = false;
     foreach (['invalid json', '{"data":null}', '{"data":[]}', '{"data":[{"id":"gpt-5.5"}]}'] as $body) {

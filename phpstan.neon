@@ -3,5 +3,9 @@ includes:
 
 parameters:
     level: 4
+    bootstrapFiles:
+        - tests/analysis-bootstrap.php
     paths:
         - src
+        - tests
+        - ecs.php

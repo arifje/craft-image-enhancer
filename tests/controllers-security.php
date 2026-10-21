@@ -4,17 +4,27 @@ declare(strict_types=1);
 
 // Dependency-free regression checks for the pure authorization/scope helpers added in the
 // audit fixes. Only framework base classes are doubled; the helpers run as production code.
-namespace craft\base {
+namespace ImageEnhancerSecurityDoubles\craft\base {
     class Component {}
     class Model {}
     class Plugin {}
 }
 
-namespace craft\web {
+namespace ImageEnhancerSecurityDoubles\craft\web {
     class Controller {}
 }
 
 namespace {
+    // Process-local framework boundaries; analysis continues to see the real Craft types.
+    foreach ([
+        'craft\base\Component' => \ImageEnhancerSecurityDoubles\craft\base\Component::class,
+        'craft\base\Model' => \ImageEnhancerSecurityDoubles\craft\base\Model::class,
+        'craft\base\Plugin' => \ImageEnhancerSecurityDoubles\craft\base\Plugin::class,
+        'craft\web\Controller' => \ImageEnhancerSecurityDoubles\craft\web\Controller::class,
+    ] as $contract => $double) {
+        class_alias($double, $contract);
+    }
+
     use arjanbrinkman\craftimageenhancer\controllers\ArticleImageController;
     use arjanbrinkman\craftimageenhancer\controllers\NotificationsController;
     use arjanbrinkman\craftimageenhancer\ImageEnhancer;
@@ -31,6 +41,11 @@ namespace {
             throw new RuntimeException($message);
         }
         $checks++;
+    }
+
+    function checkSame(mixed $actual, mixed $expected, string $message): void
+    {
+        check($actual === $expected, $message);
     }
 
     function helper(string $class, string $method): Closure
@@ -93,7 +108,7 @@ namespace {
 
         return 'value';
     });
-    check($result === 'value', 'Callback result must be returned.');
+    checkSame($result, 'value', 'Callback result must be returned.');
     check(ImageEnhancer::isAssetQueueSuppressed() === false, 'Suppression must end with the outer scope.');
     try {
         ImageEnhancer::suppressAssetQueue(static fn() => throw new LogicException('boom'));

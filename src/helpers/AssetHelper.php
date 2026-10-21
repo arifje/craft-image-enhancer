@@ -12,97 +12,97 @@ use craft\elements\Asset;
  */
 class AssetHelper
 {
-	// Const Properties
-	// =========================================================================
+    // Const Properties
+    // =========================================================================
 
-	public const ENHANCEMENT_PREVIEW_MARKER = '-enhancement-preview-';
-	public const FACE_BLUR_PREVIEW_MARKER = '-face-blur-preview-';
+    public const ENHANCEMENT_PREVIEW_MARKER = '-enhancement-preview-';
+    public const FACE_BLUR_PREVIEW_MARKER = '-face-blur-preview-';
 
-	// Public Methods
-	// =========================================================================
+    // Public Methods
+    // =========================================================================
 
-	/** Rechecks the initiating editor's access when a queued operation starts. */
-	public static function requireJobPermission(Asset $asset, ?int $userId, ?string $repairToken = null): void
-	{
-		$user = $userId ? Craft::$app->getUsers()->getUserById($userId) : null;
-		if (
-			!$user ||
-			$user->getStatus() !== \craft\elements\User::STATUS_ACTIVE ||
-			!$user->can(ImageEnhancer::PERMISSION_USE_AI_TOOLS) ||
-			!$asset->canView($user) ||
-			(!$asset->canSave($user) && (
-				!$repairToken ||
-				ImageEnhancer::getInstance()->assetRequirements->getAuthorizedRepairContext($repairToken, (int) $user->id, (int) $asset->id, $user) === null
-			))
-		) {
-			throw new \RuntimeException('You no longer have permission to edit this image.');
-		}
-	}
+    /** Rechecks the initiating editor's access when a queued operation starts. */
+    public static function requireJobPermission(Asset $asset, ?int $userId, ?string $repairToken = null): void
+    {
+        $user = $userId ? Craft::$app->getUsers()->getUserById($userId) : null;
+        if (
+            !$user ||
+            $user->getStatus() !== \craft\elements\User::STATUS_ACTIVE ||
+            !$user->can(ImageEnhancer::PERMISSION_USE_AI_TOOLS) ||
+            !$asset->canView($user) ||
+            (!$asset->canSave($user) && (
+                !$repairToken ||
+                ImageEnhancer::getInstance()->assetRequirements->getAuthorizedRepairContext($repairToken, (int) $user->id, (int) $asset->id, $user) === null
+            ))
+        ) {
+            throw new \RuntimeException('You no longer have permission to edit this image.');
+        }
+    }
 
-	/**
-	 * Creates a new asset next to the original from a local file. Returns null (and logs the
-	 * validation errors) when the element could not be saved.
-	 *
-	 * @throws \Throwable from the element save
-	 */
-	public static function createAssetFromFile(Asset $originalAsset, string $path, string $filename, ?int $uploaderId): ?Asset
-	{
-		$asset = new Asset();
-		$asset->tempFilePath = $path;
-		$asset->filename = $filename;
-		$asset->newFolderId = $originalAsset->folderId;
-		$asset->volumeId = $originalAsset->volumeId;
-		$asset->uploaderId = $uploaderId;
-		$asset->avoidFilenameConflicts = true;
-		$asset->setScenario(Asset::SCENARIO_CREATE);
+    /**
+     * Creates a new asset next to the original from a local file. Returns null (and logs the
+     * validation errors) when the element could not be saved.
+     *
+     * @throws \Throwable from the element save
+     */
+    public static function createAssetFromFile(Asset $originalAsset, string $path, string $filename, ?int $uploaderId): ?Asset
+    {
+        $asset = new Asset();
+        $asset->tempFilePath = $path;
+        $asset->filename = $filename;
+        $asset->newFolderId = $originalAsset->folderId;
+        $asset->volumeId = $originalAsset->volumeId;
+        $asset->uploaderId = $uploaderId;
+        $asset->avoidFilenameConflicts = true;
+        $asset->setScenario(Asset::SCENARIO_CREATE);
 
-		$saved = ImageEnhancer::suppressAssetQueue(static fn(): bool => Craft::$app->getElements()->saveElement($asset));
-		if (!$saved) {
-			Craft::warning('ImageEnhancer: Could not save generated asset: ' . json_encode($asset->getErrors()), __METHOD__);
+        $saved = ImageEnhancer::suppressAssetQueue(static fn(): bool => Craft::$app->getElements()->saveElement($asset));
+        if (!$saved) {
+            Craft::warning('ImageEnhancer: Could not save generated asset: ' . json_encode($asset->getErrors()), __METHOD__);
 
-			return null;
-		}
+            return null;
+        }
 
-		return $asset;
-	}
+        return $asset;
+    }
 
-	/**
-	 * Hard-deletes a generated asset (preview), so its file is removed immediately.
-	 */
-	public static function deleteGeneratedAsset(Asset $asset): void
-	{
-		try {
-			ImageEnhancer::suppressAssetQueue(static fn(): bool => Craft::$app->getElements()->deleteElement($asset, true));
-		} catch (\Throwable $e) {
-			Craft::warning('ImageEnhancer: Could not delete generated asset ' . $asset->id . ' (' . get_class($e) . ').', __METHOD__);
-		}
-	}
+    /**
+     * Hard-deletes a generated asset (preview), so its file is removed immediately.
+     */
+    public static function deleteGeneratedAsset(Asset $asset): void
+    {
+        try {
+            ImageEnhancer::suppressAssetQueue(static fn(): bool => Craft::$app->getElements()->deleteElement($asset, true));
+        } catch (\Throwable $e) {
+            Craft::warning('ImageEnhancer: Could not delete generated asset ' . $asset->id . ' (' . get_class($e) . ').', __METHOD__);
+        }
+    }
 
-	/**
-	 * Returns a sanitized base filename (without extension) for derived files.
-	 */
-	public static function getSafeBaseName(Asset $asset): string
-	{
-		$baseName = pathinfo((string) $asset->filename, PATHINFO_FILENAME);
+    /**
+     * Returns a sanitized base filename (without extension) for derived files.
+     */
+    public static function getSafeBaseName(Asset $asset): string
+    {
+        $baseName = pathinfo((string) $asset->filename, PATHINFO_FILENAME);
 
-		return preg_replace('/[^A-Za-z0-9._-]+/', '-', $baseName) ?: 'image';
-	}
+        return preg_replace('/[^A-Za-z0-9._-]+/', '-', $baseName) ?: 'image';
+    }
 
-	/**
-	 * Returns a timestamped preview filename using the given marker.
-	 */
-	public static function getPreviewFilename(Asset $asset, string $marker): string
-	{
-		$extension = FileHelper::sanitizeExtension((string) pathinfo((string) $asset->filename, PATHINFO_EXTENSION));
+    /**
+     * Returns a timestamped preview filename using the given marker.
+     */
+    public static function getPreviewFilename(Asset $asset, string $marker): string
+    {
+        $extension = FileHelper::sanitizeExtension((string) pathinfo((string) $asset->filename, PATHINFO_EXTENSION));
 
-		return self::getSafeBaseName($asset) . $marker . date('YmdHis') . ($extension !== '' ? '.' . $extension : '');
-	}
+        return self::getSafeBaseName($asset) . $marker . date('YmdHis') . ($extension !== '' ? '.' . $extension : '');
+    }
 
-	/**
-	 * Whether a filename looks like a generated preview (marker followed by a 14-digit timestamp).
-	 */
-	public static function isPreviewFilename(string $filename): bool
-	{
-		return preg_match('/(?:-enhancement-preview-|-face-blur-preview-)\d{14}(?:[-_]\d+)?(?:\.[A-Za-z0-9]+)?$/', $filename) === 1;
-	}
+    /**
+     * Whether a filename looks like a generated preview (marker followed by a 14-digit timestamp).
+     */
+    public static function isPreviewFilename(string $filename): bool
+    {
+        return preg_match('/(?:-enhancement-preview-|-face-blur-preview-)\d{14}(?:[-_]\d+)?(?:\.[A-Za-z0-9]+)?$/', $filename) === 1;
+    }
 }

@@ -3,11 +3,18 @@
 declare(strict_types=1);
 
 // No network or application: exercise the production response parser directly.
-namespace craft\base {
+namespace ImageEnhancerResponseDoubles\craft\base {
     class Component {}
 }
 
 namespace {
+    // Process-local framework boundaries; analysis continues to see the real Craft types.
+    foreach ([
+        'craft\base\Component' => \ImageEnhancerResponseDoubles\craft\base\Component::class,
+    ] as $contract => $double) {
+        class_alias($double, $contract);
+    }
+
     require __DIR__ . '/../src/services/AiImageEnhancementService.php';
     require __DIR__ . '/../src/helpers/JobStatus.php';
     require __DIR__ . '/../src/services/AiVideoGenerationService.php';

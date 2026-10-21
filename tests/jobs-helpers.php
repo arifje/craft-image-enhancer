@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 // Dependency-free regression checks for the job/service helpers. Craft/Yii classes are
 // stubbed; Guzzle and PSR-7 are the real vendor packages so HTTP behaviour is realistic.
-namespace craft\base {
+namespace ImageEnhancerJobDoubles\craft\base {
     class Model {}
 }
 
-namespace craft\helpers {
+namespace ImageEnhancerJobDoubles\craft\helpers {
     class App
     {
         public static function parseEnv(string $value): string
@@ -18,11 +18,11 @@ namespace craft\helpers {
     }
 }
 
-namespace yii\base {
+namespace ImageEnhancerJobDoubles\yii\base {
     class Component {}
 }
 
-namespace craft\elements {
+namespace ImageEnhancerJobDoubles\craft\elements {
     class Asset
     {
         public ?int $width = null;
@@ -31,7 +31,7 @@ namespace craft\elements {
     }
 }
 
-namespace craft\elements\conditions\assets {
+namespace ImageEnhancerJobDoubles\craft\elements\conditions\assets {
     class FileSizeConditionRule
     {
         public const UNIT_B = 'B';
@@ -42,6 +42,18 @@ namespace craft\elements\conditions\assets {
 }
 
 namespace {
+    // Process-local framework boundaries; analysis continues to see the real Craft types.
+    foreach ([
+        'craft\base\Model' => \ImageEnhancerJobDoubles\craft\base\Model::class,
+        'craft\helpers\App' => \ImageEnhancerJobDoubles\craft\helpers\App::class,
+        'yii\base\Component' => \ImageEnhancerJobDoubles\yii\base\Component::class,
+        'craft\elements\Asset' => \ImageEnhancerJobDoubles\craft\elements\Asset::class,
+        'craft\elements\conditions\assets\FileSizeConditionRule' => \ImageEnhancerJobDoubles\craft\elements\conditions\assets\FileSizeConditionRule::class,
+        'Craft' => ImageEnhancerJobCraftDouble::class,
+    ] as $contract => $double) {
+        class_alias($double, $contract);
+    }
+
     use arjanbrinkman\craftimageenhancer\helpers\AnalysisResultHelper;
     use arjanbrinkman\craftimageenhancer\helpers\AssetHelper;
     use arjanbrinkman\craftimageenhancer\helpers\ChatModelHelper;
@@ -49,7 +61,7 @@ namespace {
     use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
     use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
     use arjanbrinkman\craftimageenhancer\services\AssetRequirementService;
-    use craft\elements\Asset;
+    use ImageEnhancerJobDoubles\craft\elements\Asset;
     use GuzzleHttp\ClientInterface;
     use GuzzleHttp\Exception\ClientException;
     use GuzzleHttp\Exception\ConnectException;
@@ -81,7 +93,7 @@ namespace {
         }
     });
 
-    class Craft
+    class ImageEnhancerJobCraftDouble
     {
         public static function warning(string $message, string $method): void {}
         public static function info(string $message, string $method): void {}
@@ -160,6 +172,8 @@ namespace {
         /** @var callable */
         public $handler;
 
+        public function getRequestCount(): int { return count($this->requests); }
+
         public function send(RequestInterface $request, array $options = []): ResponseInterface { throw new LogicException(); }
         public function sendAsync(RequestInterface $request, array $options = []): PromiseInterface { throw new LogicException(); }
         public function requestAsync(string $method, $uri, array $options = []): PromiseInterface { throw new LogicException(); }
@@ -178,7 +192,7 @@ namespace {
         return new Response(200, [], '{"choices":[{"message":{"content":"{}"}}]}');
     };
     $result = ChatModelHelper::createCompletion($fakeClient, 'key', ChatModelHelper::buildPayload('gpt-5.5', [], 500));
-    check(count($fakeClient->requests) === 2, 'Retry once when reasoning_effort is rejected.');
+    check($fakeClient->getRequestCount() === 2, 'Retry once when reasoning_effort is rejected.');
     check(isset($fakeClient->requests[0]['options']['json']['reasoning_effort']) && !isset($fakeClient->requests[1]['options']['json']['reasoning_effort']), 'Retry drops reasoning_effort.');
     check($fakeClient->requests[0]['options']['timeout'] === HttpHelper::CHAT_TIMEOUT && isset($fakeClient->requests[0]['options']['connect_timeout']), 'Chat requests are time-bounded.');
     check(isset($result['choices']), 'Return decoded completion.');
@@ -188,7 +202,7 @@ namespace {
         throw new ClientException('bad', new Request('POST', $url), new Response(400, [], '{"error":{"message":"Invalid image"}}'));
     };
     check(throws(static fn() => ChatModelHelper::createCompletion($fakeClient, 'key', ChatModelHelper::buildPayload('gpt-5.5', [], 500))) instanceof ClientException, 'Other 400 errors are not retried.');
-    check(count($fakeClient->requests) === 1, 'Other 400 errors make one request.');
+    check($fakeClient->getRequestCount() === 1, 'Other 400 errors make one request.');
 
     // ---------------------------------------------------------------------
     // Face boxes (I9)
@@ -281,7 +295,7 @@ namespace {
     $fakeClient->requests = [];
     $fakeClient->handler = static fn(): ResponseInterface => new Response(302, ['Location' => 'https://evil.example.com/a.png']);
     $error = throws(static fn() => HttpHelper::downloadToFile($fakeClient, 'https://imgen.x.ai/a.png', $tmp, 1000, [], [HttpHelper::class, 'isAllowedXaiUrl']));
-    check($error instanceof RuntimeException && count($fakeClient->requests) === 1, 'Redirects to other hosts are refused before requesting them.');
+    check($error instanceof RuntimeException && $fakeClient->getRequestCount() === 1, 'Redirects to other hosts are refused before requesting them.');
     check(!file_exists($tmp), 'Failed downloads leave no file behind.');
 
     $fakeClient->handler = static fn(): ResponseInterface => new Response(301, ['Location' => 'http://imgen.x.ai/a.png']);

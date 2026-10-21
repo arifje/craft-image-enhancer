@@ -5,12 +5,12 @@ namespace arjanbrinkman\craftimageenhancer\services;
 use Craft;
 use craft\base\ElementInterface;
 use craft\elements\Asset;
-use craft\elements\User;
 use craft\elements\conditions\assets\FileSizeConditionRule;
 use craft\elements\conditions\assets\HeightConditionRule;
 use craft\elements\conditions\assets\WidthConditionRule;
 use craft\elements\conditions\ElementCondition;
 use craft\elements\conditions\ElementConditionRuleInterface;
+use craft\elements\User;
 use craft\fields\Assets as AssetsField;
 use yii\base\Component;
 

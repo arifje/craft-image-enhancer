@@ -2,14 +2,15 @@
   "name": "arjan-brinkman/craft-image-enhancer",
   "description": "Checks, enhances, and anonymizes image assets with AI and local image tooling.",
   "type": "craft-plugin",
-  "version": "2.2.1",
+  "version": "3.0.0",
   "require": {
-    "php": ">=8.2",
-    "craftcms/cms": "^4.0.0|^5.0.0"
+    "php": "^8.2",
+    "craftcms/cms": "^5.11.0"
   },
   "require-dev": {
     "craftcms/ecs": "dev-main",
-    "craftcms/phpstan": "dev-main"
+    "craftcms/phpstan": "dev-main",
+    "phpstan/phpstan": "^2.1"
   },
   "autoload": {
     "psr-4": {
@@ -26,7 +27,22 @@
   "scripts": {
     "check-cs": "ecs check --ansi",
     "fix-cs": "ecs check --ansi --fix",
-    "phpstan": "phpstan --memory-limit=1G"
+    "phpstan": "phpstan analyse --no-progress --debug --memory-limit=1G",
+    "test": [
+      "@php tests/controllers-security.php",
+      "@php tests/editor-images.php",
+      "@php tests/reformat-geometry.php",
+      "@php tests/openai-models.php",
+      "@php tests/settings-validation.php",
+      "@php tests/jobs-helpers.php",
+      "@php tests/provider-response-shapes.php",
+      "@php tests/craft5-contract.php"
+    ],
+    "check": [
+      "@phpstan",
+      "@check-cs",
+      "@test"
+    ]
   },
   "config": {
     "sort-packages": true,

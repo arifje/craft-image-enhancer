@@ -55,6 +55,24 @@ const disposable=await upload(writer);equal((await action(writer,'upload-assista
 equal((await action(writer,'upload-assistant/discard',{repairToken:disposable.body.repairToken})).body.discarded,true,'Repeated discard is harmless');
 equal((await upload(reader)).status,403,'Read-only volume role cannot upload');
 }finally{execFileSync('php',[root+'/conditions.php','off']);}
+// Exercise the actual upload-assistant UI and the Craft 5 replacement renderer.
+execFileSync('php',[root+'/conditions.php','on']);
+try{
+await writer.goto(base+entryPath);
+await writer.evaluate(()=>{const element=document.querySelector('.elementselect .element[data-kind="image"]');const input=jQuery(element).closest('.elementselect').data('elementSelect');input.removeElement(jQuery(element));});
+await writer.waitForFunction(()=>!document.querySelector('.elementselect .element[data-kind="image"]'));
+const uiUpload=writer.waitForResponse(r=>decodeURIComponent(r.url()).includes('upload-assistant/upload')&&r.request().method()==='POST');
+await writer.locator('input[type="file"]').first().setInputFiles({name:'native-field-upload.jpg',mimeType:'image/jpeg',buffer:fs.readFileSync(root+'/site/private-images/audit-source.jpg')});
+const uiUploadResponse=await(await uiUpload).json();equal(uiUploadResponse.needsRepair,true,'Native field upload enters requirement assistant');
+await writer.locator('[data-local-repair]').waitFor({state:'visible'});
+const rendered=writer.waitForResponse(r=>decodeURIComponent(r.url()).includes('app/render-elements')&&r.request().method()==='POST');
+await writer.locator('[data-local-repair]').click();equal((await rendered).status(),200,'Native upload selects via Craft 5 app/render-elements');
+await writer.waitForFunction(()=>!document.querySelector('.image-enhancer-cp-modal'));
+equal(await writer.locator('.elementselect .element[data-kind="image"]').count(),1,'Repaired upload is selected in native field');
+const selected=await writer.locator('.elementselect .element[data-kind="image"]').first().getAttribute('data-id');
+await writer.getByRole('button',{name:'Save',exact:true}).click();await writer.waitForTimeout(500);await writer.goto(base+entryPath);
+equal(await writer.locator('.elementselect .element[data-kind="image"]').first().getAttribute('data-id'),selected,'Native upload relation survives entry Save/reload');
+}finally{execFileSync('php',[root+'/conditions.php','off']);execFileSync('php',['/tmp/image-enhancer-craft5-20261021/restore-relation.php']);}
 equal((await admin.goto(base+'/admin/settings/plugins/craft-image-enhancer')).status(),200,'Native settings render');await admin.screenshot({path:root+'/native-settings.png',fullPage:true});
 equal(errors.length,0,'No browser JavaScript errors');fs.writeFileSync(root+'/browser-errors.json',JSON.stringify(errors));console.log('Passed '+checks+' native browser/HTTP checks');
 }catch(e){for(const[role,p]of Object.entries(pages)){fs.writeFileSync(root+'/failure-'+role+'.html',await p.content());await p.screenshot({path:root+'/failure-'+role+'.png',fullPage:true}).catch(()=>{});}console.error(errors);throw e;}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

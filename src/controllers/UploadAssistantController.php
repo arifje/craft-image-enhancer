@@ -449,7 +449,7 @@ class UploadAssistantController extends Controller
 
         $allowedExtensions = Craft::$app->getConfig()->getGeneral()->allowedFileExtensions;
         $extension = strtolower(pathinfo($uploadedFile->name, PATHINFO_EXTENSION));
-        if (is_array($allowedExtensions) && !in_array($extension, $allowedExtensions, true)) {
+        if (!in_array($extension, $allowedExtensions, true)) {
             throw new AssetDisallowedExtensionException(Craft::t('app', '"{extension}" is not an allowed file extension.', [
                 'extension' => $extension,
             ]));

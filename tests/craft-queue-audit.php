@@ -16,6 +16,13 @@ $f=json_decode(file_get_contents($root.'/fixture.json'),true,512,JSON_THROW_ON_E
 $assert=static function($ok,$message)use(&$checks){if(!$ok)throw new RuntimeException($message);$checks++;echo "PASS: $message\n";};
 $plugin=ImageEnhancer::getInstance();$asset=$app->getAssets()->getAssetById($f['assetId']);
 $assert((new ReflectionClass($plugin))->getFileName()===$root.'/plugin/src/ImageEnhancer.php','Exact Documents source loaded');
+foreach ([1,2,3,4,5,6,7,8] as $orientation) {
+ $image=new Imagick();$image->newImage(30,10,new ImagickPixel('blue'));$image->setImageOrientation($orientation);
+ \arjanbrinkman\craftimageenhancer\helpers\ImageHelper::autoOrient($image);
+ $swapped=$orientation>=5;
+ $assert($image->getImageWidth()===($swapped?10:30)&&$image->getImageHeight()===($swapped?30:10)&&$image->getImageOrientation()===Imagick::ORIENTATION_TOPLEFT,'Native EXIF orientation '.$orientation.' normalizes dimensions and tag');
+ $image->clear();
+}
 $run=static function($class,$props=[],$mode='success',$cancel=false)use($app,$f){
  $GLOBALS['ieAuditMode']=$mode;$token=bin2hex(random_bytes(16));$GLOBALS['ieAuditToken']=$token;$GLOBALS['ieAuditAssetId']=$f['assetId'];
  JobStatus::merge($token,$f['assetId'],['token'=>$token,'assetId'=>$f['assetId'],'userId'=>$f['users']['writer'],'status'=>$cancel?'canceled':'queued']);

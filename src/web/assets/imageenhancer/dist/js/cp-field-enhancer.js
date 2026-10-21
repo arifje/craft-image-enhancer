@@ -12,7 +12,6 @@
 	'use strict';
 
 	const defaults = {
-		craftMajorVersion: 4,
 		uploadRequirementAssistantEnabled: false,
 		providerChoiceEnabled: false,
 		imageEnhancementProvider: 'openai',
@@ -2676,7 +2675,7 @@
 				throw new Error('Craft action requests are unavailable.');
 			}
 
-			// Multipart uploads must carry CSRF explicitly on both Craft 4 and 5.
+			// Multipart uploads must carry CSRF explicitly.
 			if (payload instanceof FormData && Craft.csrfTokenName && Craft.csrfTokenValue) {
 				payload.set(Craft.csrfTokenName, Craft.csrfTokenValue);
 			}
@@ -2859,23 +2858,6 @@
 		}
 
 		const viewMode = input.settings.viewMode;
-		const craftMajorVersion = Number.parseInt(String(config.craftMajorVersion || 4), 10);
-		if (craftMajorVersion === 4) {
-			const response = await Craft.sendActionRequest('POST', 'elements/get-element-html', {
-				data: {
-					elementId: assetId,
-					siteId: input.settings.criteria?.siteId,
-					thumbSize: viewMode,
-				},
-			});
-			const element = window.jQuery(response.data.html);
-			await Craft.appendHeadHtml(response.data.headHtml);
-			input.selectUploadedFile(Craft.getElementInfo(element));
-			input.$container.trigger('change');
-			Craft.cp?.setEdited?.(true);
-			scheduleScanBurst();
-			return;
-		}
 
 		const response = await Craft.sendActionRequest('POST', 'app/render-elements', {
 			data: {

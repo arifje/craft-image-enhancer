@@ -18,197 +18,197 @@ use yii\queue\RetryableJobInterface;
 
 class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 {
-	/**
-	 * Google: generation request (900s) + polling (capped at 900s) + download (300s).
-	 */
-	private const TTR = 2400;
+    /**
+     * Google: generation request (900s) + polling (capped at 900s) + download (300s).
+     */
+    private const TTR = 2400;
 
-	public int $assetId;
-	public ?int $userId = null;
-	public string $token;
-	public string $videoPrompt = '';
-	public string $videoProvider = AiVideoGenerationService::PROVIDER_GOOGLE;
-	public string $videoModel = AiVideoGenerationService::GOOGLE_MODEL_GEMINI_OMNI_FLASH;
+    public int $assetId;
+    public ?int $userId = null;
+    public string $token;
+    public string $videoPrompt = '';
+    public string $videoProvider = AiVideoGenerationService::PROVIDER_GOOGLE;
+    public string $videoModel = AiVideoGenerationService::GOOGLE_MODEL_GEMINI_OMNI_FLASH;
 
-	public function execute($queue): void
-	{
-		$videoPath = null;
-		$localPath = null;
-		$this->updateStatus('running', 0.05, 'Loading source image');
-		$this->setProgress($queue, 0.05, 'Loading source image');
+    public function execute($queue): void
+    {
+        $videoPath = null;
+        $localPath = null;
+        $this->updateStatus('running', 0.05, 'Loading source image');
+        $this->setProgress($queue, 0.05, 'Loading source image');
 
-		try {
-			if ($this->isCanceled()) {
-				$this->finishCanceled($queue);
-				return;
-			}
+        try {
+            if ($this->isCanceled()) {
+                $this->finishCanceled($queue);
+                return;
+            }
 
-			$asset = Craft::$app->getAssets()->getAssetById($this->assetId);
-			if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
-				throw new \RuntimeException('Asset not found or unsupported.');
-			}
+            $asset = Craft::$app->getAssets()->getAssetById($this->assetId);
+            if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
+                throw new \RuntimeException('Asset not found or unsupported.');
+            }
 
-			AssetHelper::requireJobPermission($asset, $this->userId);
+            AssetHelper::requireJobPermission($asset, $this->userId);
 
-			$localPath = FileHelper::copyAssetToTemp($asset);
+            $localPath = FileHelper::copyAssetToTemp($asset);
 
-			$service = ImageEnhancer::getInstance()->aiVideoGeneration;
-			$videoPath = $service->createVideoToTempFile(
-				Craft::createGuzzleClient(),
-				ImageEnhancer::getInstance()->getSettings(),
-				$asset,
-				$localPath,
-				$this->videoPrompt,
-				$this->videoProvider,
-				$this->videoModel,
-				function(float $progress, string $label) use ($queue): void {
-					if ($this->isCanceled()) {
-						return;
-					}
+            $service = ImageEnhancer::getInstance()->aiVideoGeneration;
+            $videoPath = $service->createVideoToTempFile(
+                Craft::createGuzzleClient(),
+                ImageEnhancer::getInstance()->getSettings(),
+                $asset,
+                $localPath,
+                $this->videoPrompt,
+                $this->videoProvider,
+                $this->videoModel,
+                function(float $progress, string $label) use ($queue): void {
+                    if ($this->isCanceled()) {
+                        return;
+                    }
 
-					$this->updateStatus('running', $progress, $label);
-					$this->setProgress($queue, $progress, $label);
-				},
-				fn(): bool => $this->isCanceled(),
-			);
+                    $this->updateStatus('running', $progress, $label);
+                    $this->setProgress($queue, $progress, $label);
+                },
+                fn(): bool => $this->isCanceled(),
+            );
 
-			if ($this->isCanceled()) {
-				$service->deleteVideo($videoPath);
-				$this->finishCanceled($queue);
-				return;
-			}
+            if ($this->isCanceled()) {
+                $service->deleteVideo($videoPath);
+                $this->finishCanceled($queue);
+                return;
+            }
 
-			$this->updateStatus('complete', 1, 'Video ready to download', [
-				'videoPath' => $videoPath,
-				'videoFilename' => $service->getDownloadFilename($asset),
-				'videoProvider' => $this->videoProvider,
-				'videoModel' => $this->videoModel,
-			]);
+            $this->updateStatus('complete', 1, 'Video ready to download', [
+                'videoPath' => $videoPath,
+                'videoFilename' => $service->getDownloadFilename($asset),
+                'videoProvider' => $this->videoProvider,
+                'videoModel' => $this->videoModel,
+            ]);
 
-			// A cancel that raced the "complete" write must not leave the video behind.
-			if ($this->isCanceled()) {
-				$service->deleteVideo($videoPath);
-				$this->finishCanceled($queue);
-				return;
-			}
+            // A cancel that raced the "complete" write must not leave the video behind.
+            if ($this->isCanceled()) {
+                $service->deleteVideo($videoPath);
+                $this->finishCanceled($queue);
+                return;
+            }
 
-			$this->setProgress($queue, 1, 'Video ready to download');
-		} catch (\Throwable $e) {
-			if ($videoPath) {
-				ImageEnhancer::getInstance()->aiVideoGeneration->deleteVideo($videoPath);
-			}
+            $this->setProgress($queue, 1, 'Video ready to download');
+        } catch (\Throwable $e) {
+            if ($videoPath) {
+                ImageEnhancer::getInstance()->aiVideoGeneration->deleteVideo($videoPath);
+            }
 
-			if ($this->isCanceled()) {
-				$this->finishCanceled($queue);
-				return;
-			}
+            if ($this->isCanceled()) {
+                $this->finishCanceled($queue);
+                return;
+            }
 
-			$this->updateStatus('failed', 1, 'Video generation failed', [
-				'message' => HttpHelper::describeForUser($e),
-			]);
-			$this->setProgress($queue, 1, 'Video generation failed');
-			Craft::error('ImageEnhancer: Article image video queue job failed: ' . HttpHelper::describe($e) . ' ' . HttpHelper::describeForUser($e), __METHOD__);
+            $this->updateStatus('failed', 1, 'Video generation failed', [
+                'message' => HttpHelper::describeForUser($e),
+            ]);
+            $this->setProgress($queue, 1, 'Video generation failed');
+            Craft::error('ImageEnhancer: Article image video queue job failed: ' . HttpHelper::describe($e) . ' ' . HttpHelper::describeForUser($e), __METHOD__);
 
-			if ($e instanceof \Error) {
-				throw $e;
-			}
-		} finally {
-			FileHelper::delete($localPath);
-		}
-	}
+            if ($e instanceof \Error) {
+                throw $e;
+            }
+        } finally {
+            FileHelper::delete($localPath);
+        }
+    }
 
-	public function getTtr(): int
-	{
-		return self::TTR;
-	}
+    public function getTtr(): int
+    {
+        return self::TTR;
+    }
 
-	public function canRetry($attempt, $error): bool
-	{
-		return false;
-	}
+    public function canRetry($attempt, $error): bool
+    {
+        return false;
+    }
 
-	private function isSupportedImageAsset(Asset $asset): bool
-	{
-		return $asset->kind === Asset::KIND_IMAGE &&
-			in_array($asset->mimeType, ['image/jpeg', 'image/jpg', 'image/png'], true);
-	}
+    private function isSupportedImageAsset(Asset $asset): bool
+    {
+        return $asset->kind === Asset::KIND_IMAGE &&
+            in_array($asset->mimeType, ['image/jpeg', 'image/jpg', 'image/png'], true);
+    }
 
-	private function updateStatus(string $status, float $progress, string $progressLabel, array $extra = []): void
-	{
-		if ($status !== 'canceled' && $this->isCanceled()) {
-			return;
-		}
+    private function updateStatus(string $status, float $progress, string $progressLabel, array $extra = []): void
+    {
+        if ($status !== 'canceled' && $this->isCanceled()) {
+            return;
+        }
 
-		JobStatus::merge($this->token, $this->assetId, array_merge([
-			'status' => $status,
-			'assetId' => $this->assetId,
-			'token' => $this->token,
-			'operation' => 'createVideo',
-			'videoProvider' => $this->videoProvider,
-			'videoModel' => $this->videoModel,
-			'progress' => $progress,
-			'progressLabel' => $progressLabel,
-		], $extra));
-	}
+        JobStatus::merge($this->token, $this->assetId, array_merge([
+            'status' => $status,
+            'assetId' => $this->assetId,
+            'token' => $this->token,
+            'operation' => 'createVideo',
+            'videoProvider' => $this->videoProvider,
+            'videoModel' => $this->videoModel,
+            'progress' => $progress,
+            'progressLabel' => $progressLabel,
+        ], $extra));
+    }
 
-	private function isCanceled(): bool
-	{
-		return JobStatus::isCanceled($this->token);
-	}
+    private function isCanceled(): bool
+    {
+        return JobStatus::isCanceled($this->token);
+    }
 
-	private function finishCanceled($queue): void
-	{
-		$this->updateStatus('canceled', 1, 'Canceled');
-		$this->setProgress($queue, 1, 'Canceled');
-	}
+    private function finishCanceled($queue): void
+    {
+        $this->updateStatus('canceled', 1, 'Canceled');
+        $this->setProgress($queue, 1, 'Canceled');
+    }
 
-	private function getRelatedEntryForAsset(): ?Entry
-	{
-		$sourceId = (new Query())
-			->select(['sourceId'])
-			->from(Table::RELATIONS)
-			->where(['targetId' => $this->assetId])
-			->scalar();
+    private function getRelatedEntryForAsset(): ?Entry
+    {
+        $sourceId = (new Query())
+            ->select(['sourceId'])
+            ->from(Table::RELATIONS)
+            ->where(['targetId' => $this->assetId])
+            ->scalar();
 
-		if (!$sourceId) {
-			return null;
-		}
+        if (!$sourceId) {
+            return null;
+        }
 
-		$element = Craft::$app->elements->getElementById((int) $sourceId, null, '*');
-		if ($element instanceof Entry) {
-			return $element;
-		}
+        $element = Craft::$app->elements->getElementById((int) $sourceId, null, '*');
+        if ($element instanceof Entry) {
+            return $element;
+        }
 
-		$ownerId = $element->ownerId ?? null;
-		if (!$ownerId) {
-			return null;
-		}
+        $ownerId = $element->ownerId ?? null;
+        if (!$ownerId) {
+            return null;
+        }
 
-		$owner = Craft::$app->elements->getElementById((int) $ownerId, Entry::class, '*');
+        $owner = Craft::$app->elements->getElementById((int) $ownerId, Entry::class, '*');
 
-		return $owner instanceof Entry ? $owner : null;
-	}
+        return $owner instanceof Entry ? $owner : null;
+    }
 
-	private function truncateTitle(string $title, int $limit = 25): string
-	{
-		$title = trim($title);
-		$length = function_exists('mb_strlen') ? mb_strlen($title) : strlen($title);
-		if ($length <= $limit) {
-			return $title;
-		}
+    private function truncateTitle(string $title, int $limit = 25): string
+    {
+        $title = trim($title);
+        $length = function_exists('mb_strlen') ? mb_strlen($title) : strlen($title);
+        if ($length <= $limit) {
+            return $title;
+        }
 
-		$slice = function_exists('mb_substr')
-			? mb_substr($title, 0, max(0, $limit - 3))
-			: substr($title, 0, max(0, $limit - 3));
+        $slice = function_exists('mb_substr')
+            ? mb_substr($title, 0, max(0, $limit - 3))
+            : substr($title, 0, max(0, $limit - 3));
 
-		return rtrim($slice) . '...';
-	}
+        return rtrim($slice) . '...';
+    }
 
-	protected function defaultDescription(): string
-	{
-		$title = $this->getRelatedEntryForAsset()?->title ?? null;
-		$title = $title ? $this->truncateTitle($title) : null;
+    protected function defaultDescription(): string
+    {
+        $title = $this->getRelatedEntryForAsset()->title ?? null;
+        $title = $title ? $this->truncateTitle($title) : null;
 
-		return $title ? 'Create image video: ' . $title : 'Create image video';
-	}
+        return $title ? 'Create image video: ' . $title : 'Create image video';
+    }
 }

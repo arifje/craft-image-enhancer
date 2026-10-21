@@ -6,44 +6,44 @@ use craft\db\Migration;
 
 class m260623_120000_add_prompt_overrides_to_runtime_settings extends Migration
 {
-	private const TABLE = '{{%imageenhancer_runtime_settings}}';
+    private const TABLE = '{{%imageenhancer_runtime_settings}}';
 
-	public function safeUp(): bool
-	{
-		// Nothing to alter if the table was never created (the Install migration or
-		// m260519_091500_create_runtime_settings_table creates it with these columns).
-		if (!$this->db->tableExists(self::TABLE)) {
-			return true;
-		}
+    public function safeUp(): bool
+    {
+        // Nothing to alter if the table was never created (the Install migration or
+        // m260519_091500_create_runtime_settings_table creates it with these columns).
+        if (!$this->db->tableExists(self::TABLE)) {
+            return true;
+        }
 
-		if (!$this->columnExists('creativeEnhancementPromptOverride')) {
-			$this->addColumn(self::TABLE, 'creativeEnhancementPromptOverride', $this->text()->null());
-		}
+        if (!$this->columnExists('creativeEnhancementPromptOverride')) {
+            $this->addColumn(self::TABLE, 'creativeEnhancementPromptOverride', $this->text()->null());
+        }
 
-		if (!$this->columnExists('faceBlurDetectionPromptOverride')) {
-			$this->addColumn(self::TABLE, 'faceBlurDetectionPromptOverride', $this->text()->null());
-		}
+        if (!$this->columnExists('faceBlurDetectionPromptOverride')) {
+            $this->addColumn(self::TABLE, 'faceBlurDetectionPromptOverride', $this->text()->null());
+        }
 
-		return true;
-	}
+        return true;
+    }
 
-	public function safeDown(): bool
-	{
-		if ($this->columnExists('faceBlurDetectionPromptOverride')) {
-			$this->dropColumn(self::TABLE, 'faceBlurDetectionPromptOverride');
-		}
+    public function safeDown(): bool
+    {
+        if ($this->columnExists('faceBlurDetectionPromptOverride')) {
+            $this->dropColumn(self::TABLE, 'faceBlurDetectionPromptOverride');
+        }
 
-		if ($this->columnExists('creativeEnhancementPromptOverride')) {
-			$this->dropColumn(self::TABLE, 'creativeEnhancementPromptOverride');
-		}
+        if ($this->columnExists('creativeEnhancementPromptOverride')) {
+            $this->dropColumn(self::TABLE, 'creativeEnhancementPromptOverride');
+        }
 
-		return true;
-	}
+        return true;
+    }
 
-	private function columnExists(string $column): bool
-	{
-		$table = $this->db->getTableSchema(self::TABLE, true);
+    private function columnExists(string $column): bool
+    {
+        $table = $this->db->getTableSchema(self::TABLE, true);
 
-		return $table !== null && $table->getColumn($column) !== null;
-	}
+        return $table !== null && $table->getColumn($column) !== null;
+    }
 }
