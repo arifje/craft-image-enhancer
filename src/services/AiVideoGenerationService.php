@@ -347,10 +347,17 @@ class AiVideoGenerationService extends Component
 			}
 		}
 
-		foreach ($data['steps'] ?? [] as $step) {
-			foreach ($step['content'] ?? [] as $content) {
-				if (($content['type'] ?? null) === 'video') {
-					return is_array($content) ? $content : [];
+		$steps = $data['steps'] ?? null;
+		if (!is_array($steps)) {
+			return [];
+		}
+		foreach ($steps as $step) {
+			if (!is_array($step) || !is_array($step['content'] ?? null)) {
+				continue;
+			}
+			foreach ($step['content'] as $content) {
+				if (is_array($content) && ($content['type'] ?? null) === 'video') {
+					return $content;
 				}
 			}
 		}

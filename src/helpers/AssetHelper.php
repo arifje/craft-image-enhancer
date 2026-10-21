@@ -21,6 +21,24 @@ class AssetHelper
 	// Public Methods
 	// =========================================================================
 
+	/** Rechecks the initiating editor's access when a queued operation starts. */
+	public static function requireJobPermission(Asset $asset, ?int $userId, ?string $repairToken = null): void
+	{
+		$user = $userId ? Craft::$app->getUsers()->getUserById($userId) : null;
+		if (
+			!$user ||
+			$user->getStatus() !== \craft\elements\User::STATUS_ACTIVE ||
+			!$user->can(ImageEnhancer::PERMISSION_USE_AI_TOOLS) ||
+			!$asset->canView($user) ||
+			(!$asset->canSave($user) && (
+				!$repairToken ||
+				ImageEnhancer::getInstance()->assetRequirements->getAuthorizedRepairContext($repairToken, (int) $user->id, (int) $asset->id, $user) === null
+			))
+		) {
+			throw new \RuntimeException('You no longer have permission to edit this image.');
+		}
+	}
+
 	/**
 	 * Creates a new asset next to the original from a local file. Returns null (and logs the
 	 * validation errors) when the element could not be saved.

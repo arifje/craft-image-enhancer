@@ -35,6 +35,7 @@ class ArticleImageFaceBlurJob extends BaseJob implements RetryableJobInterface
 	public int $assetId;
 	public ?int $userId = null;
 	public string $token;
+	public ?string $uploadRepairToken = null;
 	public bool $useManualFaces = false;
 	public array $manualFaces = [];
 
@@ -69,6 +70,8 @@ class ArticleImageFaceBlurJob extends BaseJob implements RetryableJobInterface
 			if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
 				throw new \RuntimeException('Asset not found or unsupported.');
 			}
+			AssetHelper::requireJobPermission($asset, $this->userId, $this->uploadRepairToken);
+
 			if (!class_exists(Imagick::class)) {
 				throw new \RuntimeException('Imagick is required to blur faces.');
 			}

@@ -296,6 +296,7 @@ class ImageEnhancer extends Plugin
 			'xAiImageEnhancementModel' => $settings->xAiImageEnhancementModel,
 			'googleImageEnhancementModel' => $settings->googleImageEnhancementModel,
 			'allowedFieldHandles' => $settings->cpEnhancerAssetFieldHandles,
+			'allowedFieldLayoutElements' => $this->getAllowedFieldLayoutElements($settings),
 			'providerOptions' => Settings::imageEnhancementProviderOptions(),
 			'modelOptions' => [
 				// Cache-only: a page render must never wait on the OpenAI model endpoint.
@@ -343,6 +344,26 @@ class ImageEnhancer extends Plugin
 		}
 
 		return $options;
+	}
+
+	/** Resolves selected fields by identity when Craft 5 overrides their layout handle. */
+	private function getAllowedFieldLayoutElements(Settings $settings): array
+	{
+		if (empty($settings->cpEnhancerAssetFieldHandles)) {
+			return [];
+		}
+		$fields = Craft::$app->getFields();
+		$uids = [];
+		foreach ($fields->getAllLayouts() as $layout) {
+			foreach ($layout->getCustomFieldElements() as $element) {
+				$field = $fields->getFieldByUid($element->getFieldUid());
+				if ($field instanceof AssetsField && in_array($field->handle, $settings->cpEnhancerAssetFieldHandles, true)) {
+					$uids[] = $element->uid;
+				}
+			}
+		}
+
+		return array_values(array_unique($uids));
 	}
 	
 	private function attachEventHandlers(): void

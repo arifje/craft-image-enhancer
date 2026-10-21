@@ -38,6 +38,7 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 	public int $assetId;
 	public ?int $userId = null;
 	public string $token;
+	public ?string $uploadRepairToken = null;
 	public int $retryAttempt = 0;
 	public ?string $imageEnhancementProvider = null;
 	public ?string $imageEnhancementModel = null;
@@ -82,6 +83,8 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 			if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
 				throw new \RuntimeException('Asset not found or unsupported.');
 			}
+
+			AssetHelper::requireJobPermission($asset, $this->userId, $this->uploadRepairToken);
 
 			$localPath = FileHelper::copyAssetToTemp($asset);
 

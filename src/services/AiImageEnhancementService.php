@@ -328,10 +328,25 @@ class AiImageEnhancementService extends Component
 
 	private function extractGoogleImageData(?array $data): ?string
 	{
-		foreach ($data['candidates'] ?? [] as $candidate) {
-			foreach ($candidate['content']['parts'] ?? [] as $part) {
+		$candidates = $data['candidates'] ?? null;
+		if (!is_array($candidates)) {
+			return null;
+		}
+
+		foreach ($candidates as $candidate) {
+			if (!is_array($candidate) || !is_array($candidate['content'] ?? null)) {
+				continue;
+			}
+			$parts = $candidate['content']['parts'] ?? null;
+			if (!is_array($parts)) {
+				continue;
+			}
+			foreach ($parts as $part) {
+				if (!is_array($part)) {
+					continue;
+				}
 				$inlineData = $part['inline_data'] ?? $part['inlineData'] ?? null;
-				if (is_array($inlineData) && !empty($inlineData['data'])) {
+				if (is_array($inlineData) && is_string($inlineData['data'] ?? null) && $inlineData['data'] !== '') {
 					return $inlineData['data'];
 				}
 			}

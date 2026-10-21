@@ -20,6 +20,7 @@
 		xAiImageEnhancementModel: 'grok-imagine-image-quality',
 		googleImageEnhancementModel: 'gemini-3.1-flash-image',
 		allowedFieldHandles: [],
+		allowedFieldLayoutElements: [],
 		routes: {
 			uploadAssistant: 'craft-image-enhancer/upload-assistant/upload',
 			uploadLocalRepair: 'craft-image-enhancer/upload-assistant/local-repair',
@@ -333,7 +334,7 @@
 			: [];
 
 		if (allowedHandles.length > 0) {
-			return Boolean(handle && allowedHandles.includes(handle));
+			return Boolean((handle && allowedHandles.includes(handle)) || (field?.dataset.layoutElement && config.allowedFieldLayoutElements.includes(field.dataset.layoutElement)));
 		}
 
 		return Boolean(field && !isNestedField(field));
@@ -490,7 +491,7 @@
 			: [];
 
 		if (allowedHandles.length > 0) {
-			return Boolean(handle && allowedHandles.includes(handle));
+			return Boolean((handle && allowedHandles.includes(handle)) || (field?.dataset.layoutElement && config.allowedFieldLayoutElements.includes(field.dataset.layoutElement)));
 		}
 
 		return Boolean(field && !isNestedField(field) && !isNestedAssetCard(card));
@@ -1215,10 +1216,18 @@
 			}
 		}
 
-		/**
-		 * Stops any in-flight polling and marks earlier responses as stale.
-		 * Call this at the start of every action that starts a new operation.
-		 */
+		/** Cancels a late enqueue response after its UI operation was interrupted. */
+		async cancelStaleOperation(response) {
+			if (!response?.token) return;
+			try {
+				await this.request('cancel', {
+					assetId: this.assetId, token: response.token, uploadRepairToken: this.repairToken,
+				});
+			} catch (error) {
+				// Status restoration still exposes the operation if cancellation failed.
+			}
+		}
+
 		beginOperation() {
 			this.invalidateOperation();
 			this.statusStartedAt = 0;
@@ -1264,6 +1273,7 @@
 
 				const response = await this.request('enhance', payload);
 				if (!this.isCurrentOperation(operationSequence)) {
+					await this.cancelStaleOperation(response);
 					return;
 				}
 				this.token = response.token || '';
@@ -1360,6 +1370,7 @@
 
 				const response = await this.request('enhance', payload);
 				if (!this.isCurrentOperation(operationSequence)) {
+					await this.cancelStaleOperation(response);
 					return;
 				}
 				this.token = response.token || '';
@@ -1673,6 +1684,7 @@
 
 				const response = await this.request('reformat', payload);
 				if (!this.isCurrentOperation(operationSequence)) {
+					await this.cancelStaleOperation(response);
 					return;
 				}
 				this.token = response.token || '';
@@ -1769,6 +1781,7 @@
 					videoModel: this.selectedVideoModel,
 				});
 				if (!this.isCurrentOperation(operationSequence)) {
+					await this.cancelStaleOperation(response);
 					return;
 				}
 				this.syncVideoSelection(response);
@@ -1861,6 +1874,7 @@
 					assetId: this.assetId,
 				});
 				if (!this.isCurrentOperation(operationSequence)) {
+					await this.cancelStaleOperation(response);
 					return;
 				}
 				this.token = response.token || '';
@@ -1949,6 +1963,7 @@
 					manualFaces: JSON.stringify(manualFaces),
 				});
 				if (!this.isCurrentOperation(operationSequence)) {
+					await this.cancelStaleOperation(response);
 					return;
 				}
 				this.token = response.token || '';
@@ -2107,6 +2122,7 @@
 
 		async cancel() {
 			if (!this.token) {
+				this.invalidateOperation();
 				this.setBusy(false);
 				this.resumeManualBlurMode();
 				return;

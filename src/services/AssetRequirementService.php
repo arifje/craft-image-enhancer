@@ -5,6 +5,7 @@ namespace arjanbrinkman\craftimageenhancer\services;
 use Craft;
 use craft\base\ElementInterface;
 use craft\elements\Asset;
+use craft\elements\User;
 use craft\elements\conditions\assets\FileSizeConditionRule;
 use craft\elements\conditions\assets\HeightConditionRule;
 use craft\elements\conditions\assets\WidthConditionRule;
@@ -136,7 +137,7 @@ class AssetRequirementService extends Component
         ];
     }
 
-    public function getAuthorizedRepairContext(string $token, int $userId, ?int $assetId = null): ?array
+    public function getAuthorizedRepairContext(string $token, int $userId, ?int $assetId = null, ?User $user = null): ?array
     {
         $context = $this->getRepairContext($token);
         $contextAssetId = (int) ($context['assetId'] ?? 0);
@@ -149,7 +150,7 @@ class AssetRequirementService extends Component
             return null;
         }
 
-        $user = Craft::$app->getUser()->getIdentity();
+        $user ??= Craft::$app->getUser()->getIdentity();
         $asset = Craft::$app->getAssets()->getAssetById($contextAssetId);
         $targetFolder = Craft::$app->getAssets()->findFolder([
             'id' => (int) ($context['targetFolderId'] ?? 0),
@@ -160,7 +161,7 @@ class AssetRequirementService extends Component
             !$asset instanceof Asset ||
             (int) $asset->uploaderId !== $userId ||
             !$targetFolder ||
-            !Craft::$app->getUser()->checkPermission('saveAssets:' . $targetFolder->getVolume()->uid)
+            !$user->can('saveAssets:' . $targetFolder->getVolume()->uid)
         ) {
             return null;
         }

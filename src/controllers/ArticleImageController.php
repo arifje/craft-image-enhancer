@@ -40,6 +40,26 @@ class ArticleImageController extends Controller
 
 		$this->requireCpRequest();
 		$this->requirePermission(ImageEnhancer::PERMISSION_USE_AI_TOOLS);
+		$request = Craft::$app->getRequest();
+		foreach (['token', 'version', 'uploadRepairToken', 'imageEnhancementProvider', 'imageEnhancementModel', 'method'] as $name) {
+			$value = $request->getBodyParam($name);
+			if ($value !== null && !is_string($value)) {
+				throw new \yii\web\BadRequestHttpException('Invalid ' . $name . '.');
+			}
+		}
+		foreach (['assetId', 'previewId', 'width', 'height'] as $name) {
+			foreach ([$request->getBodyParam($name), $request->getQueryParam($name)] as $value) {
+				if ($value !== null && !is_string($value) && !is_int($value)) {
+					throw new \yii\web\BadRequestHttpException('Invalid ' . $name . '.');
+				}
+			}
+		}
+		foreach (['statusKey', 'uploadRepairToken'] as $name) {
+			$value = $request->getQueryParam($name);
+			if ($value !== null && !is_string($value)) {
+				throw new \yii\web\BadRequestHttpException('Invalid ' . $name . '.');
+			}
+		}
 
 		return true;
 	}
@@ -105,6 +125,7 @@ class ArticleImageController extends Controller
 				'imageEnhancementProvider' => $providerOptions['provider'] ?? null,
 				'imageEnhancementModel' => $providerOptions['model'] ?? null,
 				'customPrompt' => $customPrompt,
+				'uploadRepairToken' => $repairToken !== '' ? $repairToken : null,
 				'targetWidth' => $repairTarget['width'] ?? null,
 				'targetHeight' => $repairTarget['height'] ?? null,
 			]),
@@ -351,6 +372,7 @@ class ArticleImageController extends Controller
 				'token' => $token,
 				'useManualFaces' => $useManualFaces,
 				'manualFaces' => $manualFaces ?: [],
+				'uploadRepairToken' => (string) Craft::$app->getRequest()->getBodyParam('uploadRepairToken'),
 			]),
 		);
 	}

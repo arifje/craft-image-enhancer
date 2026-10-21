@@ -2,6 +2,7 @@
 
 namespace arjanbrinkman\craftimageenhancer\jobs;
 
+use arjanbrinkman\craftimageenhancer\helpers\AssetHelper;
 use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
 use arjanbrinkman\craftimageenhancer\helpers\JobStatus;
@@ -46,6 +47,8 @@ class ArticleImageVideoJob extends BaseJob implements RetryableJobInterface
 			if (!$asset instanceof Asset || !$this->isSupportedImageAsset($asset)) {
 				throw new \RuntimeException('Asset not found or unsupported.');
 			}
+
+			AssetHelper::requireJobPermission($asset, $this->userId);
 
 			$localPath = FileHelper::copyAssetToTemp($asset);
 

@@ -40,6 +40,14 @@ class UploadAssistantController extends Controller
         $this->requireCpRequest();
         $this->requirePermission(ImageEnhancer::PERMISSION_USE_AI_TOOLS);
 
+        $request = Craft::$app->getRequest();
+        foreach (['repairToken', 'fieldId', 'elementId', 'siteId'] as $name) {
+            $value = $request->getBodyParam($name);
+            if ($value !== null && !is_string($value) && ($name === 'repairToken' || !is_int($value))) {
+                throw new BadRequestHttpException('Invalid ' . $name . '.');
+            }
+        }
+
         return true;
     }
 
