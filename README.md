@@ -123,7 +123,7 @@ The plugin adds a compact **Enhance** button below JPEG/PNG assets in enabled Cr
 - Zoom, fit, pan, maximize, or drag the bottom-right corner to resize the modal. Drag the left edge of the side panel to make it wider or narrower (arrow keys work when the edge is focused; double-click resets it); the width is remembered in the browser. Keyboard shortcuts include V/H/R/O/T/B for tools, arrows to nudge (Shift for 10 pixels), and Cmd/Ctrl+Z, Shift+Z, D, and S for undo, redo, duplicate, and save.
 - **Download image** exports the current composition. **Save image** flattens it into the original JPEG/PNG format and replaces the existing Craft asset file. Asset IDs, relations, and image dimensions are preserved. Layers are temporary and are not retained after saving or closing.
 
-The **AI tools** tab retains enhancement, custom edits, face blur, drawn custom blur, and video generation. These queued tools work on the saved base image. Image operations show a before/after comparison; **Use result in editor** places the preview beneath your editable layers. Save the composition to commit it. Save an applied AI result before starting another AI operation. Video results remain download-only.
+The **AI tools** tab supports enhancement, custom edits and automatic face blur in the same editing session. Each completed result becomes the current base image automatically; the next AI edit uses that result. Shapes, text, imported images and local blur layers remain editable above it. **Undo/Redo** steps through both AI results and layer edits, including choosing an earlier image for the next AI operation. The original asset stays unchanged until you click **Save image** once to flatten and save the complete composition. Failed or canceled operations retain the previous composition. Video results remain download-only and require saving pending image edits first.
 
 Local drawing and composition need no provider API key. The editor accepts base images up to 24 megapixels and 8192 pixels per edge, up to 40 layers, and imported image files up to 10 MB/24 megapixels each. Flattened saves are limited to 25 MB; PHP and the web server must permit that upload size (`upload_max_filesize`, `post_max_size`, and the request-body limit). No database migration or frontend build step is required for 2.0.0 or 2.1.0.
 
@@ -133,7 +133,7 @@ If **AI image provider** is set to **Choose in frontend**, the modal also shows 
 
 The **Custom edit** action accepts a one-off generative instruction and uses the selected provider and model. Prompts stay in the open modal so a failed or canceled request can be adjusted and retried, but they are not stored in browser persistence or returned by the status endpoint. The queue job retains the prompt while it is needed to execute or retry the request.
 
-The **Blur faces** action uses the ChatGPT/OpenAI API key to detect face/head bounding boxes and then applies a fragmented oval anonymization mask locally with Imagick. The **Custom blur** action lets editors draw one or more oval regions on the image; those normalized coordinates go directly to the same Imagick blur job and skip AI detection. Both paths create a preview asset first, so editors can compare and decide whether to keep or discard the blurred result. Abandoned previews older than 24 hours are removed during Craft's garbage collection.
+The **Blur faces** action uses the ChatGPT/OpenAI API key to detect face/head bounding boxes and then applies a fragmented oval anonymization mask locally with Imagick. The **Custom blur** action activates the editor's local blur layer tool, so regions can be moved, resized, reordered or removed without another AI request. Automatic face blur creates a temporary result and adds it to the session history. Accepted previews are cleaned up when the editor closes, subject to asset deletion permissions. Abandoned previews older than 24 hours are removed during Craft's garbage collection. AI source previews remain available for one hour; if a source expires, the editor reports it without reverting to the original. The browser composition can still be saved or downloaded.
 
 The AI action endpoints are control-panel only and require the **Use AI image tools** permission.
 
@@ -195,6 +195,7 @@ Regression checks (some use framework classes from Composer; run against both su
 ```bash
 for t in tests/*.php; do php "$t"; done
 node tests/editor-document.js
+node tests/editor-session.js
 ```
 
 - `tests/openai-models.php`: OpenAI model discovery, cache expiry, credential changes, fallbacks, and OpenAI/Grok request validation.
@@ -213,6 +214,7 @@ node tests/editor-document.js
 - `tests/editor-images.php`: composite format, byte-size, dimension, and pixel bounds.
 - `tests/reformat-geometry.php`: format validation, focal-point crop boxes, canvas placement, default sizes, and OpenAI output sizes.
 - `tests/editor-document.js`: layers, transformed hit testing, locks, visibility, history, and document limits.
+- `tests/editor-session.js`: consecutive AI results, preserved layers, undo/redo source selection, and session cleanup tracking.
 - `tests/editor-http.py`: real authenticated source and upload checks, including CSRF, stale versions, invalid bytes, preview ownership, and a successful native asset replacement.
 
 Run the HTTP checks only on a disposable test asset (the final assertion replaces its file):

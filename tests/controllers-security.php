@@ -28,8 +28,10 @@ namespace {
     use arjanbrinkman\craftimageenhancer\controllers\ArticleImageController;
     use arjanbrinkman\craftimageenhancer\controllers\NotificationsController;
     use arjanbrinkman\craftimageenhancer\ImageEnhancer;
+    use arjanbrinkman\craftimageenhancer\helpers\EditorSource;
 
     require __DIR__ . '/../src/ImageEnhancer.php';
+    require __DIR__ . '/../src/helpers/EditorSource.php';
     require __DIR__ . '/../src/controllers/ArticleImageController.php';
     require __DIR__ . '/../src/controllers/NotificationsController.php';
 
@@ -93,6 +95,15 @@ namespace {
     check($bound(['assetId' => 10, 'previewId' => 10], 10, 10) === false, 'Original can never be its own preview.');
     check($bound(['assetId' => 10], 10, 20) === false, 'Statuses without a preview bind nothing.');
     check($bound(null, 10, 20) === false, 'Missing status binds nothing.');
+
+    // Chaining is restricted to completed, user-owned previews of the same original.
+    $source = ['status' => 'complete', 'assetId' => 10, 'userId' => 7, 'previewId' => 20];
+    check(EditorSource::isOwnedSource($source, 10, 7), 'Completed own preview can be reused.');
+    foreach ([['userId' => 8], ['assetId' => 11], ['previewId' => 10], ['previewId' => 0], ['status' => 'running'], ['status' => 'canceled'], ['status' => 'failed']] as $override) {
+        check(!EditorSource::isOwnedSource(array_merge($source, $override), 10, 7), 'Untrusted source binding must be rejected.');
+    }
+    check(!EditorSource::isOwnedSource(null, 10, 7), 'Expired source must not silently use the original.');
+    check(!EditorSource::isOwnedSource($source, 10, 0), 'Guests cannot reuse editor sources.');
 
     // After-save analysis is limited to the configured volume allow-list.
     check(ImageEnhancer::isVolumeHandleInScope('news', ['news', 'blog']) === true, 'Listed volume is in scope.');

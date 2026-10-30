@@ -1895,6 +1895,7 @@
 		}
 
 		startManualBlurMode(preserveRegions = false) {
+			if (this.editor) { this.editor.setTool('blur'); return; }
 			if (this.uploadRepair) {
 				return;
 			}
@@ -2286,6 +2287,7 @@
 			}
 			this.setPreviewMode(true);
 			this.updateComparison();
+			if (this.editor && this.operation !== 'reformat') void this.editor.acceptPreview();
 		}
 
 		setPreviewMode(enabled) {
@@ -2675,6 +2677,9 @@
 				throw new Error('Craft action requests are unavailable.');
 			}
 
+			if (this.editor && ['enhance', 'blurFaces'].includes(action)) {
+				payload = { ...payload, ...this.editor.sourcePayload() };
+			}
 			// Multipart uploads must carry CSRF explicitly.
 			if (payload instanceof FormData && Craft.csrfTokenName && Craft.csrfTokenValue) {
 				payload.set(Craft.csrfTokenName, Craft.csrfTokenValue);

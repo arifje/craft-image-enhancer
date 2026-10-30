@@ -3,6 +3,7 @@
 namespace arjanbrinkman\craftimageenhancer\jobs;
 
 use arjanbrinkman\craftimageenhancer\helpers\AssetHelper;
+use arjanbrinkman\craftimageenhancer\helpers\EditorSource;
 use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
@@ -38,6 +39,8 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
     public int $assetId;
     public ?int $userId = null;
     public string $token;
+    /** Accepted editor preview to use instead of the saved original. */
+    public ?string $sourceToken = null;
     public ?string $uploadRepairToken = null;
     public int $retryAttempt = 0;
     public ?string $imageEnhancementProvider = null;
@@ -86,7 +89,8 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
 
             AssetHelper::requireJobPermission($asset, $this->userId, $this->uploadRepairToken);
 
-            $localPath = FileHelper::copyAssetToTemp($asset);
+            $source = EditorSource::resolve($asset, (int) $this->userId, $this->sourceToken);
+            $localPath = FileHelper::copyAssetToTemp($source);
 
             $providerOptions = $this->getProviderOptions();
             $providerLabel = ImageEnhancer::getInstance()->aiImageEnhancement->getProviderLabel($settings, $providerOptions);
@@ -344,6 +348,7 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
                 'userId' => $this->userId,
                 'token' => $this->token,
                 'retryAttempt' => $nextAttempt,
+                'sourceToken' => $this->sourceToken,
                 'imageEnhancementProvider' => $this->imageEnhancementProvider,
                 'imageEnhancementModel' => $this->imageEnhancementModel,
                 'customPrompt' => $this->customPrompt,

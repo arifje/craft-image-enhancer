@@ -3,6 +3,7 @@
 namespace arjanbrinkman\craftimageenhancer\controllers;
 
 use arjanbrinkman\craftimageenhancer\helpers\EditorImageHelper;
+use arjanbrinkman\craftimageenhancer\helpers\EditorSource;
 use arjanbrinkman\craftimageenhancer\helpers\FileHelper as EditorFileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ReformatHelper;
@@ -41,7 +42,7 @@ class ArticleImageController extends Controller
         $this->requireCpRequest();
         $this->requirePermission(ImageEnhancer::PERMISSION_USE_AI_TOOLS);
         $request = Craft::$app->getRequest();
-        foreach (['token', 'version', 'uploadRepairToken', 'imageEnhancementProvider', 'imageEnhancementModel', 'method'] as $name) {
+        foreach (['token', 'sourceToken', 'version', 'uploadRepairToken', 'imageEnhancementProvider', 'imageEnhancementModel', 'method'] as $name) {
             $value = $request->getBodyParam($name);
             if ($value !== null && !is_string($value)) {
                 throw new \yii\web\BadRequestHttpException('Invalid ' . $name . '.');
@@ -1017,6 +1018,18 @@ class ArticleImageController extends Controller
                 return $this->asJsonFailure('An operation is already running for this image. Wait for it to finish or cancel it first.');
             }
 
+            $sourceToken = (string) Craft::$app->getRequest()->getBodyParam('sourceToken', '');
+            if ($sourceToken !== '') {
+                if (!in_array($statusFields['operation'] ?? '', ['enhance', 'customEnhance', 'blurFaces', 'manualBlurFaces'], true)) {
+                    return $this->asJsonFailure('This operation requires the saved image. Save your edits first.');
+                }
+                try {
+                    EditorSource::resolve($asset, $userId, $sourceToken);
+                } catch (\RuntimeException $e) {
+                    return $this->asJsonFailure($e->getMessage());
+                }
+            }
+
             $token = bin2hex(random_bytes(16));
             $status = array_merge($statusFields, [
                 'status' => 'queued',
@@ -1026,7 +1039,11 @@ class ArticleImageController extends Controller
                 'progressLabel' => 'Queued',
             ]);
             $this->setEnhancementStatus($token, $status);
-            $jobId = Craft::$app->getQueue()->push($jobFactory($token));
+            $job = $jobFactory($token);
+            if ($job instanceof ArticleImageEnhancementJob || $job instanceof ArticleImageFaceBlurJob) {
+                $job->sourceToken = $sourceToken !== '' ? $sourceToken : null;
+            }
+            $jobId = Craft::$app->getQueue()->push($job);
 
             // The job may already have updated the status; merge instead of overwriting it.
             $current = Craft::$app->getCache()->get($this->getEnhancementStatusCacheKey($token));
@@ -1275,7 +1292,12 @@ class ArticleImageController extends Controller
         }
 
         if ($assetId) {
-            Craft::$app->getCache()->delete($this->getEnhancementAssetStatusCacheKey($assetId));
+            $key = $this->getEnhancementAssetStatusCacheKey($assetId);
+            $active = Craft::$app->getCache()->get($key);
+            // Cleaning an older editor step must not erase a newer operation's status.
+            if (!$token || (is_array($active) && ($active['token'] ?? null) === $token)) {
+                Craft::$app->getCache()->delete($key);
+            }
         }
     }
 

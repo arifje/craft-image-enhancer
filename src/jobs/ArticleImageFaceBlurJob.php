@@ -4,6 +4,7 @@ namespace arjanbrinkman\craftimageenhancer\jobs;
 
 use arjanbrinkman\craftimageenhancer\helpers\AssetHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ChatModelHelper;
+use arjanbrinkman\craftimageenhancer\helpers\EditorSource;
 use arjanbrinkman\craftimageenhancer\helpers\FaceBoxHelper;
 use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
@@ -35,6 +36,8 @@ class ArticleImageFaceBlurJob extends BaseJob implements RetryableJobInterface
     public int $assetId;
     public ?int $userId = null;
     public string $token;
+    /** Accepted editor preview to use instead of the saved original. */
+    public ?string $sourceToken = null;
     public ?string $uploadRepairToken = null;
     public bool $useManualFaces = false;
     public array $manualFaces = [];
@@ -76,7 +79,8 @@ class ArticleImageFaceBlurJob extends BaseJob implements RetryableJobInterface
                 throw new \RuntimeException('Imagick is required to blur faces.');
             }
 
-            $localPath = FileHelper::copyAssetToTemp($asset);
+            $source = EditorSource::resolve($asset, (int) $this->userId, $this->sourceToken);
+            $localPath = FileHelper::copyAssetToTemp($source);
 
             if ($this->useManualFaces) {
                 $this->updateStatus('running', 0.2, 'Preparing manual blur areas', [

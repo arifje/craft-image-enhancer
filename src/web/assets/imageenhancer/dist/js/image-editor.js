@@ -28,13 +28,13 @@
 		constructor(host) {
 			this.host = host; this.root = host.root; this.images = new Map(); this.urls = new Set();
 			this.tool = 'move'; this.selectedId = null; this.zoom = 1; this.fitted = true; this.state = 'loading';
-			this.pendingAi = false; this.saving = false; this.disposed = false; this.importing = false;
+			this.previews = new Map(); this.saving = false; this.disposed = false; this.importing = false;
 			this.events = new AbortController(); this.controls = {};
 			this.mount();
 			this.initialize().catch((error) => { this.host.showError(error); this.message.textContent = 'Unable to open image'; });
 		}
 		get selected() { return this.doc?.layers.find((layer) => layer.id === this.selectedId); }
-		get dirty() { return Boolean(this.doc?.dirty || this.pendingAi); }
+		get dirty() { return Boolean(this.doc?.dirty); }
 		get editable() { return this.state === 'idle' && !this.saving && !this.importing && Boolean(this.doc); }
 		mount() {
 			this.root.classList.add('ie-modal'); this.root.setAttribute('role', 'dialog'); this.root.setAttribute('aria-modal', 'true'); this.root.setAttribute('aria-label', 'Image editor');
@@ -154,8 +154,9 @@
 		}
 		setState(state) {
 			this.state = state;
-			const legacy = state !== 'idle'; this.viewport.hidden = legacy; this.legacyStage.hidden = !legacy;
-			if (legacy) this.tab('ai');
+			const legacy = ['preview', 'manual', 'format', 'video', 'videoReady'].includes(state);
+			this.viewport.hidden = legacy; this.legacyStage.hidden = !legacy;
+			if (state !== 'idle') this.tab('ai');
 			this.host.keepButton.textContent = 'Use result in editor'; this.host.discardButton.textContent = 'Discard result';
 			this.refresh();
 		}
@@ -283,15 +284,16 @@
 			this.undoButton.disabled = !this.editable || this.doc.cursor === 0; this.redoButton.disabled = !this.editable || this.doc.cursor === this.doc.history.length - 1;
 			for (const [tool, control] of Object.entries(this.toolButtons)) { control.disabled = !this.editable; control.classList.toggle('is-active', tool === this.tool); control.setAttribute('aria-pressed', String(tool === this.tool)); }
 			this.artboard.dataset.tool = this.tool;
-			this.aiNote.textContent = this.pendingAi ? 'AI result applied. Save this image before starting another AI operation.' : 'AI works on the base image. Your layers stay editable above it.';
-			if (this.state === 'idle') for (const control of [this.host.enhanceButton, this.host.customEditButton, this.host.openFormatButton, this.host.blurFacesButton, this.host.customBlurButton, this.host.openVideoButton]) control.disabled = !this.doc || this.pendingAi || this.saving || this.importing;
+			this.aiNote.textContent = 'AI edits build on the current base image. Shapes, text and blur layers stay editable. Save once when finished.';
+			if (this.state === 'idle') for (const control of [this.host.enhanceButton, this.host.customEditButton, this.host.openFormatButton, this.host.blurFacesButton, this.host.customBlurButton, this.host.openVideoButton]) control.disabled = !this.doc || this.saving || this.importing;
 			// A new format replaces the saved image, so unsaved layers must be saved (or discarded) first.
-			if (this.state === 'idle' && this.doc?.dirty) { this.host.openFormatButton.disabled = true; this.host.openFormatButton.title = 'Save your edits before changing the format.'; } else this.host.openFormatButton.title = '';
+			if (this.state === 'idle' && this.doc?.dirty) { this.host.openFormatButton.disabled = true; this.host.openVideoButton.disabled = true; this.host.openFormatButton.title = 'Save your edits before changing the format.'; this.host.openVideoButton.title = 'Save your edits before creating a video.'; } else { this.host.openFormatButton.title = ''; this.host.openVideoButton.title = ''; }
 			if (!this.doc) {
 				this.propertyGrid.hidden = true;
 				for (const control of this.layerButtons) control.disabled = true;
 				return;
 			}
+			this.syncBasePreview();
 			this.message.textContent = `${this.doc.width} × ${this.doc.height} px${this.dirty ? ' · Unsaved' : ''}`;
 			this.renderLayers(); this.renderProperties(); this.scheduleRender(); this.renderSelection();
 		}
@@ -335,13 +337,22 @@
 			} catch (error) { this.host.showError(error); }
 			finally { this.importing = false; this.refresh(); }
 		}
+		sourcePayload() {
+			return { sourceToken: this.previews.get(this.doc?.baseId)?.token || '' };
+		}
+		syncBasePreview() {
+			const image = this.images.get(this.doc?.baseId);
+			if (image && this.host.originalImage.src !== image.src) this.host.originalImage.src = image.src;
+		}
 		async acceptPreview() {
 			if (this.saving || !this.doc) return;
 			this.saving = true; this.host.setPreviewProcessing(true, 'Loading result into editor…'); this.refresh();
 			try {
+				const baseId = 'preview-' + this.host.token;
+				this.previews.set(baseId, { token: this.host.token, previewId: this.host.previewId });
 				const image = await loadImage(this.host.enhancedUrl); if (this.disposed) return;
-				this.images.set('ai-result', image); this.doc.baseId = 'ai-result'; this.doc.commit(); this.pendingAi = true;
-				this.host.setPreviewProcessing(false); this.host.setPreviewMode(false); this.host.setStatus('AI result applied. Continue editing or save the image.', false); this.tab('layers');
+				this.images.set(baseId, image); this.doc.baseId = baseId; this.doc.commit();
+				this.host.setBusy(false); this.host.setPreviewMode(false); this.host.setStatus('Result added to your edit. Add layers, run another enhancement, or undo. Save image when finished.', false); this.tab('layers');
 			} catch (error) { this.host.setPreviewProcessing(false); this.host.showError(error); }
 			finally { this.saving = false; this.host.closeButton.disabled = false; this.refresh(); }
 		}
@@ -356,9 +367,8 @@
 				if (blob.size > 25 * 1024 * 1024) throw new Error('The edited image exceeds the 25 MB save limit.');
 				if (save) {
 					const form = new FormData(); form.append('assetId', this.host.assetId); form.append('version', this.host.assetInfo.editorVersion || ''); form.append('image', blob, mime === 'image/png' ? 'edited.png' : 'edited.jpg');
-					if (this.pendingAi) { form.append('token', this.host.token); form.append('previewId', this.host.previewId); }
 					const response = await this.host.request('saveEditor', form);
-					this.doc.saved = this.doc.snapshot(); this.pendingAi = false; this.host.editorSaved(response);
+					this.doc.saved = this.doc.snapshot(); this.host.editorSaved(response);
 				} else {
 					if (this.exportLink) { URL.revokeObjectURL(this.exportLink.href); this.urls.delete(this.exportLink.href); this.exportLink.remove(); }
 					const url = URL.createObjectURL(blob); this.urls.add(url);
@@ -430,6 +440,10 @@
 			return false;
 		}
 		destroy() {
+			for (const preview of this.previews.values()) {
+				void this.host.request('discard', { assetId: this.host.assetId, ...preview }).catch(() => {});
+			}
+			this.previews.clear();
 			this.disposed = true; this.events.abort(); this.observer.disconnect(); cancelAnimationFrame(this.frame);
 			for (const url of this.urls) URL.revokeObjectURL(url); this.images.clear();
 			this.canvas.width = this.canvas.height = 1; if (this.blurCanvas) this.blurCanvas.width = this.blurCanvas.height = 1;

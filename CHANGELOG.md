@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.0 - 2026-10-30
+
+- Combine successive AI enhancements, custom edits, automatic face blur, shapes, text, image layers and local blurs in one editor session, then save the finished image once.
+- Apply AI results to the editor automatically and preserve each result in undo/redo history. Further AI edits use the currently selected base image while layers remain editable.
+- Validate preview ownership and the original asset binding both when queueing and when processing another edit. Keep the original unchanged until the final save and clean up accepted previews when closing the session.
+
 ## 3.0.0 — 2026-10-21
 
 ### Breaking
