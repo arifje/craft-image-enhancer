@@ -11,7 +11,7 @@ class EditorImageHelper
     public const MAX_PIXELS = 24000000;
     public const MAX_EDGE = 8192;
 
-    public static function validate(?array $info, int $bytes, int $width, int $height, string $mime): ?string
+    public static function validate(?array $info, int $bytes, int $width, int $height, string $mime, bool $allowResize = false): ?string
     {
         if ($bytes <= 0 || $bytes > self::MAX_BYTES) {
             return 'The edited image must be smaller than 25 MB.';
@@ -27,7 +27,9 @@ class EditorImageHelper
         }
         // Browsers apply EXIF orientation; portrait originals can have swapped dimensions.
         if (!(($w === $width && $h === $height) || ($w === $height && $h === $width))) {
-            return 'The edited image must preserve the original dimensions.';
+            return $allowResize
+                ? ReformatHelper::validateTarget($w, $h, ReformatHelper::METHOD_CROP)
+                : 'The edited image must preserve the original dimensions.';
         }
 
         return null;

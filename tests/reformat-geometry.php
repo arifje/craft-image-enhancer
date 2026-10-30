@@ -64,4 +64,12 @@ $check(ReformatHelper::openAiSize('gpt-image-1', 3413, 1920) === '1536x1024', 'g
 $check(ReformatHelper::openAiSize('gpt-image-1.5', 1080, 1920) === '1024x1536', 'gpt-image-1.5 portrait uses 1024x1536');
 $check(ReformatHelper::openAiSize('chatgpt-image-latest', 1000, 1000) === '1024x1024', 'square uses 1024x1024');
 
+$transform = ReformatHelper::layerTransform(320, 200, 400, 400, 'crop');
+$check($transform == ['scaleX' => 2, 'scaleY' => 2, 'offsetX' => -120, 'offsetY' => 0], 'crop maps layers with source pixels');
+$transform = ReformatHelper::layerTransform(320, 200, 400, 400, 'crop', 1, 0.5);
+$check($transform['offsetX'] == -240, 'layer crop follows focal point');
+$transform = ReformatHelper::layerTransform(320, 200, 640, 640, 'fit');
+$check($transform == ['scaleX' => 2, 'scaleY' => 2, 'offsetX' => 0, 'offsetY' => 120], 'fit centres and scales layers');
+$check(ReformatHelper::layerTransform(320, 200, 640, 640, 'ai') === $transform, 'AI extend uses the same placement');
+
 echo "Passed {$checks} reformat geometry checks.\n";

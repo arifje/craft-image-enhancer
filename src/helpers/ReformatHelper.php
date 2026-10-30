@@ -118,6 +118,26 @@ class ReformatHelper
     }
 
     /**
+     * Maps editable layer centres and sizes along with the pixels of a format change.
+     *
+     * @return array{scaleX: float, scaleY: float, offsetX: float, offsetY: float}
+     */
+    public static function layerTransform(int $sourceWidth, int $sourceHeight, int $width, int $height, string $method, float $focalX = 0.5, float $focalY = 0.5): array
+    {
+        if ($method === self::METHOD_CROP) {
+            $box = self::cropBox($sourceWidth, $sourceHeight, $width, $height, $focalX, $focalY);
+            $scaleX = $width / $box['width'];
+            $scaleY = $height / $box['height'];
+
+            return ['scaleX' => $scaleX, 'scaleY' => $scaleY, 'offsetX' => -$box['x'] * $scaleX, 'offsetY' => -$box['y'] * $scaleY];
+        }
+
+        $rect = self::containRect($sourceWidth, $sourceHeight, $width, $height);
+
+        return ['scaleX' => $rect['width'] / $sourceWidth, 'scaleY' => $rect['height'] / $sourceHeight, 'offsetX' => (float) $rect['x'], 'offsetY' => (float) $rect['y']];
+    }
+
+    /**
      * Default output size for a ratio: crop keeps the cropped pixels (no upscaling); fit and
      * AI extend use the smallest canvas that contains the whole source, within the size limits.
      *

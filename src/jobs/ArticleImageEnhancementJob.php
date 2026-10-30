@@ -92,6 +92,23 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
             $source = EditorSource::resolve($asset, (int) $this->userId, $this->sourceToken);
             $localPath = FileHelper::copyAssetToTemp($source);
 
+            $editorTransform = null;
+            if ($this->isReformat()) {
+                $error = ReformatHelper::validateTarget((int) $this->targetWidth, (int) $this->targetHeight, (string) $this->reformatMethod);
+                if ($error !== null) {
+                    throw new \RuntimeException($error);
+                }
+                [$sourceWidth, $sourceHeight] = ImageHelper::getOrientedSize($localPath) ?? [0, 0];
+                if ($sourceWidth < 1 || $sourceHeight < 1) {
+                    throw new \RuntimeException('Could not read the editor source dimensions.');
+                }
+                $focal = $asset->getFocalPoint();
+                $editorTransform = ReformatHelper::layerTransform(
+                    $sourceWidth, $sourceHeight, (int) $this->targetWidth, (int) $this->targetHeight,
+                    (string) $this->reformatMethod, (float) ($focal['x'] ?? 0.5), (float) ($focal['y'] ?? 0.5),
+                );
+            }
+
             $providerOptions = $this->getProviderOptions();
             $providerLabel = ImageEnhancer::getInstance()->aiImageEnhancement->getProviderLabel($settings, $providerOptions);
             $progressLabel = match (true) {
@@ -133,6 +150,7 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
             $completeLabel = $this->isReformat() ? 'New format preview ready' : ($this->isCustomEnhancement() ? 'Custom edit preview ready' : 'Enhanced preview ready');
             $this->updateStatus('complete', 1, $completeLabel, [
                 'previewId' => $previewAsset->id,
+                'editorTransform' => $editorTransform,
             ]);
 
             // A cancel that raced the "complete" write must not leave an orphaned preview.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.2.0 - 2026-10-30
+
+- Combine crop, resize, fit and AI extend with AI enhancement and editable layers in one session, then save the finished image once.
+- Keep layers aligned with format changes, include dimensions in undo/redo, and show the current composition in the live format preview.
+- Use the current session image for subsequent format operations and accept resized final compositions within the existing image limits.
+- Keep one Enhance button per asset card after Craft refreshes or saves an asset, and clean up existing duplicate buttons.
+
 ## 3.1.0 - 2026-10-30
 
 - Combine successive AI enhancements, custom edits, automatic face blur, shapes, text, image layers and local blurs in one editor session, then save the finished image once.

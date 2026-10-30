@@ -121,9 +121,9 @@ The plugin adds a compact **Enhance** button below JPEG/PNG assets in enabled Cr
 - Drag layers to move them or use the inspector for exact position, size, rotation, color, and opacity. Drag the corner handle to resize; hold Shift to preserve proportions.
 - Duplicate, reorder, hide, lock, or delete layers, with undo/redo for document changes. Blur affects the image and visible layers beneath it.
 - Zoom, fit, pan, maximize, or drag the bottom-right corner to resize the modal. Drag the left edge of the side panel to make it wider or narrower (arrow keys work when the edge is focused; double-click resets it); the width is remembered in the browser. Keyboard shortcuts include V/H/R/O/T/B for tools, arrows to nudge (Shift for 10 pixels), and Cmd/Ctrl+Z, Shift+Z, D, and S for undo, redo, duplicate, and save.
-- **Download image** exports the current composition. **Save image** flattens it into the original JPEG/PNG format and replaces the existing Craft asset file. Asset IDs, relations, and image dimensions are preserved. Layers are temporary and are not retained after saving or closing.
+- **Download image** exports the current composition. **Save image** flattens it into the original JPEG/PNG format and replaces the existing Craft asset file. Asset IDs and relations are preserved; dimensions change only when you apply a new format. Layers are temporary and are not retained after saving or closing.
 
-The **AI tools** tab supports enhancement, custom edits and automatic face blur in the same editing session. Each completed result becomes the current base image automatically; the next AI edit uses that result. Shapes, text, imported images and local blur layers remain editable above it. **Undo/Redo** steps through both AI results and layer edits, including choosing an earlier image for the next AI operation. The original asset stays unchanged until you click **Save image** once to flatten and save the complete composition. Failed or canceled operations retain the previous composition. Video results remain download-only and require saving pending image edits first.
+The **AI tools** tab supports enhancement, custom edits, automatic face blur and format changes in the same editing session. Each completed result becomes the current base image automatically; the next AI edit uses that result. Shapes, text, imported images and local blur layers remain editable above it. **Undo/Redo** steps through AI results, layer edits and format changes, restoring canvas dimensions and choosing the base image for the next AI operation. The original asset stays unchanged until you click **Save image** once to flatten and save the complete composition. Failed or canceled operations retain the previous composition. Video results remain download-only and require saving pending image edits first.
 
 Local drawing and composition need no provider API key. The editor accepts base images up to 24 megapixels and 8192 pixels per edge, up to 40 layers, and imported image files up to 10 MB/24 megapixels each. Flattened saves are limited to 25 MB; PHP and the web server must permit that upload size (`upload_max_filesize`, `post_max_size`, and the request-body limit). No database migration or frontend build step is required for 2.0.0 or 2.1.0.
 
@@ -147,7 +147,7 @@ The AI action endpoints are control-panel only and require the **Use AI image to
 
 While the panel is open, the stage shows a live preview of the new format: the exact crop around the focal point, the blurred fit, or for AI extend the layout with the areas the AI will fill marked. The AI result itself appears after the queued job finishes.
 
-The result is shown as a preview first. **Save new format** replaces the asset file (same asset ID and relations, new dimensions) and requires Craft's **Replace files** permission. Save or discard layer edits before changing the format. Formats must be 64–8192 pixels per edge, at most 24 megapixels, and between 1:4 and 4:1 (1:3 to 3:1 for AI extend). Check field requirements such as minimum width after changing the format of an existing asset.
+The result becomes the current editor image automatically. Crop, resize, enhance and add layers in any order, then click **Save image** once. Existing layers move and scale with the image; layers outside a crop remain in the document and can be repositioned or restored with undo. The live format preview includes layers. **Undo/Redo** restores the dimensions, base image and layer positions together. Only the final save replaces the asset file (same asset ID and relations, new dimensions), requiring Craft's **Replace files** permission. Formats must be 64–8192 pixels per edge, at most 24 megapixels, and between 1:4 and 4:1 (1:3 to 3:1 for AI extend). Check field requirements such as minimum width after changing the format of an existing asset.
 
 #### Upload Requirement Assistant
 
@@ -211,10 +211,11 @@ node tests/editor-session.js
 - Custom edits are generative and can intentionally alter image content or composition. Always review the before/after preview before keeping the result.
 - The upload requirement assistant repairs numeric width, height, and file-size selection conditions while preserving the source aspect ratio. Other failed selection-condition rules remain non-repairable.
 
+- `tests/browser/asset-button-refresh.cjs`: native Craft card refreshes, duplicate-button cleanup and repeated asset saves in the isolated audit site (Puppeteer driver supplied by `IE_BROWSER_DRIVER`).
 - `tests/editor-images.php`: composite format, byte-size, dimension, and pixel bounds.
 - `tests/reformat-geometry.php`: format validation, focal-point crop boxes, canvas placement, default sizes, and OpenAI output sizes.
 - `tests/editor-document.js`: layers, transformed hit testing, locks, visibility, history, and document limits.
-- `tests/editor-session.js`: consecutive AI results, preserved layers, undo/redo source selection, and session cleanup tracking.
+- `tests/editor-session.js`: consecutive AI and format results, preserved layers and dimensions, undo/redo source selection, and session cleanup tracking.
 - `tests/editor-http.py`: real authenticated source and upload checks, including CSRF, stale versions, invalid bytes, preview ownership, and a successful native asset replacement.
 
 Run the HTTP checks only on a disposable test asset (the final assertion replaces its file):

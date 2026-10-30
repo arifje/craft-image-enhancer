@@ -33,3 +33,21 @@ for (let i = 0; i < 90; i++) { doc.layers[0].x = i; doc.commit(); }
 assert.equal(doc.history.length, 60);
 const capped = new EditorDocument(100, 100); for (let i = 0; i < 40; i++) capped.add('rect'); assert.throws(() => capped.add('rect'), /40 layers/);
 console.log('Editor document history, stacking, hit testing, rotation and limits passed.');
+
+const resized = new EditorDocument(320, 200);
+resized.add('text', {x: 80, y: 40, width: 100, height: 40, fontSize: 20, rotation: 30, locked: true, visible: false});
+resized.add('blur', {x: 20, y: 20, width: 40, height: 40, strength: 12});
+const beforeCrop = resized.snapshot();
+resized.reformat(400, 400, 'crop', {scaleX: 2, scaleY: 2, offsetX: -120, offsetY: 0});
+assert.equal(resized.layers[0].x, 40); assert.equal(resized.layers[0].width, 200);
+assert.equal(resized.layers[0].fontSize, 40); assert.equal(resized.layers[0].rotation, 30);
+assert.equal(resized.layers[0].locked, true); assert.equal(resized.layers[0].visible, false);
+assert.equal(resized.layers[1].x, -80, 'Cropped layers are retained outside the canvas');
+assert.equal(resized.layers[1].strength, 24);
+const afterCrop = resized.snapshot();
+resized.undo(); assert.equal(resized.snapshot(), beforeCrop);
+resized.redo(); assert.equal(resized.snapshot(), afterCrop);
+resized.reformat(800, 400, 'fit', {scaleX: 1, scaleY: 1, offsetX: 200, offsetY: 0});
+assert.equal(resized.layers[0].x, 240); assert.equal(resized.width, 800);
+resized.undo(); assert.equal(resized.snapshot(), afterCrop);
+console.log('Format dimensions, layer transforms and undo/redo passed.');

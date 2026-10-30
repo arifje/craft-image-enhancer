@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/helpers/ImageHelper.php';
 require __DIR__ . '/../src/helpers/EditorImageHelper.php';
+require __DIR__ . '/../src/helpers/ReformatHelper.php';
 
 use arjanbrinkman\craftimageenhancer\helpers\EditorImageHelper;
 
@@ -25,6 +26,11 @@ foreach ([
     $validate(array_merge($info, ['width' => 9000])) !== null,
     $validate(array_merge($info, ['width' => 6000, 'height' => 6000])) !== null,
     $validate(array_merge($info, ['mime' => 'image/jpeg']), 1000, 'image/jpg') === null,
+    EditorImageHelper::validate(['width' => 600, 'height' => 600, 'mime' => 'image/png'], 1000, 1200, 800, 'image/png', true) === null,
+    EditorImageHelper::validate(['width' => 63, 'height' => 200, 'mime' => 'image/png'], 1000, 1200, 800, 'image/png', true) !== null,
+    EditorImageHelper::validate(['width' => 2000, 'height' => 100, 'mime' => 'image/png'], 1000, 1200, 800, 'image/png', true) !== null,
+    EditorImageHelper::validate(['width' => 6000, 'height' => 6000, 'mime' => 'image/png'], 1000, 1200, 800, 'image/png', true) !== null,
+    EditorImageHelper::validate(['width' => 600, 'height' => 600, 'mime' => 'image/jpeg'], 1000, 1200, 800, 'image/png', true) !== null,
 ] as $valid) {
     if (!$valid) throw new RuntimeException('Editor image validation failed at check ' . ($checks + 1));
     $checks++;

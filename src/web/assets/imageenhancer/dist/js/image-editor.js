@@ -249,16 +249,20 @@
 			if (!this.doc || this.disposed) return;
 			const ctx = this.canvas.getContext('2d'); ctx.clearRect(0, 0, this.doc.width, this.doc.height);
 			ctx.drawImage(this.images.get(this.doc.baseId), 0, 0, this.doc.width, this.doc.height);
-			for (const layer of this.doc.layers) {
+			this.drawLayers(this.canvas, this.doc.layers);
+		}
+		drawLayers(canvas, layers) {
+			const ctx = canvas.getContext('2d');
+			for (const layer of layers) {
 				if (!layer.visible) continue;
 				if (layer.type === 'blur') {
 					// Pixelation is deterministic across browsers and applies to every layer below it.
 					const small = this.blurCanvas; const scale = Math.max(4, layer.strength);
-					small.width = Math.max(1, Math.ceil(this.doc.width / scale)); small.height = Math.max(1, Math.ceil(this.doc.height / scale));
-					const smallCtx = small.getContext('2d'); smallCtx.drawImage(this.canvas, 0, 0, small.width, small.height);
+					small.width = Math.max(1, Math.ceil(canvas.width / scale)); small.height = Math.max(1, Math.ceil(canvas.height / scale));
+					const smallCtx = small.getContext('2d'); smallCtx.drawImage(canvas, 0, 0, small.width, small.height);
 					ctx.save(); this.transform(ctx, layer); ctx.beginPath(); ctx.rect(-layer.width / 2, -layer.height / 2, layer.width, layer.height); ctx.clip();
 					ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = layer.opacity; ctx.imageSmoothingEnabled = false;
-					ctx.drawImage(small, 0, 0, this.doc.width, this.doc.height); ctx.restore(); continue;
+					ctx.drawImage(small, 0, 0, canvas.width, canvas.height); ctx.restore(); continue;
 				}
 				ctx.save(); this.transform(ctx, layer); ctx.globalAlpha = layer.opacity; ctx.fillStyle = layer.color;
 				const x = -layer.width / 2, y = -layer.height / 2;
@@ -286,12 +290,16 @@
 			this.artboard.dataset.tool = this.tool;
 			this.aiNote.textContent = 'AI edits build on the current base image. Shapes, text and blur layers stay editable. Save once when finished.';
 			if (this.state === 'idle') for (const control of [this.host.enhanceButton, this.host.customEditButton, this.host.openFormatButton, this.host.blurFacesButton, this.host.customBlurButton, this.host.openVideoButton]) control.disabled = !this.doc || this.saving || this.importing;
-			// A new format replaces the saved image, so unsaved layers must be saved (or discarded) first.
-			if (this.state === 'idle' && this.doc?.dirty) { this.host.openFormatButton.disabled = true; this.host.openVideoButton.disabled = true; this.host.openFormatButton.title = 'Save your edits before changing the format.'; this.host.openVideoButton.title = 'Save your edits before creating a video.'; } else { this.host.openFormatButton.title = ''; this.host.openVideoButton.title = ''; }
+			// Video generation still uses the saved asset.
+			this.host.openVideoButton.title = '';
+			if (this.state === 'idle' && this.doc?.dirty) { this.host.openVideoButton.disabled = true; this.host.openVideoButton.title = 'Save your edits before creating a video.'; }
 			if (!this.doc) {
 				this.propertyGrid.hidden = true;
 				for (const control of this.layerButtons) control.disabled = true;
 				return;
+			}
+			if (this.canvas.width !== this.doc.width || this.canvas.height !== this.doc.height) {
+				this.canvas.width = this.doc.width; this.canvas.height = this.doc.height; this.fit(); this.layoutCanvas();
 			}
 			this.syncBasePreview();
 			this.message.textContent = `${this.doc.width} × ${this.doc.height} px${this.dirty ? ' · Unsaved' : ''}`;
@@ -306,7 +314,7 @@
 				const lock = button(layer.locked ? 'Unlock ' + layer.name : 'Lock ' + layer.name, 'lock', () => { layer.locked = !layer.locked; this.doc.commit(); this.refresh(); }, layer.locked ? 'is-locked' : 'is-muted');
 				eye.disabled = lock.disabled = !this.editable; eye.setAttribute('aria-pressed', String(layer.visible)); lock.setAttribute('aria-pressed', String(layer.locked)); row.append(pick, eye, lock); this.layerList.append(row);
 			}
-			const base = el('div', 'ie-layer ie-base'); base.innerHTML = icon('image'); base.append(el('span', '', this.doc.baseId === 'original' ? 'Original image' : 'AI result'), el('span', 'ie-base-lock', 'Base')); this.layerList.append(base);
+			const base = el('div', 'ie-layer ie-base'); base.innerHTML = icon('image'); base.append(el('span', '', this.doc.baseId === 'original' ? 'Original image' : 'Edited base image'), el('span', 'ie-base-lock', 'Base')); this.layerList.append(base);
 			for (const control of this.layerButtons) control.disabled = !this.editable || !this.selected || this.selected.locked;
 		}
 		renderProperties() {
@@ -344,14 +352,18 @@
 			const image = this.images.get(this.doc?.baseId);
 			if (image && this.host.originalImage.src !== image.src) this.host.originalImage.src = image.src;
 		}
-		async acceptPreview() {
+		async acceptPreview(response = this.host.previewResponse || {}) {
 			if (this.saving || !this.doc) return;
 			this.saving = true; this.host.setPreviewProcessing(true, 'Loading result into editor…'); this.refresh();
 			try {
 				const baseId = 'preview-' + this.host.token;
 				this.previews.set(baseId, { token: this.host.token, previewId: this.host.previewId });
 				const image = await loadImage(this.host.enhancedUrl); if (this.disposed) return;
-				this.images.set(baseId, image); this.doc.baseId = baseId; this.doc.commit();
+				this.images.set(baseId, image);
+				if (this.host.operation === 'reformat') {
+					const transform = response.editorTransform || this.host.formatTransform(image.naturalWidth, image.naturalHeight, response.reformatMethod || this.host.formatMethod);
+					this.doc.reformat(image.naturalWidth, image.naturalHeight, baseId, transform);
+				} else { this.doc.baseId = baseId; this.doc.commit(); }
 				this.host.setBusy(false); this.host.setPreviewMode(false); this.host.setStatus('Result added to your edit. Add layers, run another enhancement, or undo. Save image when finished.', false); this.tab('layers');
 			} catch (error) { this.host.setPreviewProcessing(false); this.host.showError(error); }
 			finally { this.saving = false; this.host.closeButton.disabled = false; this.refresh(); }

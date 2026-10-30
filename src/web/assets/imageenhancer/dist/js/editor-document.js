@@ -12,7 +12,7 @@
 			this.cursor = 0;
 			this.saved = this.history[0];
 		}
-		snapshot() { return JSON.stringify({ layers: this.layers, baseId: this.baseId }); }
+		snapshot() { return JSON.stringify({ layers: this.layers, baseId: this.baseId, width: this.width, height: this.height }); }
 		get dirty() { return this.snapshot() !== this.saved; }
 		commit() {
 			const state = this.snapshot();
@@ -42,6 +42,22 @@
 			this.layers.push(layer);
 			if (commit) this.commit();
 			return layer;
+		}
+		transformedLayers({ scaleX, scaleY, offsetX, offsetY }) {
+			// Preserve shapes and rotations; image resampling can round the axes by a pixel.
+			const scale = Math.min(scaleX, scaleY);
+			return this.layers.map((layer) => ({
+				...layer,
+				x: (layer.x + layer.width / 2) * scaleX + offsetX - layer.width * scale / 2,
+				y: (layer.y + layer.height / 2) * scaleY + offsetY - layer.height * scale / 2,
+				width: layer.width * scale, height: layer.height * scale,
+				fontSize: layer.fontSize * scale, strength: layer.strength * scale,
+			}));
+		}
+		reformat(width, height, baseId, transform) {
+			this.layers = this.transformedLayers(transform);
+			this.width = width; this.height = height; this.baseId = baseId;
+			this.commit();
 		}
 		duplicate(id) {
 			const source = this.layers.find((layer) => layer.id === id);

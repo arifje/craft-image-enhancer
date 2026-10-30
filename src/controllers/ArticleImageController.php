@@ -546,7 +546,7 @@ class ArticleImageController extends Controller
         }
         $info = ImageHelper::getImageInfo($upload->tempName);
         $error = EditorImageHelper::validate(
-            $info, (int) filesize($upload->tempName), (int) $asset->width, (int) $asset->height, $asset->mimeType,
+            $info, (int) filesize($upload->tempName), (int) $asset->width, (int) $asset->height, $asset->mimeType, true,
         );
         if ($error !== null) {
             return $this->asJsonFailure($error);
@@ -1020,7 +1020,7 @@ class ArticleImageController extends Controller
 
             $sourceToken = (string) Craft::$app->getRequest()->getBodyParam('sourceToken', '');
             if ($sourceToken !== '') {
-                if (!in_array($statusFields['operation'] ?? '', ['enhance', 'customEnhance', 'blurFaces', 'manualBlurFaces'], true)) {
+                if (!in_array($statusFields['operation'] ?? '', ['enhance', 'customEnhance', 'blurFaces', 'manualBlurFaces', 'reformat'], true)) {
                     return $this->asJsonFailure('This operation requires the saved image. Save your edits first.');
                 }
                 try {

@@ -422,7 +422,7 @@
 
 	function attachEnhanceButton(candidate) {
 		const card = getAssetCard(candidate);
-		if (!card || card.dataset.imageEnhancerCpReady === '1') {
+		if (!card) {
 			return;
 		}
 
@@ -432,18 +432,22 @@
 			return;
 		}
 
-		const action = document.createElement('div');
-		action.className = 'image-enhancer-cp-field-action';
-		const button = document.createElement('button');
+		// Craft refreshes card attributes/markup but detaches and restores all buttons.
+		// Reconcile the actual DOM: a marker on the card cannot survive that refresh.
+		const buttons = [...card.querySelectorAll('.image-enhancer-cp-field-button')].filter((node) => getAssetCard(node) === card);
+		const actions = [...card.querySelectorAll('.image-enhancer-cp-field-action')].filter((node) => getAssetCard(node) === card);
+		const button = buttons.shift() || document.createElement('button');
+		const action = actions.shift() || document.createElement('div');
 		button.type = 'button';
 		button.className = 'btn small image-enhancer-cp-field-button';
 		button.textContent = 'Enhance';
-		action.appendChild(button);
 		button.dataset.imageEnhancerCpAssetId = assetId;
 		button.dataset.imageEnhancerCpOriginalUrl = originalUrl;
-
-		card.appendChild(action);
-		card.dataset.imageEnhancerCpReady = '1';
+		action.className = 'image-enhancer-cp-field-action';
+		if (button.parentElement !== action) action.appendChild(button);
+		if (action.parentElement !== card) card.appendChild(action);
+		buttons.forEach((node) => node.remove());
+		actions.forEach((node) => node.remove());
 	}
 
 	function getAssetCard(candidate) {
@@ -1421,11 +1425,23 @@
 		}
 
 		formatPreviewSource() {
-			const image = this.editor?.images?.get('original');
+			const image = this.editor?.images?.get(this.editor.doc?.baseId);
 			if (image?.naturalWidth) {
 				return image;
 			}
 			return this.originalImage.complete && this.originalImage.naturalWidth ? this.originalImage : null;
+		}
+
+		formatTransform(width, height, method) {
+			const source = this.formatSourceSize();
+			if (method === 'crop') {
+				const focal = this.assetInfo?.focalPoint || {};
+				const box = formatCropBox(source.width, source.height, width, height, Number(focal.x ?? 0.5), Number(focal.y ?? 0.5));
+				const scaleX = width / box.width, scaleY = height / box.height;
+				return { scaleX, scaleY, offsetX: -box.x * scaleX, offsetY: -box.y * scaleY };
+			}
+			const rect = formatContainRect(source.width, source.height, width, height);
+			return { scaleX: rect.width / source.width, scaleY: rect.height / source.height, offsetX: rect.x, offsetY: rect.y };
 		}
 
 		/**
@@ -1467,6 +1483,11 @@
 					if (method === 'ai') {
 						this.drawExtendAreas(ctx, rect, canvasWidth, canvasHeight);
 					}
+				}
+				if (this.editor?.doc) {
+					const transform = this.formatTransform(width, height, method);
+					for (const key of Object.keys(transform)) transform[key] *= scale;
+					this.editor.drawLayers(canvas, this.editor.doc.transformedLayers(transform));
 				}
 				this.showFormatPreview(true);
 			});
@@ -1600,8 +1621,8 @@
 				}
 			}
 			summary += this.formatMethod === 'ai'
-				? ' The marked area is filled by AI; you approve the result before it replaces this image.'
-				: ' The result replaces this image after you approve the preview.';
+				? ' AI fills the marked area. The result joins your edit; save once when finished.'
+				: ' The result joins your edit with layers preserved. Save image when finished.';
 			this.formatSummary.textContent = summary;
 			this.renderFormatPreview();
 		}
@@ -2173,8 +2194,8 @@
 		}
 
 		async keep() {
-			// A new format has different dimensions than the editor canvas, so it is saved directly.
-			if (this.editor && this.operation !== 'reformat') {
+			// Editor results, including format changes, stay unsaved until the final export.
+			if (this.editor) {
 				await this.editor.acceptPreview();
 				return;
 			}
@@ -2273,6 +2294,7 @@
 			this.previewId = response.previewId || response.previewToken || response.enhancedAssetId || response.tempAssetId || '';
 			this.token = response.token || this.token;
 			this.operation = this.resolveOperation(response);
+			this.previewResponse = response;
 			this.enhancedUrl = enhancedUrl;
 			this.enhancedImage.src = enhancedUrl;
 			this.hideManualBlurMode(true);
@@ -2287,7 +2309,7 @@
 			}
 			this.setPreviewMode(true);
 			this.updateComparison();
-			if (this.editor && this.operation !== 'reformat') void this.editor.acceptPreview();
+			if (this.editor) void this.editor.acceptPreview();
 		}
 
 		setPreviewMode(enabled) {
@@ -2422,7 +2444,7 @@
 			this.toggleButton(this.keepButton, state !== 'preview');
 			this.toggleButton(this.discardButton, state !== 'preview');
 			this.editor?.setState(state);
-			if (state === 'preview' && this.operation === 'reformat') {
+			if (!this.editor && state === 'preview' && this.operation === 'reformat') {
 				this.keepButton.textContent = 'Save new format';
 			}
 		}
@@ -2677,7 +2699,7 @@
 				throw new Error('Craft action requests are unavailable.');
 			}
 
-			if (this.editor && ['enhance', 'blurFaces'].includes(action)) {
+			if (this.editor && ['enhance', 'blurFaces', 'reformat'].includes(action)) {
 				payload = { ...payload, ...this.editor.sourcePayload() };
 			}
 			// Multipart uploads must carry CSRF explicitly.
