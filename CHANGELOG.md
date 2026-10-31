@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.3.0 - 2026-10-31
+
+- Add optional native Craft MCP Tools for enhancement discovery, queued image processing and read-only status.
+- Preserve source assets, validate exact output pixels, and save separate results using shared provider and format processing.
+- Support explicitly selected unpublished draft Assets fields and exclusive nested ownership, native upload destinations, relation replacement and human-edit conflict detection.
+- Persist idempotency, provenance and generation/storage/attachment outcomes; recover retained images after storage failure without another provider call.
+- Require live user/token permissions, disclose AI costs and fidelity limits, and keep provider diagnostics and credentials out of tool responses.
+- Add the schema 1.3.0 migration, MCP examples and isolated native integration coverage. Run `php craft up` and restart queue workers after updating.
+
 ## 3.2.0 - 2026-10-30
 
 - Combine crop, resize, fit and AI extend with AI enhancement and editable layers in one session, then save the finished image once.

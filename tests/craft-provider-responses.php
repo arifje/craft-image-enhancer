@@ -7,7 +7,7 @@ $root = '/tmp/image-enhancer-audit-20261020';
 if (getenv('IE_AUDIT_SITE') !== $root . '/site') {
     throw new RuntimeException('Set IE_AUDIT_SITE to the isolated audit site.');
 }
-require $root . '/site/bootstrap.php';
+require getenv('IE_AUDIT_SITE') . '/bootstrap.php';
 $app = require CRAFT_VENDOR_PATH . '/craftcms/cms/bootstrap/console.php';
 if ($app->getDb()->createCommand('SELECT DATABASE()')->queryScalar() !== 'image_enhancer_audit_20261020') {
     throw new RuntimeException('Wrong audit database.');

@@ -10,7 +10,7 @@ use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 
 $root='/tmp/image-enhancer-audit-20261020';
 if(getenv('IE_AUDIT_SITE')!==$root.'/site')throw new RuntimeException('Wrong audit site');
-require $root.'/site/bootstrap.php';$app=require CRAFT_VENDOR_PATH.'/craftcms/cms/bootstrap/console.php';
+require getenv('IE_AUDIT_SITE').'/bootstrap.php';$app=require CRAFT_VENDOR_PATH.'/craftcms/cms/bootstrap/console.php';
 if($app->getDb()->createCommand('SELECT DATABASE()')->queryScalar()!=='image_enhancer_audit_20261020')throw new RuntimeException('Wrong DB');
 $f=json_decode(file_get_contents($root.'/fixture.json'),true,512,JSON_THROW_ON_ERROR);$checks=0;
 $assert=static function($ok,$message)use(&$checks){if(!$ok)throw new RuntimeException($message);$checks++;echo "PASS: $message\n";};

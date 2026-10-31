@@ -55,6 +55,8 @@ class Install extends Migration
             ]);
         }
 
+        (new m261031_120000_add_mcp_requests())->safeUp();
+
         return true;
     }
 
@@ -63,6 +65,7 @@ class Install extends Migration
      */
     public function safeDown(): bool
     {
+        $this->dropTableIfExists(m261031_120000_add_mcp_requests::TABLE);
         $this->dropTableIfExists(self::TABLE);
 
         return true;

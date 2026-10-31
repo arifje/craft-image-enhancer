@@ -238,50 +238,10 @@ class ArticleImageEnhancementJob extends BaseJob implements RetryableJobInterfac
      */
     private function reformatToTempFile(ClientInterface $client, Settings $settings, Asset $asset, string $localPath, array $providerOptions = []): string
     {
-        $width = (int) $this->targetWidth;
-        $height = (int) $this->targetHeight;
-        $method = (string) $this->reformatMethod;
-        $error = ReformatHelper::validateTarget($width, $height, $method);
-        if ($error !== null) {
-            throw new \RuntimeException($error);
-        }
-
-        $mimeType = (string) $asset->mimeType;
-        $tempPath = FileHelper::createTempPathForAsset($asset);
-        $canvasPath = null;
-        $maskPath = null;
-        $aiPath = null;
-
-        try {
-            if ($method === ReformatHelper::METHOD_CROP) {
-                $focalPoint = $asset->getFocalPoint();
-                ReformatHelper::crop(
-                    $localPath, $tempPath, $mimeType, $width, $height,
-                    (float) ($focalPoint['x'] ?? 0.5), (float) ($focalPoint['y'] ?? 0.5),
-                );
-            } elseif ($method === ReformatHelper::METHOD_FIT) {
-                ReformatHelper::fitWithBlur($localPath, $tempPath, $mimeType, $width, $height);
-            } else {
-                $canvasPath = FileHelper::createTempPathForAsset($asset);
-                $maskPath = FileHelper::createTempPath('png');
-                ReformatHelper::writeExtendInput($localPath, $canvasPath, $maskPath, $mimeType, $width, $height);
-                $aiPath = ImageEnhancer::getInstance()->aiImageEnhancement->extendToTempFile(
-                    $client, $settings, $asset, $canvasPath, $maskPath, $width, $height, $providerOptions, $this->reformatPrompt,
-                );
-                $error = ImageHelper::validateImageInfo(ImageHelper::getImageInfo($aiPath));
-                if ($error !== null) {
-                    throw new \RuntimeException('The provider returned an unusable image (' . $error . ').');
-                }
-                ReformatHelper::compositeExtension($aiPath, $localPath, $tempPath, $mimeType, $width, $height);
-            }
-        } catch (\Throwable $e) {
-            FileHelper::delete($tempPath);
-            throw $e;
-        } finally {
-            FileHelper::delete($canvasPath, $maskPath, $aiPath);
-        }
-
-        return $tempPath;
+        return ImageEnhancer::getInstance()->imageProcessing->reformatToTempFile(
+            $client, $settings, $asset, $localPath, (int) $this->targetWidth, (int) $this->targetHeight,
+            (string) $this->reformatMethod, $providerOptions, $this->reformatPrompt,
+        );
     }
 
     private function isReformat(): bool

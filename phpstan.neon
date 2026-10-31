@@ -3,6 +3,8 @@ includes:
 
 parameters:
     level: 4
+    scanFiles:
+        - tests/stubs/mcp-tools.stub
     bootstrapFiles:
         - tests/analysis-bootstrap.php
     paths:

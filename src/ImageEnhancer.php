@@ -9,6 +9,8 @@ use arjanbrinkman\craftimageenhancer\services\AiImageEnhancementService;
 use arjanbrinkman\craftimageenhancer\services\AiVideoGenerationService;
 use arjanbrinkman\craftimageenhancer\services\AssetRequirementService;
 use arjanbrinkman\craftimageenhancer\services\CleanupService;
+use arjanbrinkman\craftimageenhancer\services\ImageProcessingService;
+use arjanbrinkman\craftimageenhancer\services\McpEnhancements;
 use arjanbrinkman\craftimageenhancer\services\OpenAiModelService;
 use arjanbrinkman\craftimageenhancer\services\RuntimeSettingsService;
 use arjanbrinkman\craftimageenhancer\utilities\QualityCheckUtility;
@@ -45,6 +47,8 @@ use yii\base\Event;
  * @property AssetRequirementService $assetRequirements
  * @property CleanupService $cleanup
  * @property RuntimeSettingsService $runtimeSettings
+ * @property ImageProcessingService $imageProcessing
+ * @property McpEnhancements $mcpEnhancements
  * @property OpenAiModelService $openAiModels
  */
 class ImageEnhancer extends Plugin
@@ -55,7 +59,7 @@ class ImageEnhancer extends Plugin
      */
     public const PERMISSION_USE_AI_TOOLS = 'craft-image-enhancer:use-ai-tools';
 
-    public string $schemaVersion = '1.2.0';
+    public string $schemaVersion = '1.3.0';
     public bool $hasCpSettings = true;
 
     /**
@@ -82,6 +86,8 @@ class ImageEnhancer extends Plugin
         return [
             'components' => [
                 'openAiModels' => OpenAiModelService::class,
+                'imageProcessing' => ImageProcessingService::class,
+                'mcpEnhancements' => McpEnhancements::class,
                 'aiImageEnhancement' => AiImageEnhancementService::class,
                 'aiVideoGeneration' => AiVideoGenerationService::class,
                 'assetRequirements' => AssetRequirementService::class,
@@ -132,6 +138,7 @@ class ImageEnhancer extends Plugin
 
         // Component-type and permission registration must run in every request context.
         $this->registerPermissions();
+        $this->registerMcpTools();
         $this->registerGarbageCollection();
         $this->attachEventHandlers();
         $this->registerUtilities();
@@ -153,6 +160,20 @@ class ImageEnhancer extends Plugin
 
                 $this->registerCpFieldEnhancer();
             });
+        });
+    }
+
+    /** Register optional native MCP tools without requiring MCP Tools at runtime. */
+    private function registerMcpTools(): void
+    {
+        $mcp = 'arifje\\mcptools\\Mcp';
+        if (!class_exists($mcp) || !defined($mcp . '::EVENT_REGISTER_TOOLS')
+            || !class_exists('arifje\\mcptools\\support\\CallContext')
+            || !enum_exists('arifje\\mcptools\\enums\\Capability')) {
+            return;
+        }
+        Event::on($mcp, $mcp::EVENT_REGISTER_TOOLS, static function($event): void {
+            $event->addTool(\arjanbrinkman\craftimageenhancer\mcp\ImageTools::class, 'craft-image-enhancer');
         });
     }
 

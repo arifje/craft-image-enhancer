@@ -8,9 +8,13 @@ Image Enhancer 3 requires Craft CMS 5.11.0 or later (within Craft 5), and PHP 8.
 
 ### Upgrading from 2.x
 
-Version 3.0.0 removes Craft 4 support. Keep Image Enhancer 2.x on Craft 4. Upgrade the application to PHP 8.2+ and Craft 5.11.0+ first, then update this plugin to `^3.0`, run `php craft up`, restart queue workers, and reload the control panel. Existing settings, runtime prompt overrides, assets and relations are retained; this release adds no schema migration. The Craft minimum also avoids the older SVG Sanitizer 0.22 dependency line.
+Version 3.0.0 removes Craft 4 support. Keep Image Enhancer 2.x on Craft 4. Upgrade the application to PHP 8.2+ and Craft 5.11.0+ first, then update this plugin to `^3.0`, run `php craft up`, restart queue workers, and reload the control panel. Existing settings, runtime prompt overrides, assets and relations are retained; the 3.0.0 release adds no schema migration (3.3.0 adds the MCP request table). The Craft minimum also avoids the older SVG Sanitizer 0.22 dependency line.
 
 You need an OpenAI API key to analyze images. AI enhancement also requires an API key for the selected enhancement provider.
+
+## MCP image tools
+
+Image Enhancer 3.3 adds optional MCP discovery, queued enhancement and read-only status tools. Agents can produce exact-size separate assets and attach them to explicitly selected unpublished drafts, with permission checks, conflict detection and idempotent retries. See [MCP configuration, examples and limitations](docs/mcp-image-enhancement.md). Updating to 3.3 requires `php craft up` and a queue-worker restart.
 
 ## Permissions
 

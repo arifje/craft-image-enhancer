@@ -1,0 +1,55 @@
+<?php
+// Static-analysis contracts for the optional Craft MCP Tools 1.2 integration.
+// Never autoloaded at runtime. Native integration tests use the real plugin.
+namespace arifje\mcptools\enums {
+    enum Capability: string { case Upload = 'upload'; }
+    enum ToolCategory: string { case PLUGIN = 'plugin'; case CONTENT = 'content'; }
+}
+namespace arifje\mcptools\attributes {
+    #[\Attribute(\Attribute::TARGET_METHOD)]
+    class McpToolMeta {
+        public function __construct(public \arifje\mcptools\enums\ToolCategory $category, public bool $dangerous = false, public bool $privileged = false, public ?string $condition = null, public bool $codeExecution = false, public ?\arifje\mcptools\enums\Capability $capability = null) {}
+    }
+}
+namespace arifje\mcptools\http {
+    enum Scope: string {
+        case ReadOnly = 'readonly'; case Content = 'content'; case Full = 'full';
+        public function isDisabled(array $disabled): bool {}
+    }
+    class Token {
+        public function __construct(public string $name, public int $userId, public Scope $scope, public ?\DateTimeImmutable $expiryDate = null, public ?\DateTimeImmutable $lastUsedAt = null, public ?int $id = null, public ?\DateTimeImmutable $dateCreated = null, public ?int $grantId = null, public ?array $sections = null, public ?array $capabilities = null) {}
+        public function expired(\DateTimeImmutable $now): bool {}
+        public function hasCapability(\arifje\mcptools\enums\Capability $capability): bool {}
+        public function allowsSection(?string $sectionUid): bool {}
+    }
+    class RecordStore { public function findByHash(string $hash): ?Token {} public function insert(Token $token, string $hash): Token {} public function delete(int $id): bool {} }
+}
+namespace arifje\mcptools\records {
+    /** @property string $tokenHash */
+    class Token extends \craft\db\ActiveRecord {}
+}
+namespace arifje\mcptools\support {
+    class CallContext {
+        public static function forHttp(\arifje\mcptools\http\Token $token, ?string $ip): void {}
+        public static function reset(): void {}
+        public static function isHttp(): bool {}
+        public static function token(): ?\arifje\mcptools\http\Token {}
+        public static function hasCapability(\arifje\mcptools\enums\Capability $capability): bool {}
+        public static function allowsSection(?string $uid): bool {}
+    }
+}
+namespace arifje\mcptools\models {
+    class Settings extends \craft\base\Model { public array $disabledScopes = []; }
+}
+namespace arifje\mcptools {
+    /** @method static Mcp getInstance() */
+    class Mcp extends \craft\base\Plugin {
+        public static function getToolRegistry(): \arifje\mcptools\services\ToolRegistry {}
+        public static function isToolEnabled(string $name): bool {}
+        public function getSettings(): \arifje\mcptools\models\Settings {}
+    }
+}
+
+namespace arifje\mcptools\services {
+    class ToolRegistry { public function getDefinition(string $name): ?object {} }
+}
