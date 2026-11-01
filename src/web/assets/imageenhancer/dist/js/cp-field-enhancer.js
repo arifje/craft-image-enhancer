@@ -2307,9 +2307,12 @@
 			if (this.operation === 'reformat') {
 				this.range.value = 100;
 			}
-			this.setPreviewMode(true);
-			this.updateComparison();
-			if (this.editor) void this.editor.acceptPreview();
+			if (this.editor) {
+				void this.editor.acceptPreview();
+			} else {
+				this.setPreviewMode(true);
+				this.updateComparison();
+			}
 		}
 
 		setPreviewMode(enabled) {

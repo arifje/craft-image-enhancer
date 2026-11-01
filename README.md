@@ -119,8 +119,10 @@ When this mode is enabled, the settings page shows all provider API key and mode
 
 ### Control Panel Asset Fields
 
-The plugin adds a compact **Enhance** button below JPEG/PNG assets in enabled Craft asset fields. It opens a resizable image editor with a dark workspace, a tool rail, a layer list, and a transform inspector.
+The plugin adds a compact **Enhance** button below JPEG/PNG assets in enabled Craft asset fields. It opens a resizable image editor with light and dark workspace themes, a tool rail, a layer list, and a transform inspector.
 
+- Switch themes with the sun button in the editor header. Your choice is remembered in this browser; dark remains the default. Theme changes do not affect exported image pixels.
+- Compare the original image with the current composition using the comparison button beside Undo. After an AI result, comparison stays open until you choose **Done**, toggle comparison off, or select a drawing tool/layer. Drag the range slider or use its arrow/Home/End keys. The comparison includes your layers; after a format change the original fits inside the new dimensions without stretching.
 - Draw rectangles, ellipses, and local pixelated blur regions; add text and PNG/JPEG/WebP image layers.
 - Drag layers to move them or use the inspector for exact position, size, rotation, color, and opacity. Drag the corner handle to resize; hold Shift to preserve proportions.
 - Duplicate, reorder, hide, lock, or delete layers, with undo/redo for document changes. Blur affects the image and visible layers beneath it.

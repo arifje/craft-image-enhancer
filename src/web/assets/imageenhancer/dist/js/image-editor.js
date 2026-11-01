@@ -1,6 +1,7 @@
 (function () {
 	'use strict';
 	const paths = {
+		compare: 'M3 3h18v18H3zM12 3v18', sun: 'M12 8a4 4 0 110 8 4 4 0 010-8M12 2v2M12 20v2M2 12h2M20 12h2M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
 		move: 'M5 3l14 10-7 1-3 7z', hand: 'M8 12V6a2 2 0 014 0v5-1V4a2 2 0 014 0v7-3a2 2 0 014 0v7c0 5-3 7-7 7-3 0-5-2-7-5l-3-5a2 2 0 013-2z',
 		rect: 'M4 4h16v16H4z', ellipse: 'M20 12a8 8 0 11-16 0 8 8 0 0116 0', text: 'M4 5V3h16v2M12 3v18M8 21h8',
 		image: 'M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5M15 7h.01', blur: 'M12 3c-3 4-7 8-7 12a7 7 0 0014 0c0-4-4-8-7-12zM8 15h8M9 18h6',
@@ -29,7 +30,7 @@
 			this.host = host; this.root = host.root; this.images = new Map(); this.urls = new Set();
 			this.tool = 'move'; this.selectedId = null; this.zoom = 1; this.fitted = true; this.state = 'loading';
 			this.previews = new Map(); this.saving = false; this.disposed = false; this.importing = false;
-			this.events = new AbortController(); this.controls = {};
+			this.events = new AbortController(); this.controls = {}; this.comparing = false;
 			this.mount();
 			this.initialize().catch((error) => { this.host.showError(error); this.message.textContent = 'Unable to open image'; });
 		}
@@ -48,7 +49,9 @@
 			this.downloadButton = button('Download image', 'download', () => this.export(false));
 			this.saveButton = el('button', 'ie-save', 'Save image'); this.saveButton.type = 'button'; this.saveButton.addEventListener('click', () => this.export(true));
 			const maximize = button('Maximize editor', 'fit', () => { this.root.classList.toggle('ie-maximized'); maximize.setAttribute('aria-pressed', String(this.root.classList.contains('ie-maximized'))); });
-			headActions.append(this.downloadButton, maximize, this.saveButton, this.host.closeButton); header.append(headActions); shell.prepend(header);
+			this.themeButton = button('Use light theme', 'sun', () => this.setTheme(this.theme === 'light' ? 'dark' : 'light'));
+			this.restoreTheme();
+			headActions.append(this.themeButton, this.downloadButton, maximize, this.saveButton, this.host.closeButton); header.append(headActions); shell.prepend(header);
 			const workspace = el('div', 'ie-workspace');
 			const rail = el('div', 'ie-tools'); rail.setAttribute('role', 'toolbar'); rail.setAttribute('aria-label', 'Image tools');
 			this.toolButtons = {};
@@ -64,14 +67,22 @@
 			this.zoomLabel = el('button', 'ie-zoom', '100%'); this.zoomLabel.type = 'button'; this.zoomLabel.title = 'Actual size'; this.zoomLabel.addEventListener('click', () => this.setZoom(1));
 			const fit = el('button', 'ie-button ie-fit', 'Fit'); fit.type = 'button'; fit.addEventListener('click', () => { this.fitted = true; this.fit(); });
 			this.message = el('span', 'ie-document-info', 'Loading image…');
-			toolbar.append(this.undoButton, this.redoButton, el('span', 'ie-separator'), minus, this.zoomLabel, plus, fit, this.message);
+			this.compareButton = button('Compare original and current edit', 'compare', () => this.setComparing(!this.comparing), 'ie-compare-toggle');
+			toolbar.append(this.compareButton, this.undoButton, this.redoButton, el('span', 'ie-separator'), minus, this.zoomLabel, plus, fit, this.message);
 			this.viewport = el('div', 'ie-viewport'); this.board = el('div', 'ie-board'); this.artboard = el('div', 'ie-artboard');
 			this.canvas = el('canvas', 'ie-canvas'); this.canvas.setAttribute('aria-label', 'Image composition');
 			this.selection = el('div', 'ie-selection'); this.selection.hidden = true;
 			this.resizeHandle = el('span', 'ie-layer-handle'); this.resizeHandle.title = 'Drag to resize; Shift preserves proportions'; this.selection.append(this.resizeHandle);
-			this.artboard.append(this.canvas, this.selection); this.board.append(this.artboard); this.viewport.append(this.board);
+			this.comparisonImage = el('img', 'ie-comparison-original'); this.comparisonImage.alt = 'Original image'; this.comparisonImage.draggable = false; this.comparisonImage.hidden = true;
+			this.comparisonDivider = el('div', 'ie-comparison-divider'); this.comparisonDivider.hidden = true;
+			this.comparisonBar = el('div', 'ie-comparison-bar'); this.comparisonBar.hidden = true;
+			this.comparisonRange = el('input'); this.comparisonRange.type = 'range'; this.comparisonRange.min = 0; this.comparisonRange.max = 100; this.comparisonRange.value = 50;
+			this.comparisonRange.setAttribute('aria-label', 'Before and after comparison'); this.comparisonRange.addEventListener('input', () => this.updateComparison());
+			const doneComparing = el('button', 'ie-button ie-fit', 'Done'); doneComparing.type = 'button'; doneComparing.addEventListener('click', () => { this.setComparing(false); this.compareButton.focus(); });
+			this.comparisonBar.append(el('span', '', 'Original'), this.comparisonRange, el('span', '', 'Current edit'), doneComparing);
+			this.artboard.append(this.canvas, this.comparisonImage, this.comparisonDivider, this.selection); this.board.append(this.artboard); this.viewport.append(this.board);
 			this.legacyStage = this.root.querySelector('.image-enhancer-cp-stage'); this.legacyStage.hidden = true;
-			center.append(toolbar, this.viewport, this.legacyStage);
+			center.append(toolbar, this.comparisonBar, this.viewport, this.legacyStage);
 			const sidebar = el('aside', 'ie-sidebar'); const tabs = el('div', 'ie-tabs');
 			this.layersPanel = el('section', 'ie-layers-panel'); this.aiPanel = el('section', 'ie-ai-panel');
 			this.layersTab = el('button', 'is-active', 'Layers'); this.aiTab = el('button', '', 'AI tools');
@@ -128,10 +139,35 @@
 			if (this.disposed) return;
 			const width = image.naturalWidth, height = image.naturalHeight;
 			if (width * height > 24000000 || Math.max(width, height) > 8192) throw new Error('The editor supports images up to 24 megapixels and 8192 pixels per edge.');
+			this.comparisonImage.src = image.src;
 			this.images.set('original', image); this.doc = new window.ImageEnhancerDocument(width, height);
 			this.canvas.width = width; this.canvas.height = height;
 			this.blurCanvas = document.createElement('canvas');
 			this.fit(); this.setState(this.host.actionState || 'idle'); this.refresh();
+		}
+		restoreTheme() {
+			let theme = 'dark';
+			try { theme = window.localStorage.getItem('imageEnhancerTheme') === 'light' ? 'light' : 'dark'; } catch (error) { /* storage unavailable */ }
+			this.setTheme(theme, false);
+		}
+		setTheme(theme, persist = true) {
+			this.theme = theme === 'light' ? 'light' : 'dark'; this.root.dataset.theme = this.theme;
+			const label = this.theme === 'light' ? 'Use dark theme' : 'Use light theme';
+			this.themeButton.title = label; this.themeButton.setAttribute('aria-label', label); this.themeButton.setAttribute('aria-pressed', String(this.theme === 'light'));
+			if (persist) try { window.localStorage.setItem('imageEnhancerTheme', this.theme); } catch (error) { /* storage unavailable */ }
+		}
+		setComparing(enabled) {
+			this.comparing = Boolean(enabled && this.doc);
+			this.updateComparison(); this.renderSelection();
+			if (this.fitted) this.fit();
+		}
+		updateComparison() {
+			const visible = this.comparing && this.state === 'idle';
+			this.comparisonBar.hidden = this.comparisonImage.hidden = this.comparisonDivider.hidden = !visible;
+			this.compareButton.setAttribute('aria-pressed', String(this.comparing)); this.compareButton.classList.toggle('is-active', this.comparing);
+			const value = clamp(Number(this.comparisonRange.value), 0, 100);
+			this.comparisonImage.style.clipPath = `inset(0 ${100 - value}% 0 0)`; this.comparisonDivider.style.left = value + '%';
+			this.comparisonRange.setAttribute('aria-valuetext', `${value}% original, ${100 - value}% current edit`);
 		}
 		buildInspector() {
 			this.inspector.append(el('h3', '', 'Transform & style'));
@@ -162,7 +198,7 @@
 		}
 		setTool(tool) {
 			if (!this.editable) return;
-			this.tool = tool; this.tab('layers');
+			this.setComparing(false); this.tool = tool; this.tab('layers');
 			if (tool === 'text') { this.addLayer('text', { width: this.doc.width * 0.5, height: this.doc.height * 0.15, x: this.doc.width * 0.25, y: this.doc.height * 0.425 }); this.tool = 'move'; }
 			this.refresh();
 		}
@@ -203,7 +239,7 @@
 		}
 		point(event) { const rect = this.canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left) / this.zoom, y: (event.clientY - rect.top) / this.zoom }; }
 		pointerDown(event) {
-			if (!this.editable || event.button !== 0) return; event.preventDefault(); this.artboard.setPointerCapture(event.pointerId);
+			if (!this.editable || this.comparing || event.button !== 0) return; event.preventDefault(); this.artboard.setPointerCapture(event.pointerId);
 			const point = this.point(event); this.gesture = { point, before: this.doc.snapshot(), clientX: event.clientX, clientY: event.clientY, left: this.viewport.scrollLeft, top: this.viewport.scrollTop };
 			if (this.tool === 'hand' || event.altKey) { this.gesture.kind = 'pan'; return; }
 			if (event.target === this.resizeHandle && this.selected && !this.selected.locked) { this.gesture.kind = 'resize'; this.gesture.layer = { ...this.selected }; return; }
@@ -275,7 +311,7 @@
 		}
 		transform(ctx, layer) { ctx.translate(layer.x + layer.width / 2, layer.y + layer.height / 2); ctx.rotate(layer.rotation * Math.PI / 180); }
 		renderSelection() {
-			const layer = this.selected; this.selection.hidden = !layer || !layer.visible || !this.editable;
+			const layer = this.selected; this.selection.hidden = !layer || !layer.visible || !this.editable || this.comparing;
 			if (!layer) return; const style = this.selection.style;
 			style.left = layer.x * this.zoom + 'px'; style.top = layer.y * this.zoom + 'px'; style.width = layer.width * this.zoom + 'px'; style.height = layer.height * this.zoom + 'px'; style.transform = `rotate(${layer.rotation}deg)`;
 			this.resizeHandle.hidden = layer.locked;
@@ -284,6 +320,7 @@
 			if (this.disposed) return;
 			this.saveButton.disabled = !this.editable || !this.dirty || this.host.assetInfo?.canReplace === false;
 			this.saveButton.textContent = this.saving ? 'Saving…' : 'Save image'; this.saveButton.title = this.host.assetInfo?.canReplace === false ? 'You do not have permission to replace this asset.' : 'Save the flattened image to this asset';
+			this.compareButton.disabled = !this.editable; this.updateComparison();
 			this.downloadButton.disabled = !this.editable;
 			this.undoButton.disabled = !this.editable || this.doc.cursor === 0; this.redoButton.disabled = !this.editable || this.doc.cursor === this.doc.history.length - 1;
 			for (const [tool, control] of Object.entries(this.toolButtons)) { control.disabled = !this.editable; control.classList.toggle('is-active', tool === this.tool); control.setAttribute('aria-pressed', String(tool === this.tool)); }
@@ -309,7 +346,7 @@
 			this.layerList.replaceChildren();
 			for (const layer of [...this.doc.layers].reverse()) {
 				const row = el('div', 'ie-layer' + (this.selectedId === layer.id ? ' is-selected' : ''));
-				const pick = button(layer.name, layer.type, () => { this.selectedId = layer.id; this.tool = 'move'; this.refresh(); }, 'ie-layer-pick'); pick.append(el('span', '', layer.name)); pick.disabled = !this.editable;
+				const pick = button(layer.name, layer.type, () => { this.setComparing(false); this.selectedId = layer.id; this.tool = 'move'; this.refresh(); }, 'ie-layer-pick'); pick.append(el('span', '', layer.name)); pick.disabled = !this.editable;
 				const eye = button(layer.visible ? 'Hide ' + layer.name : 'Show ' + layer.name, 'eye', () => { layer.visible = !layer.visible; this.doc.commit(); this.refresh(); }, layer.visible ? '' : 'is-muted');
 				const lock = button(layer.locked ? 'Unlock ' + layer.name : 'Lock ' + layer.name, 'lock', () => { layer.locked = !layer.locked; this.doc.commit(); this.refresh(); }, layer.locked ? 'is-locked' : 'is-muted');
 				eye.disabled = lock.disabled = !this.editable; eye.setAttribute('aria-pressed', String(layer.visible)); lock.setAttribute('aria-pressed', String(layer.locked)); row.append(pick, eye, lock); this.layerList.append(row);
@@ -327,7 +364,7 @@
 		}
 		async importFiles(files) {
 			if (!this.editable || !files.length) return;
-			this.importing = true; this.refresh();
+			this.setComparing(false); this.importing = true; this.refresh();
 			try {
 				for (const file of files) {
 					if (this.disposed) break;
@@ -354,7 +391,7 @@
 		}
 		async acceptPreview(response = this.host.previewResponse || {}) {
 			if (this.saving || !this.doc) return;
-			this.saving = true; this.host.setPreviewProcessing(true, 'Loading result into editor…'); this.refresh();
+			this.saving = true; this.host.setBusy(true, 'Loading result into editor…'); this.host.setActionState('processing'); this.refresh();
 			try {
 				const baseId = 'preview-' + this.host.token;
 				this.previews.set(baseId, { token: this.host.token, previewId: this.host.previewId });
@@ -364,8 +401,8 @@
 					const transform = response.editorTransform || this.host.formatTransform(image.naturalWidth, image.naturalHeight, response.reformatMethod || this.host.formatMethod);
 					this.doc.reformat(image.naturalWidth, image.naturalHeight, baseId, transform);
 				} else { this.doc.baseId = baseId; this.doc.commit(); }
-				this.host.setBusy(false); this.host.setPreviewMode(false); this.host.setStatus('Result added to your edit. Add layers, run another enhancement, or undo. Save image when finished.', false); this.tab('layers');
-			} catch (error) { this.host.setPreviewProcessing(false); this.host.showError(error); }
+				this.host.setBusy(false); this.host.setPreviewMode(false); this.host.setStatus('Result added to your edit. Add layers, run another enhancement, or undo. Save image when finished.', false); this.setComparing(true); this.tab('layers');
+			} catch (error) { this.host.setPreviewProcessing(false); this.host.setPreviewMode(true); this.host.showError(error); }
 			finally { this.saving = false; this.host.closeButton.disabled = false; this.refresh(); }
 		}
 		async export(save) {

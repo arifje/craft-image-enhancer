@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.4.0 - 2026-11-01
+
+- Keep the before/after comparison visible after accepting AI results into the editing session. Reopen it at any time to compare the original image with the current composition.
+- Add a light/dark theme toggle in the editor header and remember the choice in the browser.
+- Preserve editable layers, undo/redo, subsequent enhancements and the single final save while comparing.
+- Add native browser coverage for persistent comparison, keyboard controls, continued editing, responsive light-theme layout and theme persistence.
+
 ## 3.3.0 - 2026-10-31
 
 - Add optional native Craft MCP Tools for enhancement discovery, queued image processing and read-only status.
