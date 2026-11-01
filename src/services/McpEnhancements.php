@@ -9,6 +9,7 @@ use arjanbrinkman\craftimageenhancer\helpers\EnhancementPolicy;
 use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
+use arjanbrinkman\craftimageenhancer\helpers\McpQueueStatus;
 use arjanbrinkman\craftimageenhancer\helpers\ReformatHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\jobs\McpEnhancementJob;
@@ -28,6 +29,9 @@ use Throwable;
 /** Durable orchestration only: image processing remains in the existing provider/format services. */
 class McpEnhancements extends Component
 {
+    /** Terminal request details expire after 30 days; minimal idempotency/provenance records remain. */
+    public const DETAIL_RETENTION_SECONDS = 30 * 86400;
+
     public const TERMINAL = ['complete', 'attachment_conflict', 'attachment_failed', 'failed', 'uncertain'];
 
     /** Validate all destinations before queueing; the same key never starts another paid request. */
@@ -51,13 +55,13 @@ class McpEnhancements extends Component
                 if ($row['requestHash'] !== $requestHash) {
                     throw new EnhancementException('This idempotencyKey already belongs to a different request.');
                 }
-                if ($row['status'] === 'storage_failed') {
+                if ($row['status'] === 'storage_failed' && in_array(McpQueueStatus::read($row['queueJobId'] === null ? null : (int)$row['queueJobId'])['status'], ['failed', 'missing', 'not_queued'], true)) {
                     $saved = Json::decode($row['request']);
                     $user = Access::queued($tokenId, $user, $saved['sectionUid']);
                     Access::section($saved['sectionUid']);
                     $saved['tokenId'] = $tokenId;
                     $this->update($row['requestId'], ['request' => Json::encode($saved), 'status' => 'generated', 'error' => null]);
-                    $this->enqueue($row['requestId'], 'storage_failed');
+                    $this->enqueue($row['requestId'], 'storage_failed', $row['queueJobId'] === null ? null : (int)$row['queueJobId']);
                 }
                 return $this->status($row['requestId'], $user);
             }
@@ -145,10 +149,24 @@ class McpEnhancements extends Component
         }
         $draft = $request['targetDraftId'] === null ? null : Entry::find()->id($request['targetDraftId'])->siteId($request['siteId'])->status(null)->drafts(null)->provisionalDrafts(null)->one();
         $draftReviewUrl = $draft && $draft->canView($user) ? $draft->getCpEditUrl() : null;
+        $queueJobId = $row['queueJobId'] === null ? null : (int)$row['queueJobId'];
+        $queue = McpQueueStatus::read($queueJobId);
+        $execution = McpQueueStatus::execution($row['status'], $queue);
+        $stage = McpQueueStatus::stage($row['status'], $execution);
         return [
+            'operationId' => $id, 'queueJobId' => $queueJobId,
             'requestId' => $id, 'jobId' => $row['queueJobId'] === null ? null : (int) $row['queueJobId'],
             'createdAt' => $row['dateCreated'], 'updatedAt' => $row['dateUpdated'],
-            'stage' => $row['status'], 'progress' => (float) $row['progress'], 'error' => $row['error'],
+            'detailsExpired' => (bool)($request['detailsExpired'] ?? false),
+            'stage' => $stage, 'processingStage' => $row['status'], 'executionStatus' => $execution,
+            'queue' => $queue, 'progress' => $queue['progress'] ?? (float)$row['progress'],
+            'processingProgress' => (float)$row['progress'], 'error' => $row['error'] ?? $queue['error'],
+            'attachmentStatus' => $request['targetDraftId'] === null ? 'not_requested' : match ($row['status']) {
+                'complete' => 'complete',
+                'attachment_conflict' => 'conflict',
+                'attachment_failed' => 'failed',
+                default => 'pending',
+            },
             'sourceAssetId' => $request['sourceAssetId'], 'result' => $result,
             'generationSucceeded' => $asset !== null || in_array($row['status'], ['generated', 'storing', 'storage_failed'], true),
             'storageSucceeded' => $asset !== null,
@@ -164,7 +182,8 @@ class McpEnhancements extends Component
                 'reconstructionAuthorized' => false, 'aiProcessed' => $request['providerOptions'] !== [],
                 'sourceVersion' => $request['sourceVersion'],
             ],
-            'next' => match ($row['status']) {
+            'next' => match ($stage) {
+                'queue_failed', 'interrupted', 'unknown' => 'Ask an operator to inspect the original Craft queue job. Missing queue rows do not prove completion. Do not change the idempotencyKey or repeat a potentially charged operation.',
                 'queued' => 'Poll image_enhancement_status. A Craft queue worker must be running.',
                 'storage_failed' => 'Fix storage/permissions, then resubmit identical arguments and the same idempotencyKey to reuse the retained pixels without another provider request.',
                 default => null,
@@ -172,13 +191,55 @@ class McpEnhancements extends Component
         ];
     }
 
+    /** Compact old terminal payloads during Craft GC, never during status polling. */
+    public function purgeCompletedDetails(): int
+    {
+        $cutoff = Db::prepareDateForDb(new \DateTimeImmutable('-' . self::DETAIL_RETENTION_SECONDS . ' seconds', new \DateTimeZone('UTC')));
+        $rows = (new Query())->from(Schema::TABLE)
+            ->where(['status' => self::TERMINAL])->andWhere(['<', 'dateUpdated', $cutoff])
+            ->andWhere(['like', 'request', '"instructions":'])->orderBy(['id' => SORT_ASC])->limit(100)->all();
+        $count = 0;
+        foreach ($rows as $candidate) {
+            $id = $candidate['requestId'];
+            $lock = 'ie-mcp-process:' . $id;
+            $mutex = Craft::$app->getMutex();
+            if (!$mutex->acquire($lock, 0)) {
+                continue;
+            }
+            try {
+                $row = $this->row($id);
+                if (!in_array($row['status'], self::TERMINAL, true) || $row['dateUpdated'] >= $cutoff) {
+                    continue;
+                }
+                $queue = McpQueueStatus::read($row['queueJobId'] === null ? null : (int)$row['queueJobId']);
+                if (!in_array($queue['status'], ['missing', 'failed', 'not_queued'], true)) {
+                    continue;
+                }
+                $request = Json::decode($row['request']);
+                unset($request['instructions'], $request['tokenId'], $request['beforeIds'], $request['folderId'], $request['rootDraftId']);
+                $request['providerOptions'] = array_intersect_key($request['providerOptions'], array_flip(['provider', 'model']));
+                $request['detailsExpired'] = true;
+                // Preserve the outcome timestamp and idempotency hashes; cleanup is not execution.
+                Db::update(Schema::TABLE, ['request' => Json::encode($request)], ['requestId' => $id, 'request' => $row['request']], updateTimestamp: false);
+                $directory = Craft::$app->getPath()->getStoragePath() . '/image-enhancer/mcp/' . $id;
+                foreach (['png', 'jpg'] as $extension) {
+                    FileHelper::delete($directory . '/result.' . $extension, $directory . '/result.' . $extension . '.part');
+                }
+                $count++;
+            } finally {
+                $mutex->release($lock);
+            }
+        }
+        return $count;
+    }
+
     /** Execute one durable request. Retrying cannot repeat a provider call with unknown outcome. */
-    public function process(string $id): void
+    public function process(string $id, ?callable $reportProgress = null): void
     {
         $lock = 'ie-mcp-process:' . $id;
         $mutex = Craft::$app->getMutex();
         if (!$mutex->acquire($lock, 1)) {
-            return;
+            throw new EnhancementException('This operation is already being processed. No duplicate work was started.');
         }
         $sourcePath = null;
         $path = null;
@@ -186,7 +247,13 @@ class McpEnhancements extends Component
         try {
             $row = $this->row($id);
             if (in_array($row['status'], self::TERMINAL, true)) {
+                if (in_array($row['status'], ['failed', 'uncertain'], true)) {
+                    throw new EnhancementException('This operation has a durable failure or uncertain outcome. No provider request was repeated.');
+                }
                 return;
+            }
+            if ($reportProgress !== null) {
+                $reportProgress(0.05, 'Validating image operation');
             }
             $request = Json::decode($row['request']);
             $user = Craft::$app->getUsers()->getUserById((int) $row['userId']);
@@ -202,7 +269,7 @@ class McpEnhancements extends Component
             if (!$asset && !is_file($path)) {
                 if ($row['status'] !== 'queued') {
                     $this->update($id, ['status' => 'uncertain', 'error' => 'Processing was interrupted without a durable result. The provider may have charged. Review before submitting a new idempotencyKey; no automatic paid retry was made.']);
-                    return;
+                    throw new EnhancementException('Processing was interrupted without a durable result. No potentially charged provider request was repeated.');
                 }
                 // Recheck destination/ownership before incurring AI cost. A field relation conflict
                 // is handled after generation so a completed image is never thrown away.
@@ -216,6 +283,9 @@ class McpEnhancements extends Component
                 $sourcePath = FileHelper::copyAssetToTemp($source);
                 $this->validateSourceFile($sourcePath, $source);
                 $this->update($id, ['status' => 'processing', 'progress' => 0.15]);
+                if ($reportProgress !== null) {
+                    $reportProgress(0.15, 'Processing image');
+                }
                 $generated = $this->generate($request, $source, $sourcePath);
                 try {
                     $this->validateOutput($generated, $request, $source);
@@ -228,18 +298,27 @@ class McpEnhancements extends Component
                     FileHelper::delete($generated);
                 }
                 $this->update($id, ['status' => 'generated', 'progress' => 0.7]);
+                if ($reportProgress !== null) {
+                    $reportProgress(0.7, 'Generated image retained');
+                }
             }
             if (!$asset) {
                 $user = Access::queued($request['tokenId'], $user, $request['sectionUid']);
                 $source = $this->source($request['sourceAssetId'], $user);
                 $this->validateOutput($path, $request, $source);
                 $this->update($id, ['status' => 'storing', 'progress' => 0.8]);
+                if ($reportProgress !== null) {
+                    $reportProgress(0.8, 'Saving result asset');
+                }
                 $asset = $this->saveResult($id, $request, $source, $path, $user);
             }
             if ($asset->trashed || !$asset->canView($user)) {
                 throw new EnhancementException('The result was removed or is no longer accessible; it will not be recreated.');
             }
             $this->update($id, ['resultAssetId' => $asset->id, 'status' => 'attaching', 'progress' => 0.9]);
+            if ($reportProgress !== null) {
+                $reportProgress(0.9, 'Finalizing result and draft attachment');
+            }
             if ($request['targetDraftId'] !== null) {
                 try {
                     $user = Access::queued($request['tokenId'], $user, $request['sectionUid']);
@@ -252,9 +331,17 @@ class McpEnhancements extends Component
                 $this->update($id, ['status' => 'complete', 'progress' => 1]);
             }
             FileHelper::delete($path);
+            if ($reportProgress !== null) {
+                $reportProgress(1.0, 'Image operation finished');
+            }
         } catch (Throwable $e) {
-            $this->update($id, ['status' => $path !== null && is_file($path) ? 'storage_failed' : 'failed', 'error' => $this->safeError($e, 'Image processing or storage failed. Review the queue logs and provider settings. A paid request may have occurred; no automatic duplicate request was made.')]);
+            $checkpoint = $this->row($id);
+            if (!in_array($checkpoint['status'], self::TERMINAL, true)) {
+                $this->update($id, ['status' => $path !== null && is_file($path) ? 'storage_failed' : 'failed', 'error' => $this->safeError($e, 'Image processing or storage failed. Review the queue logs and provider settings. A paid request may have occurred; no automatic duplicate request was made.')]);
+            }
             Craft::warning('ImageEnhancer MCP ' . $id . ': ' . HttpHelper::describe($e), __METHOD__);
+            // Let Craft retain the failed queue row; checkpoint guards prevent paid replay.
+            throw new EnhancementException('Image operation failed. Read image_enhancement_status for the durable outcome.');
         } finally {
             FileHelper::delete($sourcePath);
             Craft::$app->getUser()->setIdentity($priorUser);
@@ -395,10 +482,29 @@ class McpEnhancements extends Component
     }
 
     /** Queue once; queue failure never falls through to a paid operation. */
-    private function enqueue(string $id, string $failureStatus): void
+    private function enqueue(string $id, string $failureStatus, ?int $retryJobId = null): void
     {
         try {
-            $jobId = Craft::$app->getQueue()->push(new McpEnhancementJob(['requestId' => $id]));
+            $queue = Craft::$app->getQueue();
+            if ($retryJobId !== null) {
+                $state = McpQueueStatus::read($retryJobId)['status'];
+                if ($state === 'failed' && $queue instanceof \craft\queue\Queue) {
+                    $queue->retry((string)$retryJobId);
+                    return;
+                }
+                // An operator may have retried the original job since submission's check.
+                if (in_array($state, ['waiting', 'delayed', 'reserved'], true)) {
+                    return;
+                }
+                if ($state !== 'missing') {
+                    throw new EnhancementException('Could not verify the original queue job.');
+                }
+            }
+            $request = Json::decode($this->row($id)['request']);
+            $jobId = Craft::$app->getQueue()->push(new McpEnhancementJob([
+                'requestId' => $id,
+                'description' => 'Image enhancement ' . $id . ': asset ' . $request['sourceAssetId'] . ($request['targetDraftId'] === null ? '' : ', draft ' . $request['targetDraftId']),
+            ]));
             if (!$jobId) {
                 throw new EnhancementException('The queue did not accept this request.');
             }

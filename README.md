@@ -14,7 +14,7 @@ You need an OpenAI API key to analyze images. AI enhancement also requires an AP
 
 ## MCP image tools
 
-Image Enhancer 3.3 adds optional MCP discovery, queued enhancement and read-only status tools. Agents can produce exact-size separate assets and attach them to explicitly selected unpublished drafts, with permission checks, conflict detection and idempotent retries. See [MCP configuration, examples and limitations](docs/mcp-image-enhancement.md). Updating to 3.3 requires `php craft up` and a queue-worker restart.
+Image Enhancer 3.3 adds optional MCP discovery, queued enhancement and read-only status tools. Agents can produce exact-size separate assets and attach them to explicitly selected unpublished drafts, with permission checks, conflict detection and idempotent retries. See [MCP configuration, examples and limitations](docs/mcp-image-enhancement.md). Updating to 3.3 requires `php craft up` and a queue-worker restart. MCP responses distinguish the durable `operationId` from the actual Craft `queueJobId`; legacy `requestId`/`jobId` aliases remain supported. Read-only status separates native queue execution/progress from image checkpoints and draft attachment outcomes. Missing queue rows never imply successful output. Craft GC compacts completed request details after 30 days while preserving idempotency/provenance and recoverable work.
 
 ## Permissions
 

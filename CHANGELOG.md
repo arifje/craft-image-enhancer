@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.4.1 - 2026-11-01
+
+- Clarify MCP operation and native Craft queue identifiers while preserving `requestId` and `jobId` aliases.
+- Report native queue progress, failures, retries, expired reservations and missing jobs separately from durable image and attachment outcomes, without writes during polling.
+- Retain failed processing in Craft's queue manager and reuse its original job for storage recovery, with guards against repeating paid work.
+- Compact completed MCP request details after 30 days through Craft GC while retaining idempotency, provenance, output assets and recoverable operations.
+
 ## 3.4.0 - 2026-11-01
 
 - Keep the before/after comparison visible after accepting AI results into the editing session. Reopen it at any time to compare the original image with the current composition.

@@ -38,6 +38,7 @@ class CleanupService extends Component
     {
         $this->runStep('preview assets', fn() => $this->purgeStalePreviewAssets());
         $this->runStep('generated videos', static fn() => ImageEnhancer::getInstance()->aiVideoGeneration->cleanupExpiredVideos());
+        $this->runStep('MCP request details', static fn() => ImageEnhancer::getInstance()->mcpEnhancements->purgeCompletedDetails());
         $this->runStep('temp files', static fn() => FileHelper::purgeStaleTempFiles(self::TEMP_FILE_MAX_AGE));
     }
 

@@ -14,7 +14,7 @@ class McpEnhancementJob extends BaseJob implements RetryableJobInterface
     /** @inheritdoc */
     public function execute($queue): void
     {
-        ImageEnhancer::getInstance()->mcpEnhancements->process($this->requestId);
+        ImageEnhancer::getInstance()->mcpEnhancements->process($this->requestId, fn(float $progress, string $label) => $this->setProgress($queue, $progress, $label));
     }
 
     /** Provider timeout plus image storage and draft attachment. */

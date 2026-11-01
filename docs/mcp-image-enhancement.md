@@ -52,13 +52,47 @@ For a deterministic, free crop use `"operation":"crop"` and omit instructions/pr
 
 Sources must be JPEG/PNG, at most 50 MiB, 8192 pixels per edge and 24 megapixels. Outputs retain JPEG/PNG format, have 64–8192 pixel edges, at most 24 megapixels and 25 MiB. Final decoded dimensions are checked before saving. Ratios are limited to 1:4–4:1, or 1:3–3:1 for expansion.
 
-Poll the returned request ID:
+Poll the returned operation ID:
 
 ```json
-{"name":"image_enhancement_status","arguments":{"requestId":"returned-request-uuid"}}
+{"name":"image_enhancement_status","arguments":{"operationId":"returned-operation-uuid"}}
 ```
 
-Polling only reads. It never generates, queues, saves or attaches. Responses include the queue job ID, stage/progress/timestamps, safe error, separate generation/storage/attachment outcomes, asset ID/dimensions/URL, natural key `{volume,path,filename}`, draft/field/site IDs, review links, warnings and provenance. Asset URLs may be null for private volumes. Progress is checkpoint-based, not provider streaming progress. Provenance lives in the request table; descriptive alt text is copied from the source, never replaced by technical logs.
+Polling only reads. It never generates, queues, saves, attaches, expires reservations or updates operation rows. Responses distinguish these identifiers and states:
+
+| Field | Meaning |
+| --- | --- |
+| `operationId` | Durable Image Enhancer operation UUID. Use it for MCP status. |
+| `queueJobId` | Actual numeric Craft queue ID, or null when enqueue failed. Use it in Craft's queue manager. |
+| `requestId` | Compatibility alias for `operationId`; existing named and positional status calls continue to work. |
+| `jobId` | Compatibility alias for `queueJobId`. In Image Enhancer this has always been the native queue ID, never the operation UUID. |
+| `queue.status` | Native metadata: `waiting`, `delayed`, `reserved`, `failed`, `missing`, `not_queued`, or `unavailable`. |
+| `queue.progress` | Craft's current progress as a fraction from 0 to 1, or null without an observable row. |
+| `queue.attempt` | Craft's attempt counter, or null. A manual Craft retry resets it; this is not lifetime attempt history. |
+| `queue.reservationExpired` | The native heartbeat is older than its TTR. Polling reports this without moving the job back to waiting. |
+| `executionStatus` | `queued`, `running`, `failed`, `interrupted`, `finished`, `not_queued`, or `unknown`; separate from the processing checkpoint. |
+| `processingStage` / `processingProgress` | Last durable image checkpoint and its coarse progress. A checkpoint is not evidence that a worker is still running. |
+| `attachmentStatus` | `not_requested`, `pending`, `complete`, `conflict`, or `failed`. `pending` describes the unfinished attachment, not a live worker. |
+| `stage` / `progress` | Compatibility fields. Stage retains terminal outcomes, reflects native retry/waiting state, and reports `queue_failed`, `interrupted` or `unknown` instead of stale active checkpoints. Progress uses native queue progress when available, otherwise the retained checkpoint. |
+
+`image_enhancement_status` accepts either `operationId` or legacy `requestId`. If both are supplied, they must match; at least one is required. Do not pass `queueJobId` to the status tool. For example, a queued response may include:
+
+```json
+{
+  "operationId": "f61fc7b3-46b7-4280-88e1-cf3db1c260cf",
+  "requestId": "f61fc7b3-46b7-4280-88e1-cf3db1c260cf",
+  "queueJobId": 812,
+  "jobId": 812,
+  "executionStatus": "queued",
+  "processingStage": "queued",
+  "attachmentStatus": "pending",
+  "queue": {"status":"waiting","progress":0,"attempt":0,"reservationExpired":false,"error":null}
+}
+```
+
+Craft removes successful queue rows, and administrators can also release or purge unfinished jobs. Therefore `queue.status: missing` never proves success: a durable completion/result is required. A removed job with an unfinished checkpoint reports `executionStatus: interrupted`. A durable `complete` or attachment outcome can report `finished` alongside a missing row. Unavailable queue metadata reports `unknown` for unfinished work; no alternate scheduler is used. Raw queue error text and serialized jobs are not exposed. Operators inspect diagnostics in Craft's queue manager/logs.
+
+Responses also retain safe errors, separate generation/storage/attachment outcomes, asset ID/dimensions/URL, natural key `{volume,path,filename}`, draft/field/site IDs, review links, warnings and provenance. Asset URLs may be null for private volumes. Progress is checkpoint-based, not provider streaming progress. Provenance lives in the operation record; descriptive alt text is copied from the source, never replaced by technical logs.
 
 For nested Matrix entries, pass their element ID as `targetDraftId` and the exact root draft element ID as `ownerDraftId`. Every owner must be editable and the ownership chain must be exclusive to that draft. Shared canonical blocks must first be edited/materialized on the draft using Craft. The tool refuses ambiguous ownership; it never falls back to saving a canonical entry.
 
@@ -68,9 +102,22 @@ Submission validates the user/token, source, operation, model, exact size, actua
 
 Reuse **identical arguments and the same idempotency key** for submission retries. Keys are scoped to the user and retained without automatic expiry. Changed arguments with an existing key are rejected. Completed requests return the existing asset. Status is restricted to the initiating user and currently accessible source/result and target section.
 
-A `storage_failed` result means generated pixels were retained privately. Fix storage/permissions, then submit the same arguments/key to enqueue a storage-only recovery without another provider request. A stopped worker can recover an existing durable checkpoint when its original queue job is manually retried. If it stopped before that checkpoint, it reports `uncertain` and does not repeat a potentially charged request. A request left in `processing` beyond the job timeout needs an operator to inspect/retry that original queue job; polling does not restart it. Provider failures are not automatically retried. An enqueue failure reports `failed`; fix the queue and deliberately submit a new key only after confirming no work ran.
+A `storage_failed` result means generated pixels were retained privately. Fix storage/permissions, then submit the same arguments/key to enqueue a storage-only recovery without another provider request. Storage recovery reuses the original failed Craft queue job where it still exists; it creates a new native job only when that row is absent. It does not schedule a second job while a native job is waiting/reserved or the queue is unavailable. A stopped worker can recover an existing durable checkpoint when its original queue job is manually retried. If it stopped before that checkpoint, it reports `uncertain` and does not repeat a potentially charged request. An expired reservation or unfinished operation with a missing row reports `interrupted`; ask an operator to inspect the original queue job before retrying. Polling does not restart it. Provider/storage exceptions mark the native Craft job failed as well as retaining a safe durable outcome. A manual retry of a durable provider failure or uncertain outcome does not repeat the provider call. Provider failures are not automatically retried. An enqueue failure reports `failed`; fix the queue and deliberately submit a new key only after confirming no work ran.
 
-Known limits: no live AI fidelity guarantee; no autonomous publication; no automatic attachment retry after a human conflict; no automatic provenance expiration; filesystem writes cannot be transactionally rolled back with database changes. Retained private files require operator cleanup after abandoned storage failures. Tests use the native Craft database queue; alternative queue drivers and PostgreSQL have not been validated.
+## Storage and retention
+
+The existing `imageenhancer_mcp_requests` table is an operation/result ledger, not a second queue. No new scheduler, attempt counter, reservation, retry timer or queue table is added. Its retained fields have specific purposes:
+
+- Operation/user IDs and idempotency/request hashes enforce ownership and identical-submission deduplication.
+- The normalized request holds destination/scope authorization, the original source version, relation snapshot and provider instructions needed for execution or safe recovery.
+- Status, safe error and legacy progress record durable image/attachment outcomes after Craft removes the queue row. Runtime queue progress, attempts and reservation state are read from Craft and are not copied into this ledger.
+- The native queue ID links to Craft. The result asset ID and request provenance identify the existing output, dimensions and origin without changing its alt text.
+
+During Craft garbage collection, up to 100 terminal operation payloads per run are compacted after **30 days since the last outcome update**. Instructions, initiating token ID, relation snapshot and recovery-only folder/root details are removed; only provider/model identifiers remain from provider tuning. Leftover private result/partial files for these terminal operations are deleted. `detailsExpired` reports compaction; the outcome timestamp is preserved. This is asynchronous retention, so GC must run regularly.
+
+Minimal ownership/idempotency hashes, source/result provenance and final outcomes remain indefinitely to preserve the existing promise that an old idempotency key cannot trigger another paid operation. Saved output assets are never deleted by this cleanup. Active/unknown queue jobs and nonterminal recoverable operations, including `storage_failed`, are exempt: automatic expiry could destroy in-flight work or the only retained generated pixels. Operators must resolve or explicitly abandon those recoveries under their site's retention policy. This deliberately bounds completed detailed payloads rather than silently expiring deduplication keys or recoverable work. No destructive migration or table rewrite is required.
+
+Known limits: no live AI fidelity guarantee; no autonomous publication; no automatic attachment retry after a human conflict; filesystem writes cannot be transactionally rolled back with database changes. Native database-backed Craft queue metadata (including Craft's proxy-queue wrapper) is supported; a fully substituted queue implementation reports `unavailable` rather than guessing. Alternative backends and PostgreSQL have not been validated.
 
 ## Validation
 
