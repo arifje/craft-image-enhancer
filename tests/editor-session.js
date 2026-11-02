@@ -13,16 +13,22 @@ const Editor = context.window.ImageEnhancerEditor;
     const storage = new Map(); context.window.localStorage = { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) };
     Object.assign(editor, {
         images: new Map(), previews: new Map(), doc: new EditorDocument(800, 600),
-        refresh() {}, tab() {}, renderSelection() {}, state: 'idle',
+        refresh() {}, layersPanel: node(), aiPanel: node(), layersTab: node(), aiTab: node(), renderSelection() {}, state: 'idle',
         comparisonBar: node(), comparisonImage: node(), comparisonDivider: node(), compareButton: node(), comparisonRange: { ...node(), value: '50' },
         themeButton: node(), root: { dataset: {} }, host: {
             closeButton: {}, setBusy(value) { busyStates.push(value); editor.state = value ? 'busy' : 'idle'; }, setActionState(value) { editor.state = value; }, setPreviewProcessing() {}, setPreviewMode() {}, setStatus() {},
             showError(error) { throw error; },
         },
     });
+    editor.restoreTab(); assert.equal(editor.preferredTab, 'layers'); assert.equal(editor.layersPanel.hidden, false);
+    storage.set('imageEnhancerTab', 'invalid'); editor.restoreTab(); assert.equal(editor.preferredTab, 'layers');
+    editor.tab('ai', true); assert.equal(storage.get('imageEnhancerTab'), 'ai');
+    editor.tab('layers'); assert.equal(storage.get('imageEnhancerTab'), 'ai', 'Automatic tab switches do not overwrite explicit choices');
+    editor.restoreTab(); assert.equal(editor.aiPanel.hidden, false); assert.equal(editor.aiTab.attrs['aria-pressed'], 'true');
     const shape = editor.doc.add('rect');
     Object.assign(editor.host, { token: 'first', previewId: 11, enhancedUrl: '/first.png' });
     await editor.acceptPreview();
+    assert.equal(editor.aiPanel.hidden, false, 'AI result returns to the explicitly selected tab');
     assert.equal(editor.comparing, true, 'Accepted AI result keeps comparison open');
     assert.equal(editor.comparisonBar.hidden, false, 'Comparison stays visible after image decoding');
     editor.comparisonRange.value = 25; editor.updateComparison();
@@ -35,7 +41,9 @@ const Editor = context.window.ImageEnhancerEditor;
     assert.equal(editor.themeButton.attrs['aria-label'], 'Use dark theme');
     editor.theme = 'dark'; editor.restoreTheme(); assert.equal(editor.theme, 'light', 'Theme choice survives a new editor session');
     context.window.localStorage = { getItem() { throw Error('Unavailable'); }, setItem() { throw Error('Unavailable'); } };
-    editor.restoreTheme(); editor.setTheme('light'); assert.equal(editor.theme, 'light', 'Theme works without browser storage');
+    editor.restoreTheme(); editor.setTheme('light');
+    editor.tab('layers', true); editor.tab('ai'); assert.equal(editor.preferredTab, 'layers');
+    editor.tab('ai', true); assert.equal(editor.preferredTab, 'ai', 'Choice works for this session without storage'); assert.equal(editor.theme, 'light', 'Theme works without browser storage');
     assert.equal(editor.doc.snapshot(), snapshot, 'Theme changes never modify the image document');
     assert.equal(editor.sourcePayload().sourceToken, 'first');
     assert.equal(editor.doc.layers[0].id, shape.id);

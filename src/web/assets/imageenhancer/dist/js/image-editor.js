@@ -87,7 +87,7 @@
 			this.layersPanel = el('section', 'ie-layers-panel'); this.aiPanel = el('section', 'ie-ai-panel');
 			this.layersTab = el('button', 'is-active', 'Layers'); this.aiTab = el('button', '', 'AI tools');
 			for (const tab of [this.layersTab, this.aiTab]) tab.type = 'button';
-			this.layersTab.addEventListener('click', () => this.tab('layers')); this.aiTab.addEventListener('click', () => this.tab('ai')); tabs.append(this.layersTab, this.aiTab);
+			this.layersTab.addEventListener('click', () => this.tab('layers', true)); this.aiTab.addEventListener('click', () => this.tab('ai', true)); tabs.append(this.layersTab, this.aiTab);
 			const layerHeading = el('div', 'ie-panel-heading'); layerHeading.append(el('h3', '', 'Layers'), el('span', '', 'Top → bottom'));
 			this.layerList = el('div', 'ie-layer-list');
 			const layerActions = el('div', 'ie-layer-actions');
@@ -103,7 +103,7 @@
 			this.aiNote = el('p', 'ie-help', 'AI works on the base image. Your layers stay editable above it.'); this.aiPanel.append(this.aiNote);
 			for (const node of [this.host.providerControls, this.host.customEditPanel, this.host.formatPanel, this.host.videoPanel]) this.aiPanel.append(node);
 			this.aiPanel.append(this.root.querySelector('.image-enhancer-cp-actions'));
-			sidebar.append(tabs, this.layersPanel, this.aiPanel); this.aiPanel.hidden = true;
+			sidebar.append(tabs, this.layersPanel, this.aiPanel); this.restoreTab();
 			this.workspace = workspace; this.sidebarHandle = el('div', 'ie-sidebar-resizer');
 			this.sidebarHandle.setAttribute('role', 'separator'); this.sidebarHandle.setAttribute('aria-orientation', 'vertical'); this.sidebarHandle.setAttribute('aria-label', 'Resize side panel'); this.sidebarHandle.tabIndex = 0;
 			this.sidebarHandle.title = 'Drag to resize the side panel · double-click to reset';
@@ -183,7 +183,17 @@
 				input.addEventListener('blur', () => { if (this.doc) { this.doc.commit(); this.refresh(); } }); field.append(input); this.propertyGrid.append(field); this.controls[key] = input;
 			}
 		}
-		tab(name) {
+		restoreTab() {
+			this.preferredTab = 'layers';
+			try { if (window.localStorage.getItem('imageEnhancerTab') === 'ai') this.preferredTab = 'ai'; } catch (error) { /* storage unavailable */ }
+			this.tab(this.preferredTab);
+		}
+		tab(name, persist = false) {
+			name = name === 'ai' ? 'ai' : 'layers';
+			if (persist) {
+				this.preferredTab = name;
+				try { window.localStorage.setItem('imageEnhancerTab', name); } catch (error) { /* storage unavailable */ }
+			}
 			this.layersPanel.hidden = name !== 'layers'; this.aiPanel.hidden = name !== 'ai';
 			this.layersTab.classList.toggle('is-active', name === 'layers'); this.aiTab.classList.toggle('is-active', name === 'ai');
 			this.layersTab.setAttribute('aria-pressed', String(name === 'layers')); this.aiTab.setAttribute('aria-pressed', String(name === 'ai'));
@@ -401,7 +411,7 @@
 					const transform = response.editorTransform || this.host.formatTransform(image.naturalWidth, image.naturalHeight, response.reformatMethod || this.host.formatMethod);
 					this.doc.reformat(image.naturalWidth, image.naturalHeight, baseId, transform);
 				} else { this.doc.baseId = baseId; this.doc.commit(); }
-				this.host.setBusy(false); this.host.setPreviewMode(false); this.host.setStatus('Result added to your edit. Add layers, run another enhancement, or undo. Save image when finished.', false); this.setComparing(true); this.tab('layers');
+				this.host.setBusy(false); this.host.setPreviewMode(false); this.host.setStatus('Result added to your edit. Add layers, run another enhancement, or undo. Save image when finished.', false); this.setComparing(true); this.tab(this.preferredTab);
 			} catch (error) { this.host.setPreviewProcessing(false); this.host.setPreviewMode(true); this.host.showError(error); }
 			finally { this.saving = false; this.host.closeButton.disabled = false; this.refresh(); }
 		}

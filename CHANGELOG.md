@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.0 - 2026-11-02
+
+- Remember the last explicitly selected Layers or AI tools tab across editor sessions and page reloads.
+- Return to the chosen tab after accepting an AI result; automatic tool and processing switches do not overwrite the preference.
+- Keep tab controls usable when browser storage is unavailable.
+
 ## 3.4.1 - 2026-11-01
 
 - Clarify MCP operation and native Craft queue identifiers while preserving `requestId` and `jobId` aliases.

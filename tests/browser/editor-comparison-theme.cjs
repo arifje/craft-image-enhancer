@@ -35,6 +35,7 @@ const check = (value, label) => { assert.ok(value, label); checks++; console.log
         const previous = await action('status'); if (previous.token) await action('cancel', {token: previous.token}); await action('reset');
         await open(); await enhance();
         if (process.env.IE_BASELINE_DIR) { check(!await compareVisible(), 'Released version reproduces disappearing comparison after auto-accept'); return; }
+        check(await page.$eval('.ie-tabs button:nth-child(2)', node => node.getAttribute('aria-pressed') === 'true'), 'AI tab stays selected after enhancement');
         check(await compareVisible(), 'Comparison remains visible after acceptance and delayed callbacks');
         check(await page.$eval('.ie-compare-toggle', node => node.getAttribute('aria-pressed') === 'true'), 'Compare toggle announces its active state');
         await page.focus('.ie-comparison-bar input'); await page.keyboard.press('Home');
@@ -64,6 +65,12 @@ const check = (value, label) => { assert.ok(value, label); checks++; console.log
         await page.setViewport({width: 1440, height: 1050});
         await page.click('[aria-label="Close"]'); await page.click('.ie-discard-edits'); await page.waitForFunction(() => !document.querySelector('.ie-modal') && ![...document.querySelectorAll('.modal-shade')].some(node => node.getClientRects().length && getComputedStyle(node).display !== 'none'));
         await open(); check(await page.$eval('.ie-modal', node => node.dataset.theme === 'light'), 'Light theme persists when reopening the editor');
+        check(await page.$eval('.ie-tabs button:nth-child(2)', node => node.getAttribute('aria-pressed') === 'true'), 'AI tab persists when reopening');
+        await page.click('.ie-tabs button:first-child');
+        await page.click('[aria-label="Close"]');
+        await page.waitForFunction(() => !document.querySelector('.ie-modal') && ![...document.querySelectorAll('.modal-shade')].some(node => node.getClientRects().length && getComputedStyle(node).display !== 'none'));
+        await page.reload(); await open();
+        check(await page.$eval('.ie-tabs button:first-child', node => node.getAttribute('aria-pressed') === 'true'), 'Layers tab persists after page reload');
         await page.click('[aria-label="Use dark theme"]'); check(await page.$eval('.ie-modal', node => node.dataset.theme === 'dark'), 'Dark theme can be restored');
         check(errors.length === 0, 'No browser JavaScript errors: ' + errors.join('; '));
         console.log(`Passed ${checks} native comparison/theme UI checks.`);
