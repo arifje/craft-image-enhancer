@@ -277,7 +277,7 @@ $plugin->mcpEnhancements->purgeCompletedDetails();
 $afterGc=$tools->status(operationId:$ai['operationId']);
 $pruned=(new Query())->from(Requests::TABLE)->where(['requestId'=>$ai['operationId']])->one();
 $prunedRequest=Json::decode($pruned['request']);
-$check($afterGc['detailsExpired'] && !array_key_exists('instructions',$prunedRequest) && !array_key_exists('tokenId',$prunedRequest) && $pruned['dateUpdated']===$old, 'GC compacts terminal payloads without changing outcome time');
+$check($afterGc['detailsExpired'] && !array_key_exists('instructions',$prunedRequest) && !array_key_exists('tokenId',$prunedRequest) && !array_key_exists('caller',$prunedRequest) && $pruned['dateUpdated']===$old, 'GC compacts terminal payloads without changing outcome time');
 $check($afterGc['result']===$beforeGc['result'] && $afterGc['provenance']===$beforeGc['provenance'] && $call($aiReq)['result']['assetId']===$ai['result']['assetId'], 'GC preserves output, provenance and same-key idempotency');
 $check(!$tools->status(operationId:$retained['operationId'])['detailsExpired'], 'GC leaves waiting operation details intact');
 $queue->release((string)$retained['queueJobId']);

@@ -73,7 +73,7 @@ class ImageTools
         ?int $replaceAssetId = null,
     ): array {
         $input = compact('sourceAssetId', 'idempotencyKey', 'operation', 'aspectRatio', 'width', 'height', 'instructions', 'provider', 'model', 'targetDraftId', 'field', 'siteId', 'ownerDraftId', 'replaceAssetId');
-        return $this->run(static fn(): array => ImageEnhancer::getInstance()->mcpEnhancements->submit($input, Access::user(), Access::tokenId()));
+        return $this->run(static fn(): array => ImageEnhancer::getInstance()->mcpEnhancements->submit($input, Access::user(), Access::caller()));
     }
 
     #[McpTool(

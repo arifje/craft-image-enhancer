@@ -36,6 +36,24 @@ namespace arifje\mcptools\support {
         public static function token(): ?\arifje\mcptools\http\Token {}
         public static function hasCapability(\arifje\mcptools\enums\Capability $capability): bool {}
         public static function allowsSection(?string $uid): bool {}
+        public static function scope(): ?\arifje\mcptools\http\Scope {}
+        public static function userId(): ?int {}
+    }
+}
+namespace arifje\mcptools\support {
+    final class Caller {
+        public const string HTTP = 'http';
+        public const string LOCAL = 'local';
+        public const string NO_CALLER = '';
+        public function __construct(public string $transport, public int $userId, public ?\arifje\mcptools\http\Scope $scope = null, public ?int $tokenId = null) {}
+        public static function current(): ?self {}
+        /** @return array{transport: string, userId: int, scope: ?string, tokenId: ?int} */
+        public function toArray(): array {}
+        public static function fromArray(mixed $data): ?self {}
+        public static function fromToken(int $tokenId, int $userId): self {}
+        public function isLocal(): bool {}
+        /** @param list<\arifje\mcptools\enums\Capability> $capabilities */
+        public function refusal(?string $sectionUid = null, ?string $tool = null, array $capabilities = [], bool $dangerous = false): ?string {}
     }
 }
 namespace arifje\mcptools\models {

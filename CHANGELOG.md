@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.6.0 - 2026-11-11
+
+- The MCP image tools now also work when called from inside Craft, such as by the AI assistant through MCP Tools' `LocalClient`. They used to accept only an HTTP token and refused those calls with "Connect over HTTP with a user-bound Craft MCP Tools token".
+- Queued requests store who started them (a token, or the Craft user and scope of a local call) through MCP Tools' `Caller`, and check it again before the paid call and before attaching. Requests queued before this release keep their token check.
+- Requires Craft MCP Tools 1.8 or later when installed alongside it.
+
 ## 3.5.0 - 2026-11-02
 
 - Remember the last explicitly selected Layers or AI tools tab across editor sessions and page reloads.

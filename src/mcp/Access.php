@@ -3,27 +3,28 @@
 namespace arjanbrinkman\craftimageenhancer\mcp;
 
 use arifje\mcptools\enums\Capability;
-use arifje\mcptools\http\RecordStore;
 use arifje\mcptools\http\Scope;
 use arifje\mcptools\Mcp;
-use arifje\mcptools\records\Token as TokenRecord;
 use arifje\mcptools\support\CallContext;
+use arifje\mcptools\support\Caller;
 use arjanbrinkman\craftimageenhancer\exceptions\EnhancementException as RuntimeException;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use Craft;
 use craft\elements\User;
-use DateTimeImmutable;
 
 /** HTTP principal and queued authorization, loaded only by optional MCP integration. */
 class Access
 {
-    /** HTTP tools never borrow an implicit console/admin identity. */
+    /**
+     * The Craft user the call acts as: the user of an HTTP token, or the
+     * signed-in user of a call made inside Craft (MCP Tools' LocalClient, as
+     * used by the AI assistant). Never an implicit stdio/admin identity.
+     */
     public static function user(): User
     {
         $user = Craft::$app->getUser()->getIdentity();
-        $token = CallContext::token();
-        if (!CallContext::isHttp() || !$token || !$user instanceof User || $token->userId !== (int) $user->id) {
-            throw new RuntimeException('Connect over HTTP with a user-bound Craft MCP Tools token.');
+        if (!$user instanceof User || !Caller::current() instanceof Caller) {
+            throw new RuntimeException('Connect as a Craft user: over HTTP with a user-bound Craft MCP Tools token, or from inside Craft (such as the AI assistant). A stdio connection has no user.');
         }
         self::assertUser($user);
         return $user;
@@ -37,30 +38,38 @@ class Access
         }
     }
 
-    /** Capture only a token identifier, never its secret or hash. */
-    public static function tokenId(): int
+    /**
+     * Who started the request, to store with it: ids and a scope only, never
+     * a token secret or hash.
+     *
+     * @return array<string, mixed>
+     */
+    public static function caller(): array
     {
-        $token = CallContext::token();
-        if (!$token?->id || $token->scope === Scope::ReadOnly || !CallContext::hasCapability(Capability::Upload)) {
-            throw new RuntimeException('This operation needs a content/full token with the upload capability.');
+        $caller = Caller::current();
+        if (!$caller instanceof Caller || CallContext::scope() === Scope::ReadOnly || !CallContext::hasCapability(Capability::Upload)) {
+            throw new RuntimeException('This operation needs a content/full connection with the upload capability.');
         }
-        return $token->id;
+        return $caller->toArray();
     }
 
-    /** Live token, capability, section and plugin gates before paid work and attachment. */
-    public static function queued(int $tokenId, User $user, ?string $sectionUid): User
+    /**
+     * Live caller, capability, section and plugin gates before paid work and
+     * attachment.
+     *
+     * @param array<string, mixed>|int $caller the stored caller, or the token id requests stored before 3.6.0
+     */
+    public static function queued(array|int $caller, User $user, ?string $sectionUid): User
     {
         if (!Craft::$app->getPlugins()->isPluginEnabled('mcp-tools') || !Mcp::isToolEnabled('image_enhance')) {
             throw new RuntimeException('Image enhancement MCP tools have been disabled.');
         }
-        $record = TokenRecord::findOne($tokenId);
-        $token = $record ? (new RecordStore())->findByHash($record->tokenHash) : null;
-        if (!$token || $token->userId !== (int) $user->id || $token->expired(new DateTimeImmutable()) || $token->scope === Scope::ReadOnly || !$token->hasCapability(Capability::Upload)
-            || $token->scope->isDisabled(Mcp::getInstance()->getSettings()->disabledScopes)) {
-            throw new RuntimeException('The initiating token was revoked, expired or no longer permits uploads. Submit a new authorized request.');
-        }
-        if ($sectionUid !== null && !$token->allowsSection($sectionUid)) {
-            throw new RuntimeException('The initiating token no longer permits the draft section.');
+        $principal = is_int($caller) ? Caller::fromToken($caller, (int) $user->id) : Caller::fromArray($caller);
+        $refusal = !$principal instanceof Caller || $principal->userId !== (int) $user->id
+            ? Caller::NO_CALLER
+            : $principal->refusal($sectionUid, 'image_enhance', [Capability::Upload]);
+        if ($refusal !== null) {
+            throw new RuntimeException($refusal . ' Submit a new authorized request.');
         }
         // A provider call can outlive a permission change in another request.
         Craft::$app->getUserPermissions()->reset();

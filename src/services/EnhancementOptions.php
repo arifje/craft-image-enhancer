@@ -53,7 +53,7 @@ class EnhancementOptions
             'capabilities' => ['crop' => true, 'padding' => class_exists(\Imagick::class), 'generativeExpansion' => class_exists(\Imagick::class) && $providers !== [], 'upscale' => 'Proportional Lanczos resampling; no claim of recovered factual detail.'],
             'constraints' => ['sourceMimeTypes' => ['image/jpeg', 'image/png'], 'maxSourceBytes' => 52428800, 'maxOutputBytes' => 26214400, 'maxPixels' => ReformatHelper::MAX_PIXELS, 'minOutputEdge' => ReformatHelper::MIN_EDGE, 'maxEdge' => ReformatHelper::MAX_EDGE, 'maxInstructionsLength' => 2000],
             'destinations' => ['sourceFolder' => 'A separate asset alongside the source when no target is supplied.', 'draftField' => 'Actual layout Assets field upload destination. Supply targetDraftId (element ID), siteId and field; nested entries also need ownerDraftId. Default append; replaceAssetId replaces only that selected relation.'],
-            'requires' => ['User-bound HTTP MCP token with content/full scope and upload capability', 'Use AI image tools and native source, volume, site and draft permissions', 'Craft queue worker', 'Imagick for padding, preserve-scene sizing and expansion'],
+            'requires' => ['A Craft user: a user-bound HTTP MCP token with content/full scope and upload capability, or a call made inside Craft (MCP Tools 1.8+ LocalClient, such as the AI assistant)', 'Use AI image tools and native source, volume, site and draft permissions', 'Craft queue worker', 'Imagick for padding, preserve-scene sizing and expansion'],
         ];
     }
 

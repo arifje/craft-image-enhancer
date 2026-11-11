@@ -35,7 +35,8 @@ class McpEnhancements extends Component
     public const TERMINAL = ['complete', 'attachment_conflict', 'attachment_failed', 'failed', 'uncertain'];
 
     /** Validate all destinations before queueing; the same key never starts another paid request. */
-    public function submit(array $input, User $user, int $tokenId): array
+    /** @param array<string, mixed> $caller from Access::caller() */
+    public function submit(array $input, User $user, array $caller): array
     {
         Access::assertUser($user);
         $key = $input['idempotencyKey'];
@@ -57,15 +58,16 @@ class McpEnhancements extends Component
                 }
                 if ($row['status'] === 'storage_failed' && in_array(McpQueueStatus::read($row['queueJobId'] === null ? null : (int)$row['queueJobId'])['status'], ['failed', 'missing', 'not_queued'], true)) {
                     $saved = Json::decode($row['request']);
-                    $user = Access::queued($tokenId, $user, $saved['sectionUid']);
+                    $user = Access::queued($caller, $user, $saved['sectionUid']);
                     Access::section($saved['sectionUid']);
-                    $saved['tokenId'] = $tokenId;
+                    unset($saved['tokenId']);
+                    $saved['caller'] = $caller;
                     $this->update($row['requestId'], ['request' => Json::encode($saved), 'status' => 'generated', 'error' => null]);
                     $this->enqueue($row['requestId'], 'storage_failed', $row['queueJobId'] === null ? null : (int)$row['queueJobId']);
                 }
                 return $this->status($row['requestId'], $user);
             }
-            $user = Access::queued($tokenId, $user, null);
+            $user = Access::queued($caller, $user, null);
             $source = $this->source($input['sourceAssetId'], $user);
             if (mb_strlen($input['instructions']) > 2000) {
                 throw new EnhancementException('Keep instructions under 2000 characters.');
@@ -87,7 +89,7 @@ class McpEnhancements extends Component
             $request = array_merge($input, $size, [
                 'siteId' => $input['siteId'] ?? (int) Craft::$app->getSites()->getPrimarySite()->id,
                 'providerOptions' => $provider,
-                'tokenId' => $tokenId,
+                'caller' => $caller,
                 'sourceVersion' => $source->dateUpdated?->format('U.u'),
                 'folderId' => (int) $source->folderId,
                 'sectionUid' => null,
@@ -98,7 +100,7 @@ class McpEnhancements extends Component
                 $request = array_merge($request, (new EnhancementDrafts())->prepare($request, $user));
             }
             EnhancementDrafts::folder($request['folderId'], $user);
-            $user = Access::queued($tokenId, $user, $request['sectionUid']);
+            $user = Access::queued($caller, $user, $request['sectionUid']);
             Access::section($request['sectionUid']);
             $id = StringHelper::UUID();
             $now = Db::prepareDateForDb(new \DateTime());
@@ -112,6 +114,17 @@ class McpEnhancements extends Component
         } finally {
             $mutex->release($lock);
         }
+    }
+
+    /**
+     * The caller a request was started by: stored as `caller` since 3.6.0,
+     * as a bare `tokenId` before.
+     *
+     * @return array<string, mixed>|int
+     */
+    private static function caller(array $request): array|int
+    {
+        return $request['caller'] ?? (int) ($request['tokenId'] ?? 0);
     }
 
     /** Read-only status, including safe review links; never enqueues or saves anything. */
@@ -216,7 +229,7 @@ class McpEnhancements extends Component
                     continue;
                 }
                 $request = Json::decode($row['request']);
-                unset($request['instructions'], $request['tokenId'], $request['beforeIds'], $request['folderId'], $request['rootDraftId']);
+                unset($request['instructions'], $request['tokenId'], $request['caller'], $request['beforeIds'], $request['folderId'], $request['rootDraftId']);
                 $request['providerOptions'] = array_intersect_key($request['providerOptions'], array_flip(['provider', 'model']));
                 $request['detailsExpired'] = true;
                 // Preserve the outcome timestamp and idempotency hashes; cleanup is not execution.
@@ -260,7 +273,7 @@ class McpEnhancements extends Component
             if (!$user) {
                 throw new EnhancementException('The initiating user no longer exists.');
             }
-            $user = Access::queued($request['tokenId'], $user, $request['sectionUid']);
+            $user = Access::queued(self::caller($request), $user, $request['sectionUid']);
             Craft::$app->getUser()->setIdentity($user);
             $source = $this->source($request['sourceAssetId'], $user);
             EnhancementDrafts::folder($request['folderId'], $user);
@@ -303,7 +316,7 @@ class McpEnhancements extends Component
                 }
             }
             if (!$asset) {
-                $user = Access::queued($request['tokenId'], $user, $request['sectionUid']);
+                $user = Access::queued(self::caller($request), $user, $request['sectionUid']);
                 $source = $this->source($request['sourceAssetId'], $user);
                 $this->validateOutput($path, $request, $source);
                 $this->update($id, ['status' => 'storing', 'progress' => 0.8]);
@@ -321,7 +334,7 @@ class McpEnhancements extends Component
             }
             if ($request['targetDraftId'] !== null) {
                 try {
-                    $user = Access::queued($request['tokenId'], $user, $request['sectionUid']);
+                    $user = Access::queued(self::caller($request), $user, $request['sectionUid']);
                     $status = $this->attach($request, $asset, $user);
                     $this->update($id, ['status' => $status, 'progress' => 1, 'error' => $status === 'attachment_conflict' ? 'The draft field or destination changed after submission. The generated asset was retained; no editor work was overwritten.' : null]);
                 } catch (Throwable $e) {

@@ -2,7 +2,7 @@
   "name": "arjan-brinkman/craft-image-enhancer",
   "description": "Checks, enhances, and anonymizes image assets with AI and local image tooling.",
   "type": "craft-plugin",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "require": {
     "php": "^8.2",
     "craftcms/cms": "^5.11.0"
@@ -10,7 +10,7 @@
   "require-dev": {
     "craftcms/ecs": "dev-main",
     "craftcms/phpstan": "dev-main",
-    "mcp/sdk": "^0.8",
+    "mcp/sdk": "^0.9",
     "phpstan/phpstan": "^2.1"
   },
   "autoload": {
@@ -57,7 +57,10 @@
       "craftcms/plugin-installer": true
     }
   },
+  "conflict": {
+    "arifje/craft-mcp-tools": "<1.8"
+  },
   "suggest": {
-    "arifje/craft-mcp-tools": "^1.2 for optional user-bound HTTP MCP image tools (PHP 8.3+)"
+    "arifje/craft-mcp-tools": "^1.8 for the optional MCP image tools, over HTTP or from inside Craft (PHP 8.3+)"
   }
 }
