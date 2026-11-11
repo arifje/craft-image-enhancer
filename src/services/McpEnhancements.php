@@ -91,6 +91,7 @@ class McpEnhancements extends Component
                 'providerOptions' => $provider,
                 'caller' => $caller,
                 'sourceVersion' => $source->dateUpdated?->format('U.u'),
+                'sourceFingerprint' => self::sourceFingerprint($source),
                 'folderId' => (int) $source->folderId,
                 'sectionUid' => null,
                 'beforeIds' => [],
@@ -114,6 +115,21 @@ class McpEnhancements extends Component
         } finally {
             $mutex->release($lock);
         }
+    }
+
+    /**
+     * What identifies the source image file: its size, dimensions and the file's own
+     * modified time. A save of the asset record alone (transforms, metadata, a rename)
+     * leaves it as it is; a replaced file does not.
+     */
+    public static function sourceFingerprint(Asset $source): string
+    {
+        return implode('|', [
+            (int) $source->size,
+            (int) $source->width,
+            (int) $source->height,
+            $source->dateModified?->format('U') ?? '',
+        ]);
     }
 
     /**
@@ -289,8 +305,14 @@ class McpEnhancements extends Component
                 if ($request['targetDraftId'] !== null) {
                     (new EnhancementDrafts())->resolve($request['targetDraftId'], $request['siteId'], $request['field'], $request['ownerDraftId'], $user);
                 }
-                if ($source->dateUpdated?->format('U.u') !== $request['sourceVersion']) {
-                    throw new EnhancementException('The source asset changed after submission. Submit a new request after reviewing it.');
+                // The file, not the asset record: plugins re-save a fresh upload (transforms,
+                // metadata, renaming) without touching the image, and that refused every
+                // enhancement of a just-made frame. Requests from before keep their check.
+                $changed = isset($request['sourceFingerprint'])
+                    ? self::sourceFingerprint($source) !== $request['sourceFingerprint']
+                    : $source->dateUpdated?->format('U.u') !== $request['sourceVersion'];
+                if ($changed) {
+                    throw new EnhancementException('The source image file changed after submission. Submit a new request after reviewing it.');
                 }
                 (new EnhancementOptions())->provider($request['operation'], $request['providerOptions']['provider'] ?? null, $request['providerOptions']['model'] ?? null);
                 $sourcePath = FileHelper::copyAssetToTemp($source);

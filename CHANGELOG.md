@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.6.1 - 2026-11-11
+
+- An MCP image enhancement of a freshly made image (a frame taken from a video, a new upload) failed with "The source asset changed after submission". The request remembered when the asset record was last saved, and plugins save a new asset again right after upload (transforms, metadata, renaming) without touching the image. The check now compares the image file itself (size, dimensions and the file's modified time), so only a replaced file stops the request. Requests queued before this release keep their old check.
+
 ## 3.6.0 - 2026-11-11
 
 - The MCP image tools now also work when called from inside Craft, such as by the AI assistant through MCP Tools' `LocalClient`. They used to accept only an HTTP token and refused those calls with "Connect over HTTP with a user-bound Craft MCP Tools token".
