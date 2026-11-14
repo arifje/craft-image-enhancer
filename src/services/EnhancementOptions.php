@@ -35,7 +35,7 @@ class EnhancementOptions
                 'provider' => $provider,
                 'defaultModel' => $default,
                 'models' => array_values(array_unique([...array_column($models, 'value'), $default])),
-                'operations' => ['preserve_scene', 'generative_expand'],
+                'operations' => ['preserve_scene', 'enhance', 'generative_expand'],
                 'incursAiCosts' => true,
             ];
         }
@@ -44,6 +44,7 @@ class EnhancementOptions
             'defaultProvider' => $settings->imageEnhancementProvider === Settings::IMAGE_PROVIDER_FRONTEND ? null : $settings->imageEnhancementProvider,
             'operations' => [
                 ['operation' => 'preserve_scene', 'available' => class_exists(\Imagick::class) && $providers !== [], 'incursAiCosts' => true, 'description' => 'AI corrections, followed by deterministic fit with blurred padding if the ratio changes. AI fidelity needs human review; no reconstruction is authorized.'],
+                ['operation' => 'enhance', 'available' => $providers !== [], 'incursAiCosts' => true, 'description' => 'The Enhance button of the control panel: the site\'s own enhancement prompt and tuning levels make the picture clearer (sharper, less noise and blur, better colour and light) without changing what is in it. Keeps the picture\'s own ratio; to change the ratio use crop or generative_expand, before or after. AI fidelity needs human review.'],
                 ['operation' => 'crop', 'available' => true, 'incursAiCosts' => false, 'description' => 'Deterministic crop around the asset focal point and proportional resize.'],
                 ['operation' => 'pad', 'available' => class_exists(\Imagick::class), 'incursAiCosts' => false, 'description' => 'Preserve all source content and fit on a blurred copy of the image.'],
                 ['operation' => 'generative_expand', 'available' => class_exists(\Imagick::class) && $providers !== [], 'incursAiCosts' => true, 'description' => 'Explicitly generate outside the source. Composite the original centre back over the AI output.'],

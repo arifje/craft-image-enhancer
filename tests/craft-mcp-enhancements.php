@@ -83,7 +83,7 @@ $tools=new ImageTools();
 foreach (['image_enhancement_options','image_enhance','image_enhancement_status'] as $name) $check(Mcp::getToolRegistry()->getDefinition($name)!==null,'Tool registered: '.$name);
 $schema=(new \Mcp\Capability\Discovery\SchemaGenerator(new \Mcp\Capability\Discovery\DocBlockParser()))->generate(new ReflectionMethod(ImageTools::class,'enhance'));
 $check($schema['required']===['sourceAssetId','idempotencyKey']&&$schema['properties']['operation']['default']==='preserve_scene','SDK generates required arguments and preservation default');
-$check($schema['properties']['operation']['enum']===['preserve_scene','crop','pad','generative_expand'],'SDK advertises explicit operation policies');
+$check($schema['properties']['operation']['enum']===['preserve_scene','enhance','crop','pad','generative_expand'],'SDK advertises explicit operation policies');
 $check(!str_contains(Json::encode($tools->options()),'ApiKey'),'Discovery contains no credentials');
 $call=static function(array $options=[])use($tools,$source,$suffix):array{return $tools->enhance(...array_merge(['sourceAssetId'=>(int)$source->id,'idempotencyKey'=>'audit-'.$suffix.'-'.bin2hex(random_bytes(4)),'operation'=>'crop','width'=>1200,'height'=>675],$options));};
 $process=static function(array $job)use($app,$tools):array{ $app->getQueue()->executeJob((string)$job['jobId']); return $tools->status($job['requestId']); };

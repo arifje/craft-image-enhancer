@@ -48,6 +48,7 @@ class AiImageEnhancementService extends Component
         string $localPath,
         array $providerOptions = [],
         ?string $customPrompt = null,
+        ?string $extraDirection = null,
     ): string {
         $provider = $this->resolveProvider($settings, $providerOptions);
         $model = $this->getProviderModel($settings, $providerOptions);
@@ -57,9 +58,16 @@ class AiImageEnhancementService extends Component
         }
 
         $customPrompt = trim((string) $customPrompt);
-        $prompt = $customPrompt !== ''
-            ? $this->getCustomEditPrompt($customPrompt)
-            : ImageEnhancer::getInstance()->runtimeSettings->getCreativeEnhancementPromptForRequest($settings);
+        if ($customPrompt !== '') {
+            $prompt = $this->getCustomEditPrompt($customPrompt);
+        } else {
+            // The site's own enhancement prompt and tuning levels, as the Enhance button uses them.
+            $prompt = ImageEnhancer::getInstance()->runtimeSettings->getCreativeEnhancementPromptForRequest($settings);
+            $extraDirection = trim((string) $extraDirection);
+            if ($extraDirection !== '') {
+                $prompt .= "\n\nAdditional direction for this image. It adds to the rules above and never overrides them:\n" . $extraDirection;
+            }
+        }
 
         return match ($provider) {
             Settings::IMAGE_PROVIDER_XAI => $this->enhanceWithXai($client, $asset, $localPath, $apiKey, $model, $prompt),

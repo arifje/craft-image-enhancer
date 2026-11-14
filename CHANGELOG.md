@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.0 - 2026-11-14
+
+- New MCP operation `enhance` for `image_enhance`: what the Enhance button of the control panel does. The provider gets the site's own enhancement prompt and the tuning levels for clarity, contrast, colour and noise, so the picture comes back clearer (sharper, less noise and blur, better colour and light) with the same people, objects and framing. Before, agents had only `preserve_scene`, whose fixed prompt allows only "exposure, colour balance and mild noise", so a thumbnail or social card made through MCP had the right size but not the better quality that the Enhance button gives.
+- `enhance` keeps the picture's ratio. Dimensions or a ratio that differ from the picture's by more than 1 % are refused before anything is queued, with what to do instead: change the ratio with `crop` or `generative_expand`, and enhance that result (or the other way round). A provider picture whose ratio differs from the source by more than 4 % fails instead of being cut off; a smaller difference is trimmed at the edges.
+- `instructions` are optional for `enhance` and are added after the site's prompt as extra direction; they never replace it.
+- `image_enhancement_options` lists `enhance` for each provider and in the operations, and status and provenance report `enhancementPrompt` (`site-default` for `enhance`, `preservation` for `preserve_scene`).
+- `preserve_scene`, `crop`, `pad` and `generative_expand` work as before. No migration.
+
 ## 3.6.1 - 2026-11-11
 
 - An MCP image enhancement of a freshly made image (a frame taken from a video, a new upload) failed with "The source asset changed after submission". The request remembered when the asset record was last saved, and plugins save a new asset again right after upload (transforms, metadata, renaming) without touching the image. The check now compares the image file itself (size, dimensions and the file's modified time), so only a replaced file stops the request. Requests queued before this release keep their old check.

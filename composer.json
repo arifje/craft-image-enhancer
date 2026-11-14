@@ -2,7 +2,7 @@
   "name": "arjan-brinkman/craft-image-enhancer",
   "description": "Checks, enhances, and anonymizes image assets with AI and local image tooling.",
   "type": "craft-plugin",
-  "version": "3.6.1",
+  "version": "3.7.0",
   "require": {
     "php": "^8.2",
     "craftcms/cms": "^5.11.0"
