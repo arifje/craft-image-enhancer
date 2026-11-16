@@ -4,6 +4,12 @@
 namespace arifje\craftaiassistant {
     /** @method static Plugin getInstance() */
     class Plugin extends \craft\base\Plugin {
+        public function getJobs(): object {}
+        public function getUploads(): object {}
+        public function getAgent(): object {}
+        public function getPreferences(): object {}
+        public function getConversations(): object {}
+        public function getSettings(): \arifje\craftaiassistant\models\Settings {}
         public function getTools(): \arifje\craftaiassistant\services\Tools {}
     }
 }
@@ -11,5 +17,28 @@ namespace arifje\craftaiassistant\services {
     class Tools extends \craft\base\Component {
         public function definitions(\craft\elements\User $user): array {}
         public function call(\craft\elements\User $user, string $name, array $arguments): array {}
+    }
+}
+
+namespace arifje\craftaiassistant\models {
+    class Settings extends \craft\base\Model {
+        public string $uploadVolume = '';
+        public string $uploadFolder = '';
+    }
+}
+namespace arifje\craftaiassistant\helpers {
+    class ToolImages { public static function forModel(string $url): ?string {} }
+}
+namespace arifje\craftaiassistant\providers {
+    interface TextModel {
+        public function respond(string $instructions, array $input, array $tools, ?callable $stopped = null): array;
+        public function userItem(string $text, array $images = []): array;
+        public function toolResultItem(string $callId, string $output): array;
+    }
+}
+namespace Dotenv {
+    class Dotenv {
+        public static function createUnsafeImmutable(string $path): self {}
+        public function safeLoad(): array {}
     }
 }

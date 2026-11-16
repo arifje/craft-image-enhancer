@@ -64,7 +64,7 @@ class McpQueueStatus
         if (in_array($queue['status'], ['waiting', 'delayed'], true)) {
             return 'queued';
         }
-        if (in_array($stage, ['complete', 'attachment_conflict', 'attachment_failed'], true)) {
+        if (in_array($stage, ['complete', 'attachment_conflict', 'attachment_failed', 'awaiting_review', 'discarded'], true)) {
             return 'finished';
         }
         if (in_array($stage, ['failed', 'storage_failed', 'uncertain'], true)) {

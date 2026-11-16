@@ -33,13 +33,29 @@ class McpEnhancements extends Component
     /** Terminal request details expire after 30 days; minimal idempotency/provenance records remain. */
     public const DETAIL_RETENTION_SECONDS = 30 * 86400;
 
-    public const TERMINAL = ['complete', 'attachment_conflict', 'attachment_failed', 'failed', 'uncertain'];
+    public const TERMINAL = ['complete', 'attachment_conflict', 'attachment_failed', 'failed', 'uncertain', 'awaiting_review', 'discarded'];
 
     /** Validate all destinations before queueing; the same key never starts another paid request. */
     /** @param array<string, mixed> $caller from Access::caller() */
     public function submit(array $input, User $user, array $caller): array
     {
         Access::assertUser($user);
+        $mode = $input['outputMode'] ?? 'asset';
+        if (!in_array($mode, ['asset', 'temporary'], true)) {
+            throw new EnhancementException('Choose asset or temporary outputMode.');
+        }
+        // Preserve hashes of legacy calls that did not have this optional argument.
+        if ($mode === 'asset') {
+            unset($input['outputMode']);
+        }
+        foreach (['sourceUploadId', 'sourceOperationId'] as $optional) {
+            if (($input[$optional] ?? null) === null) {
+                unset($input[$optional]);
+            }
+        }
+        if (count(array_filter([$input['sourceAssetId'], $input['sourceUploadId'] ?? null, $input['sourceOperationId'] ?? null], static fn($value) => $value !== null)) !== 1) {
+            throw new EnhancementException('Choose exactly one sourceAssetId, sourceUploadId or sourceOperationId.');
+        }
         $key = $input['idempotencyKey'];
         if (!preg_match('/^[A-Za-z0-9._:-]{8,128}$/', $key)) {
             throw new EnhancementException('Use an idempotencyKey of 8 to 128 letters, numbers, dots, colons, underscores or hyphens.');
@@ -69,7 +85,10 @@ class McpEnhancements extends Component
                 return $this->status($row['requestId'], $user);
             }
             $user = Access::queued($caller, $user, null);
-            $source = $this->source($input['sourceAssetId'], $user);
+            $source = $this->requestSource($input, $user);
+            if (isset($input['sourceOperationId'])) {
+                $this->previewPath($input['sourceOperationId'], $user);
+            }
             if (mb_strlen($input['instructions']) > 2000) {
                 throw new EnhancementException('Keep instructions under 2000 characters.');
             }
@@ -97,6 +116,15 @@ class McpEnhancements extends Component
                 'sectionUid' => null,
                 'beforeIds' => [],
             ]);
+            if (isset($input['sourceUploadId'])) {
+                // Keep only safe metadata: status/promotion must survive the upload's 24-hour expiry.
+                $request['uploadSource'] = [
+                    'filename' => $source->filename, 'title' => $source->title,
+                    'folderId' => $source->folderId, 'volumeId' => $source->volumeId,
+                    'width' => $source->width, 'height' => $source->height, 'size' => $source->size,
+                    'dateModified' => $source->dateModified?->format(DATE_ATOM),
+                ];
+            }
             unset($request['idempotencyKey']);
             if ($request['targetDraftId'] !== null) {
                 $request = array_merge($request, (new EnhancementDrafts())->prepare($request, $user));
@@ -154,7 +182,7 @@ class McpEnhancements extends Component
         }
         $request = Json::decode($row['request']);
         Access::section($request['sectionUid']);
-        $this->source($request['sourceAssetId'], $user);
+        $this->requestSource($request, $user);
         $asset = $row['resultAssetId'] ? Craft::$app->getAssets()->getAssetById((int) $row['resultAssetId']) : null;
         if ($asset && !$asset->canView($user)) {
             throw new EnhancementException('The resulting asset is no longer viewable by this user.');
@@ -177,6 +205,13 @@ class McpEnhancements extends Component
                 'naturalKey' => ['volume' => $asset->getVolume()->handle, 'path' => $asset->getFolder()->path, 'filename' => $asset->filename],
             ];
         }
+        if (!$asset && $row['status'] === 'awaiting_review' && empty($request['detailsExpired'])) {
+            $result = [
+                'temporary' => true, 'width' => $request['width'], 'height' => $request['height'],
+                'previewUrl' => 'enhancement://' . $id,
+                'reviewUrl' => \craft\helpers\UrlHelper::actionUrl('craft-image-enhancer/candidate/preview', ['operationId' => $id]),
+            ];
+        }
         $draft = $request['targetDraftId'] === null ? null : Entry::find()->id($request['targetDraftId'])->siteId($request['siteId'])->status(null)->drafts(null)->provisionalDrafts(null)->one();
         $draftReviewUrl = $draft && $draft->canView($user) ? $draft->getCpEditUrl() : null;
         $queueJobId = $row['queueJobId'] === null ? null : (int)$row['queueJobId'];
@@ -197,8 +232,9 @@ class McpEnhancements extends Component
                 'attachment_failed' => 'failed',
                 default => 'pending',
             },
-            'sourceAssetId' => $request['sourceAssetId'], 'result' => $result,
-            'generationSucceeded' => $asset !== null || in_array($row['status'], ['generated', 'storing', 'storage_failed'], true),
+            'sourceAssetId' => $request['sourceAssetId'], 'sourceUploadId' => $request['sourceUploadId'] ?? null,
+            'sourceOperationId' => $request['sourceOperationId'] ?? null, 'result' => $result,
+            'generationSucceeded' => $asset !== null || in_array($row['status'], ['generated', 'storing', 'storage_failed', 'awaiting_review'], true),
             'storageSucceeded' => $asset !== null,
             'attachmentSucceeded' => $request['targetDraftId'] !== null && $row['status'] === 'complete',
             'targetDraftId' => $request['targetDraftId'], 'field' => $request['field'], 'siteId' => $request['siteId'],
@@ -218,12 +254,92 @@ class McpEnhancements extends Component
                 'sourceVersion' => $request['sourceVersion'],
             ],
             'next' => match ($stage) {
+                'awaiting_review' => empty($request['detailsExpired']) ? 'Inspect the temporary preview. Save only the chosen result with image_enhancement_save; discard rejected candidates with image_enhancement_discard. No Craft asset exists yet.' : 'The temporary result has expired. It cannot be saved or regenerated with this key.',
                 'queue_failed', 'interrupted', 'unknown' => 'Ask an operator to inspect the original Craft queue job. Missing queue rows do not prove completion. Do not change the idempotencyKey or repeat a potentially charged operation.',
                 'queued' => 'Poll image_enhancement_status. A Craft queue worker must be running.',
                 'storage_failed' => 'Fix storage/permissions, then resubmit identical arguments and the same idempotencyKey to reuse the retained pixels without another provider request.',
                 default => null,
             },
         ];
+    }
+
+    /** Private preview for the signed-in owner; never accepts an arbitrary path. */
+    public function previewPath(string $id, User $user): string
+    {
+        Access::assertUser($user);
+        $row = $this->row($id);
+        $request = Json::decode($row['request']);
+        if ((int)$row['userId'] !== (int)$user->id || $row['status'] !== 'awaiting_review' || !empty($request['detailsExpired'])) {
+            throw new EnhancementException('This temporary image is unavailable or has expired.');
+        }
+        Access::section($request['sectionUid']);
+        $source = $this->requestSource($request, $user);
+        $path = $this->outputPath($id, $source);
+        if (!is_file($path)) {
+            throw new EnhancementException('This temporary image is no longer available.');
+        }
+        $this->validateOutput($path, $request, $source);
+        return $path;
+    }
+
+    /** Save/discard serializes with workers and GC; no provider call is possible here. */
+    public function settle(string $id, bool $save, User $user, array $caller): array
+    {
+        $mutex = Craft::$app->getMutex();
+        $lock = 'ie-mcp-process:' . $id;
+        if (!$mutex->acquire($lock, 3)) {
+            throw new EnhancementException('This image is busy. Retry the same operation ID.');
+        }
+        try {
+            $row = $this->row($id);
+            $request = Json::decode($row['request']);
+            Access::assertUser($user);
+            if ((int)$row['userId'] !== (int)$user->id || ($request['outputMode'] ?? 'asset') !== 'temporary') {
+                throw new EnhancementException('This temporary image is not available to this user.');
+            }
+            Access::section($request['sectionUid']);
+            $user = Access::queued($caller, $user, $request['sectionUid']);
+            if ($save && in_array($row['status'], ['complete', 'attachment_conflict', 'attachment_failed'], true)) {
+                return $this->status($id, $user);
+            }
+            if (!$save && $row['status'] === 'discarded') {
+                return $this->status($id, $user);
+            }
+            if (!$save && $row['resultAssetId'] !== null) {
+                throw new EnhancementException('This image has already been saved. It cannot be discarded as a temporary candidate.');
+            }
+            $path = $this->previewPath($id, $user);
+            if (!$save) {
+                // Persist the tombstone first: a crash never makes this candidate reusable.
+                $this->update($id, ['status' => 'discarded', 'progress' => 1]);
+                FileHelper::delete($path);
+                return $this->status($id, $user);
+            }
+            $source = $this->requestSource($request, $user);
+            EnhancementDrafts::folder($request['folderId'], $user);
+            // Recovery after a process interruption reuses the UID, never creates a second asset.
+            $asset = Asset::find()->uid($id)->status(null)->trashed(null)->one();
+            $asset ??= $this->saveResult($id, $request, $source, $path, $user);
+            if ($asset->trashed || !$asset->canView($user)) {
+                throw new EnhancementException('The saved result was removed or is no longer accessible.');
+            }
+            $status = 'complete';
+            $error = null;
+            if ($request['targetDraftId'] !== null) {
+                try {
+                    $status = $this->attach($request, $asset, $user);
+                    $error = $status === 'attachment_conflict' ? 'The draft changed. The approved image was saved without overwriting editor changes.' : null;
+                } catch (Throwable $e) {
+                    $status = 'attachment_failed';
+                    $error = $this->safeError($e, 'The approved image was saved but could not be attached.');
+                }
+            }
+            $this->update($id, ['resultAssetId' => $asset->id, 'status' => $status, 'progress' => 1, 'error' => $error]);
+            FileHelper::delete($path);
+            return $this->status($id, $user);
+        } finally {
+            $mutex->release($lock);
+        }
     }
 
     /** Compact old terminal payloads during Craft GC, never during status polling. */
@@ -297,7 +413,7 @@ class McpEnhancements extends Component
             }
             $user = Access::queued(self::caller($request), $user, $request['sectionUid']);
             Craft::$app->getUser()->setIdentity($user);
-            $source = $this->source($request['sourceAssetId'], $user);
+            $source = $this->requestSource($request, $user);
             EnhancementDrafts::folder($request['folderId'], $user);
             $path = $this->outputPath($id, $source);
             $asset = $row['resultAssetId'] ? Craft::$app->getAssets()->getAssetById((int) $row['resultAssetId']) : Asset::find()->uid($id)->status(null)->trashed(null)->one();
@@ -321,7 +437,17 @@ class McpEnhancements extends Component
                     throw new EnhancementException('The source image file changed after submission. Submit a new request after reviewing it.');
                 }
                 (new EnhancementOptions())->provider($request['operation'], $request['providerOptions']['provider'] ?? null, $request['providerOptions']['model'] ?? null);
-                $sourcePath = FileHelper::copyAssetToTemp($source);
+                if (isset($request['sourceUploadId']) || isset($request['sourceOperationId'])) {
+                    $sourcePath = FileHelper::createTempPathForAsset($source);
+                    $inputPath = isset($request['sourceOperationId'])
+                        ? $this->previewPath($request['sourceOperationId'], $user)
+                        : $this->upload($request['sourceUploadId'], $user)['path'];
+                    if (!copy($inputPath, $sourcePath)) {
+                        throw new EnhancementException('The temporary source could not be read.');
+                    }
+                } else {
+                    $sourcePath = FileHelper::copyAssetToTemp($source);
+                }
                 $this->validateSourceFile($sourcePath, $source);
                 $this->update($id, ['status' => 'processing', 'progress' => 0.15]);
                 if ($reportProgress !== null) {
@@ -343,9 +469,16 @@ class McpEnhancements extends Component
                     $reportProgress(0.7, 'Generated image retained');
                 }
             }
+            if (!$asset && ($request['outputMode'] ?? 'asset') === 'temporary') {
+                $this->update($id, ['status' => 'awaiting_review', 'progress' => 1, 'error' => null]);
+                if ($reportProgress !== null) {
+                    $reportProgress(1.0, 'Image ready for review');
+                }
+                return;
+            }
             if (!$asset) {
                 $user = Access::queued(self::caller($request), $user, $request['sectionUid']);
-                $source = $this->source($request['sourceAssetId'], $user);
+                $source = $this->requestSource($request, $user);
                 $this->validateOutput($path, $request, $source);
                 $this->update($id, ['status' => 'storing', 'progress' => 0.8]);
                 if ($reportProgress !== null) {
@@ -477,6 +610,66 @@ class McpEnhancements extends Component
             $transaction->rollBack();
             throw $e;
         }
+    }
+
+    /** Resolve a source without saving a virtual upload/candidate as a Craft element. */
+    private function requestSource(array $request, User $user, int $depth = 0): Asset
+    {
+        if ($depth > 8) {
+            throw new EnhancementException('Too many chained image operations. Choose a final result before continuing.');
+        }
+        if (isset($request['sourceUploadId'])) {
+            if (isset($request['uploadSource'])) {
+                Access::assertUser($user);
+                $metadata = $request['uploadSource'];
+                $metadata['dateModified'] = new \DateTime($metadata['dateModified']);
+                return new Asset($metadata);
+            }
+            $upload = $this->upload($request['sourceUploadId'], $user);
+            $assistant = Craft::$app->getPlugins()->getPlugin('_ai-assistant');
+            if ($assistant === null || !method_exists($assistant, 'getUploads')) {
+                throw new EnhancementException('The upload service is unavailable.');
+            }
+            $folder = $assistant->getUploads()->defaultFolder($user);
+            $source = new Asset();
+            $source->filename = $upload['name'];
+            $source->title = pathinfo($upload['name'], PATHINFO_FILENAME);
+            $source->folderId = $folder->id;
+            $source->volumeId = $folder->volumeId;
+            $source->width = (int)$upload['width'];
+            $source->height = (int)$upload['height'];
+            $source->size = filesize($upload['path']);
+            $source->dateModified = new \DateTime('@' . filemtime($upload['path']));
+            $this->validateSourceFile($upload['path'], $source);
+            return $source;
+        }
+        if (isset($request['sourceOperationId'])) {
+            $row = $this->row($request['sourceOperationId']);
+            $parent = Json::decode($row['request']);
+            Access::assertUser($user);
+            Access::section($parent['sectionUid']);
+            if ((int)$row['userId'] !== (int)$user->id || !isset($parent['width'], $parent['height'])) {
+                throw new EnhancementException('The temporary source is unavailable.');
+            }
+            $source = clone $this->requestSource($parent, $user, $depth + 1);
+            $source->width = $parent['width'];
+            $source->height = $parent['height'];
+            $source->size = 0;
+            $source->dateModified = new \DateTime($row['dateCreated']);
+            return $source;
+        }
+        return $this->source($request['sourceAssetId'], $user);
+    }
+
+    /** Only a private upload belonging to the current user; no paths or remote URLs accepted. */
+    private function upload(string $id, User $user): array
+    {
+        $assistant = Craft::$app->getPlugins()->getPlugin('_ai-assistant');
+        $upload = $assistant !== null && method_exists($assistant, 'getUploads') ? $assistant->getUploads()->find($user, $id) : null;
+        if (!is_array($upload) || ($upload['kind'] ?? 'image') !== 'image' || !in_array(strtolower(pathinfo($upload['path'], PATHINFO_EXTENSION)), ['png', 'jpg', 'jpeg'], true)) {
+            throw new EnhancementException('Choose an available JPEG or PNG upload belonging to this user.');
+        }
+        return $upload;
     }
 
     /** Source access is read-only; no replacement permission is needed. */

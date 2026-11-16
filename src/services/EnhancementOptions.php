@@ -40,6 +40,7 @@ class EnhancementOptions
             ];
         }
         return [
+            'outputModes' => ['temporary' => 'Private review candidate; explicitly save the winner or discard it. Expires during Craft GC after 30 days.', 'asset' => 'Legacy immediate asset creation.'],
             'providers' => $providers,
             'defaultProvider' => $settings->imageEnhancementProvider === Settings::IMAGE_PROVIDER_FRONTEND ? null : $settings->imageEnhancementProvider,
             'operations' => [

@@ -30,6 +30,7 @@ namespace arifje\mcptools\records {
 }
 namespace arifje\mcptools\support {
     class CallContext {
+        public static function forLocal(int $userId, \arifje\mcptools\http\Scope $scope, ?string $ip): void {}
         public static function forHttp(\arifje\mcptools\http\Token $token, ?string $ip): void {}
         public static function reset(): void {}
         public static function isHttp(): bool {}

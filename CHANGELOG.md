@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.8.0 - 2026-11-17
+
+- Add private MCP enhancement candidates with authenticated previews, explicit save/discard, idempotent promotion and GC cleanup. Preserve legacy immediate asset creation by default.
+- Process private AI Assistant uploads and chain temporary candidates without creating intermediate assets. Preserve original files and enforce ownership, permissions and draft conflict checks.
+- Add native Docker integration tests for candidate lifecycle, concurrent actions, failure cases, expiry and assistant review approval/rejection.
+
 ## 3.7.2 - 2026-11-16
 
 - Fix full-project static analysis for optional AI Assistant integration tests, mutable provider request capture and policy assertions. Guard missing isolated Craft bootstraps with actionable errors. No production behavior changes.

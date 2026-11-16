@@ -236,3 +236,16 @@ EDITOR_TEST_PASSWORD='local-test-password' python3 tests/editor-http.py http://l
 ```
 
 Use separate browser sessions or distinct hostnames when testing the two Docker sites: localhost ports share cookies. Manual coverage should include drawing and transforming layers, image import, blur, visibility/locking/order, undo/redo, unsaved-close protection, resize/maximize and mobile layout, AI preview acceptance/discard, save/reopen, and denied replacement permissions. Test AI responses with a local HTTP mock when provider keys are unavailable; do not confuse simulated responses with live provider verification.
+
+
+### Temporary MCP image candidates (3.8+)
+
+Use `image_enhance` with `outputMode: "temporary"` to inspect generated pixels before creating a Craft asset. The default `asset` mode preserves existing integrations. Poll `image_enhancement_status`: `awaiting_review` means processing finished successfully, with no asset yet. AI Assistant's updated integration can read the private `enhancement://` preview locally; signed-in owners can open `result.reviewUrl` in the CP. These are not public image URLs.
+
+Choose exactly one source: an existing JPEG/PNG `sourceAssetId`; an owned AI Assistant `sourceUploadId` with `sourceAssetId: null`; or an owned temporary `sourceOperationId` with `sourceAssetId: null`. Keep intermediate candidates until their dependent operation finishes. Uploaded sources use AI Assistant's configured upload destination unless a draft field supplies one. Original uploads must still exist when the worker starts; successfully generated pixels remain savable after the upload expires.
+
+Call `image_enhancement_save(operationId)` only for the inspected, chosen result. It rechecks permissions, creates one native asset and performs any originally requested draft attachment. Duplicate saves return that same result without generating again. Draft conflicts preserve the saved image without overwriting editor changes. `image_enhancement_discard(operationId)` removes only a private candidate, never a Craft asset or entry. Save, discard, worker replay and GC share the operation mutex. Abandoned candidates use the existing 30-day Craft GC cleanup; minimal idempotency records remain. No migration is needed.
+
+The enhanced AI Assistant review flow presents the private candidate before promotion. Other MCP clients must implement their own review UI. Provider costs still apply to generated candidates even if discarded. This mode does not change other plugins' download/import behavior.
+
+The guarded native integration fixture is `tests/craft-candidates.php`: run it in Docker with `CRAFT_DB_DATABASE=ai_assistant_review_candidates`, a disposable copy of a Craft test database with MCP Tools and AI Assistant installed, and the test site's vendor autoloader as its first argument. It refuses other database names. It creates its test assets under private `/tmp` storage, uses local crops instead of paid providers, and verifies the assistant integration against `/workspace/Codex/craft-plugins/craft-ai-assistent`.
