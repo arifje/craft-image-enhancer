@@ -1,0 +1,15 @@
+<?php
+// Optional AI Assistant integration contracts, verified against its public methods.
+// Analysis-only: native probes load the installed plugin, never this file.
+namespace arifje\craftaiassistant {
+    /** @method static Plugin getInstance() */
+    class Plugin extends \craft\base\Plugin {
+        public function getTools(): \arifje\craftaiassistant\services\Tools {}
+    }
+}
+namespace arifje\craftaiassistant\services {
+    class Tools extends \craft\base\Component {
+        public function definitions(\craft\elements\User $user): array {}
+        public function call(\craft\elements\User $user, string $name, array $arguments): array {}
+    }
+}

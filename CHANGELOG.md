@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.7.2 - 2026-11-16
+
+- Fix full-project static analysis for optional AI Assistant integration tests, mutable provider request capture and policy assertions. Guard missing isolated Craft bootstraps with actionable errors. No production behavior changes.
+
 ## 3.7.1 - 2026-11-16
 
 - Retain safe HTTP status and failure categories in MCP operation status and queue errors, with the operation ID. Keep raw provider responses, request URLs and unexpected exception messages private; failed paid operations are not retried automatically.

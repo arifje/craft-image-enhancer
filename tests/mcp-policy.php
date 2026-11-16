@@ -10,8 +10,8 @@ use arjanbrinkman\craftimageenhancer\exceptions\EnhancementException;
 use arjanbrinkman\craftimageenhancer\helpers\EnhancementPolicy as Policy;
 
 $checks = 0;
-$check = static function(bool $ok) use (&$checks): void {
-    if (!$ok) throw new RuntimeException('MCP policy assertion failed.');
+$check = static function(bool $ok, string $message = 'MCP policy assertion failed.') use (&$checks): void {
+    if (!$ok) throw new RuntimeException($message);
     $checks++;
 };
 $reject = static function(callable $call) use ($check): void {
@@ -34,7 +34,9 @@ foreach ([['16:9', null, null, 1080, 1920], [null, 1200, 675, 1080, 1920], ['4:5
 }
 $check(Policy::sameRatio(1200, 675, 1920, 1080, Policy::SAME_RATIO_TOLERANCE) && !Policy::sameRatio(1080, 1350, 1920, 1080, Policy::PROVIDER_RATIO_TOLERANCE));
 $check(Policy::sameRatio(1024, 1536, 1080, 1620, Policy::PROVIDER_RATIO_TOLERANCE) && !Policy::sameRatio(1024, 1536, 1080, 1920, Policy::PROVIDER_RATIO_TOLERANCE), 'a provider picture in 2:3 for a 9:16 source is too far off');
-$check(in_array('enhance', Policy::OPERATIONS, true) && Policy::OPERATIONS[0] === 'preserve_scene');
+// Read the public contract through reflection so this regression remains a runtime assertion.
+$operations = (new ReflectionClass(Policy::class))->getConstant('OPERATIONS');
+$check(in_array('enhance', $operations, true) && $operations[0] === 'preserve_scene');
 foreach ([['16:9', 1200, 674, 'crop'], [null, 1200, null, 'pad'], ['0:9', null, null, 'crop'], ['1.5:1', null, null, 'crop'], [null, 63, 100, 'crop'], [null, 9000, 9000, 'crop'], [null, 6000, 6000, 'pad'], ['4:1', 4000, 1000, 'generative_expand'], [null, 100, 100, 'stretch']] as [$ratio, $w, $h, $operation]) {
     $reject(static fn() => Policy::dimensions($ratio, $w, $h, 1600, 900, $operation));
 }

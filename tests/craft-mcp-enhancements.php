@@ -5,7 +5,9 @@ declare(strict_types=1);
 // Destructive fixtures are permitted ONLY in this disposable Docker database.
 $site = getenv('IE_MCP_TEST_SITE');
 if ($site !== '/tmp/ie-mcp-20261031/site') throw new RuntimeException('Wrong isolated test site.');
-require $site . '/bootstrap.php';
+$bootstrap = $site . '/bootstrap.php';
+if (!is_file($bootstrap)) throw new RuntimeException('The isolated Craft test bootstrap is missing: ' . $bootstrap);
+require $bootstrap;
 $app = require CRAFT_VENDOR_PATH . '/craftcms/cms/bootstrap/console.php';
 if ($app->getDb()->createCommand('SELECT DATABASE()')->queryScalar() !== 'ie_mcp_20261031') throw new RuntimeException('Wrong isolated test database.');
 

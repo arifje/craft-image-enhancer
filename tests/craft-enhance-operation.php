@@ -30,7 +30,7 @@ $check = static function(string $label, bool $ok, string $detail = '') use (&$fa
 
 $plugin = ImageEnhancer::getInstance();
 $assistant = Assistant::getInstance();
-$check('the plugins are installed', $plugin !== null && $assistant !== null);
+$check('the plugins are enabled', $app->getPlugins()->isPluginEnabled('craft-image-enhancer') && $app->getPlugins()->isPluginEnabled('_ai-assistant'));
 $admin = User::find()->admin()->status(null)->one();
 $app->getUser()->setIdentity($admin);
 $volume = $app->getVolumes()->getAllVolumes()[0] ?? null;
@@ -60,11 +60,12 @@ if (!ImageEnhancer::suppressAssetQueue(static fn(): bool => $app->getElements()-
 }
 
 // The provider's HTTP API, stood in for. Its answer is a picture of the size the test asks for.
-$sent = [];
+/** @var ArrayObject<int, string> $sent Captured HTTP request bodies, populated by the handler. */
+$sent = new ArrayObject();
 $answer = ['w' => 1080, 'h' => 1920];
-Craft::$container->set(GuzzleHttp\Client::class, static function($container, $params) use (&$sent, &$answer, $image) {
+Craft::$container->set(GuzzleHttp\Client::class, static function($container, $params) use ($sent, &$answer, $image) {
     $config = $params[0] ?? [];
-    $config['handler'] = static function($request) use (&$sent, &$answer, $image) {
+    $config['handler'] = static function($request) use ($sent, &$answer, $image) {
         if ($request->getMethod() === 'GET') {
             return GuzzleHttp\Promise\Create::promiseFor(new GuzzleHttp\Psr7\Response(200, [], Json::encode(['data' => [['id' => 'gpt-image-2']]])));
         }
@@ -117,36 +118,36 @@ $check('and not the preservation prompt', !str_contains($sent[0] ?? '', 'Correct
 $check('the provenance says which prompt', ($result['provenance']['enhancementPrompt'] ?? null) === 'site-default' && ($result['provenance']['operation'] ?? null) === 'enhance' && ($result['provenance']['aiProcessed'] ?? false) === true);
 
 // Extra direction adds to the prompt.
-$sent = [];
+$sent->exchangeArray([]);
 $result = $run(['operation' => 'enhance', 'provider' => 'openai', 'model' => 'gpt-image-2', 'instructions' => 'Make the red disc edge crisper.']);
 $check('extra direction is added after the site\'s prompt', ($result['stage'] ?? '') === 'complete' && str_contains($sent[0] ?? '', 'Additional direction') && str_contains($sent[0], 'Make the red disc edge crisper.') && str_contains($sent[0], 'ultra-clear'), Json::encode($result));
 
 // A smaller size in the same ratio is a resize after the enhancement.
-$sent = [];
+$sent->exchangeArray([]);
 $result = $run(['operation' => 'enhance', 'provider' => 'openai', 'model' => 'gpt-image-2', 'width' => 540, 'height' => 960]);
 $check('the same ratio at another size is allowed', ($result['stage'] ?? '') === 'complete' && ($result['result']['width'] ?? 0) === 540 && ($result['result']['height'] ?? 0) === 960, Json::encode($result));
 
 // Another ratio is refused before anything is paid.
-$sent = [];
+$sent->exchangeArray([]);
 $result = $run(['operation' => 'enhance', 'provider' => 'openai', 'model' => 'gpt-image-2', 'width' => 1200, 'height' => 675]);
-$check('another ratio is refused, with what to do instead', str_contains((string)($result['refused'] ?? ''), 'crop or generative_expand') && $sent === [], Json::encode($result));
+$check('another ratio is refused, with what to do instead', str_contains((string)($result['refused'] ?? ''), 'crop or generative_expand') && count($sent) === 0, Json::encode($result));
 $result = $run(['operation' => 'enhance', 'provider' => 'openai', 'model' => 'gpt-image-2', 'aspectRatio' => '16:9']);
-$check('also when asked as a ratio', isset($result['refused']) && $sent === [], Json::encode($result));
+$check('also when asked as a ratio', isset($result['refused']) && count($sent) === 0, Json::encode($result));
 
 // A provider that sends the picture back in another ratio does not get it cropped.
 $answer = ['w' => 1024, 'h' => 1536];
-$sent = [];
+$sent->exchangeArray([]);
 $result = $run(['operation' => 'enhance', 'provider' => 'openai', 'model' => 'gpt-image-2']);
 $check('a picture in another ratio from the provider fails instead of cutting it', ($result['stage'] ?? '') === 'failed' && str_contains((string)($result['error'] ?? ''), 'another ratio') && ($result['result'] ?? null) === null, Json::encode($result));
 $answer = ['w' => 1080, 'h' => 1920];
 
 // The existing operations are as they were.
-$sent = [];
+$sent->exchangeArray([]);
 $result = $run(['operation' => 'preserve_scene', 'provider' => 'openai', 'model' => 'gpt-image-2']);
 $check('preserve_scene still uses the preservation prompt', ($result['stage'] ?? '') === 'complete' && str_contains($sent[0] ?? '', 'Correct exposure, colour balance and mild noise only') && !str_contains($sent[0], 'ultra-clear') && ($result['provenance']['enhancementPrompt'] ?? null) === 'preservation', Json::encode($result));
-$sent = [];
+$sent->exchangeArray([]);
 $result = $run(['operation' => 'crop', 'width' => 1200, 'height' => 675]);
-$check('crop is local and still works', ($result['stage'] ?? '') === 'complete' && $sent === [] && ($result['result']['width'] ?? 0) === 1200, Json::encode($result));
+$check('crop is local and still works', ($result['stage'] ?? '') === 'complete' && count($sent) === 0 && ($result['result']['width'] ?? 0) === 1200, Json::encode($result));
 
 // Clean up what this script made.
 foreach (array_unique([...$made, (int)$source->id]) as $id) {
