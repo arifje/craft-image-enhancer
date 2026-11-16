@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.7.1 - 2026-11-16
+
+- Retain safe HTTP status and failure categories in MCP operation status and queue errors, with the operation ID. Keep raw provider responses, request URLs and unexpected exception messages private; failed paid operations are not retried automatically.
+
 ## 3.7.0 - 2026-11-14
 
 - New MCP operation `enhance` for `image_enhance`: what the Enhance button of the control panel does. The provider gets the site's own enhancement prompt and the tuning levels for clarity, contrast, colour and noise, so the picture comes back clearer (sharper, less noise and blur, better colour and light) with the same people, objects and framing. Before, agents had only `preserve_scene`, whose fixed prompt allows only "exposure, colour balance and mild noise", so a thumbnail or social card made through MCP had the right size but not the better quality that the Enhance button gives.

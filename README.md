@@ -207,6 +207,7 @@ node tests/editor-session.js
 
 - `tests/openai-models.php`: OpenAI model discovery, cache expiry, credential changes, fallbacks, and OpenAI/Grok request validation.
 - `tests/controllers-security.php`: status ownership, cancel scoping, and preview binding.
+- `tests/mcp-safe-errors.php`: durable error classification, wrapped HTTP failures, uncertain transport outcomes and suppression of sensitive request/response details.
 - `tests/jobs-helpers.php`: score parsing, face boxes, file-size targets, retry classification, and download host checks.
 - `tests/settings-validation.php`: settings validation rules.
 

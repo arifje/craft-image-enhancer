@@ -24,6 +24,7 @@ use craft\elements\User;
 use craft\helpers\Db;
 use craft\helpers\Json;
 use craft\helpers\StringHelper;
+use GuzzleHttp\Exception\TransferException;
 use Throwable;
 
 /** Durable orchestration only: image processing remains in the existing provider/format services. */
@@ -381,7 +382,7 @@ class McpEnhancements extends Component
             }
             Craft::warning('ImageEnhancer MCP ' . $id . ': ' . HttpHelper::describe($e), __METHOD__);
             // Let Craft retain the failed queue row; checkpoint guards prevent paid replay.
-            throw new EnhancementException('Image operation failed. Read image_enhancement_status for the durable outcome.');
+            throw new EnhancementException('Image operation ' . $id . ' failed. ' . $this->safeError($e, 'Processing or storage failed. Check the operation status for the retained outcome.'));
         } finally {
             FileHelper::delete($sourcePath);
             Craft::$app->getUser()->setIdentity($priorUser);
@@ -575,6 +576,28 @@ class McpEnhancements extends Component
     /** Only intentionally safe messages cross the tool boundary. */
     private function safeError(Throwable $e, string $fallback): string
     {
-        return $e instanceof EnhancementException ? $e->getMessage() : $fallback;
+        if ($e instanceof EnhancementException) {
+            return $e->getMessage();
+        }
+        $status = HttpHelper::getStatusCode($e);
+        if ($status !== null) {
+            $hint = match ($status) {
+                400, 422 => 'The remote service rejected the request. Check the selected model, input image and operation parameters.',
+                401, 403 => 'The remote service refused access. Check credentials and model permissions.',
+                404 => 'The remote endpoint or requested model was not found.',
+                429 => 'The remote service rate or quota limit was reached.',
+                default => $status >= 500 ? 'The remote service could not complete the request.' : 'The remote request failed.',
+            };
+            return 'HTTP ' . $status . '. ' . $hint . ' No automatic paid retry was made.';
+        }
+        for ($current = $e; $current !== null; $current = $current->getPrevious()) {
+            if ($current instanceof TransferException) {
+                return 'Connection error or timeout. The remote outcome is unknown; no automatic paid retry was made.';
+            }
+        }
+
+        // Exception messages may contain signed URLs, credentials or local paths.
+        $type = str_contains(get_class($e), '@anonymous') ? 'anonymous exception' : get_class($e);
+        return $fallback . ' Error type: ' . $type . '.';
     }
 }
