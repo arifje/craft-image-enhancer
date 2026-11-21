@@ -98,6 +98,14 @@ Responses also retain safe errors, separate generation/storage/attachment outcom
 
 For nested Matrix entries, pass their element ID as `targetDraftId` and the exact root draft element ID as `ownerDraftId`. Every owner must be editable and the ownership chain must be exclusive to that draft. Shared canonical blocks must first be edited/materialized on the draft using Craft. The tool refuses ambiguous ownership; it never falls back to saving a canonical entry.
 
+## Provider failure diagnostics
+
+New failures include the provider's structured rejection reason, error code/type, offending parameter and request ID where supplied, alongside the operation's stage, provider/model, target dimensions and available input dimensions, MIME type and byte size. The same diagnostic is stored in MCP status (`error`), logged with the operation ID, and shown in Craft's queue job details. The native `queue.error` field stays a generic execution summary; read the operation's top-level `error` for the detailed reason.
+
+For example, an HTTP 400 can now explain that the image size is unsupported and identify the `image` parameter and provider request ID. These are provider claims for troubleshooting, not instructions or proof of an output. Only selected structured fields are read from bounded JSON responses. Request/response dumps, raw exception text, authorization headers and signed URLs are not exposed. Known request credentials, explicit image instructions and common secret formats are redacted; HTML, malformed or oversized responses fall back to the HTTP category. A provider request ID can be supplied to the provider's support team.
+
+Manual retries of terminal failed operations preserve the first diagnostic and do not repeat potentially paid work. Historical failures cannot recover response details that an older release discarded. Restart queue workers after deploying this update so new failures use the richer diagnostics. No migration is needed.
+
 ## Conflicts, failures and retries
 
 Submission validates the user/token, source, operation, model, exact size, actual entry layout, field limits and native destination before starting work. Workers recheck live permissions/token state before processing, saving and attaching. Attachment locks native element/site rows, reloads the draft, compares ordered relations with the submission snapshot, and saves only that draft through Craft. Unrelated fields are loaded fresh and preserved. A changed target field or destination produces `attachment_conflict`; the new asset is retained for explicit manual attachment. Native field selection conditions are checked on the resulting asset. Attachment errors likewise retain it as `attachment_failed`.

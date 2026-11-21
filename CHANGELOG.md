@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.8.1 - 2026-11-21
+
+- Show bounded, redacted provider rejection reasons, error codes, parameters and request IDs in MCP failures and Craft queue details.
+- Include processing stage, operation, provider/model, input dimensions/type/bytes and target dimensions to make failures actionable.
+- Preserve the original failure details when a failed job is manually retried without repeating a paid provider request.
+
 ## 3.8.0 - 2026-11-17
 
 - Add private MCP enhancement candidates with authenticated previews, explicit save/discard, idempotent promotion and GC cleanup. Preserve legacy immediate asset creation by default.

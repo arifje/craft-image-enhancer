@@ -10,6 +10,7 @@ use arjanbrinkman\craftimageenhancer\helpers\FileHelper;
 use arjanbrinkman\craftimageenhancer\helpers\HttpHelper;
 use arjanbrinkman\craftimageenhancer\helpers\ImageHelper;
 use arjanbrinkman\craftimageenhancer\helpers\McpQueueStatus;
+use arjanbrinkman\craftimageenhancer\helpers\ProviderErrorDetails;
 use arjanbrinkman\craftimageenhancer\helpers\ReformatHelper;
 use arjanbrinkman\craftimageenhancer\ImageEnhancer;
 use arjanbrinkman\craftimageenhancer\jobs\McpEnhancementJob;
@@ -510,12 +511,28 @@ class McpEnhancements extends Component
             }
         } catch (Throwable $e) {
             $checkpoint = $this->row($id);
-            if (!in_array($checkpoint['status'], self::TERMINAL, true)) {
-                $this->update($id, ['status' => $path !== null && is_file($path) ? 'storage_failed' : 'failed', 'error' => $this->safeError($e, 'Image processing or storage failed. Review the queue logs and provider settings. A paid request may have occurred; no automatic duplicate request was made.')]);
+            $request = Json::decode($checkpoint['request']);
+            $error = $checkpoint['error'];
+            if (!in_array($checkpoint['status'], self::TERMINAL, true) || !$error) {
+                $error = $this->safeError($e, 'Image processing or storage failed. Check the operation status for the retained outcome.', [$request['instructions'] ?? '']);
+                $context = [
+                    'Stage: ' . $checkpoint['status'],
+                    'Operation: ' . $request['operation'],
+                    'Provider: ' . ($request['providerOptions']['provider'] ?? 'local'),
+                    'Model: ' . ($request['providerOptions']['model'] ?? 'none'),
+                    'Target: ' . $request['width'] . 'x' . $request['height'] . ' px',
+                ];
+                if (isset($source)) {
+                    $context[] = 'Input: ' . $source->width . 'x' . $source->height . ' px, ' . $source->mimeType . ', ' . $source->size . ' bytes';
+                }
+                $error .= ' Context: ' . implode('; ', array_map(static fn(string $value): string => ProviderErrorDetails::clean($value), $context)) . '.';
             }
-            Craft::warning('ImageEnhancer MCP ' . $id . ': ' . HttpHelper::describe($e), __METHOD__);
-            // Let Craft retain the failed queue row; checkpoint guards prevent paid replay.
-            throw new EnhancementException('Image operation ' . $id . ' failed. ' . $this->safeError($e, 'Processing or storage failed. Check the operation status for the retained outcome.'));
+            if (!in_array($checkpoint['status'], self::TERMINAL, true)) {
+                $this->update($id, ['status' => $path !== null && is_file($path) ? 'storage_failed' : 'failed', 'error' => $error]);
+            }
+            Craft::warning('ImageEnhancer MCP ' . $id . ': ' . $error, __METHOD__);
+            // Preserve the first failure on manual retries, without repeating a provider call.
+            throw new EnhancementException('Image operation ' . $id . ' failed. ' . $error);
         } finally {
             FileHelper::delete($sourcePath);
             Craft::$app->getUser()->setIdentity($priorUser);
@@ -767,7 +784,7 @@ class McpEnhancements extends Component
     }
 
     /** Only intentionally safe messages cross the tool boundary. */
-    private function safeError(Throwable $e, string $fallback): string
+    private function safeError(Throwable $e, string $fallback, array $redactions = []): string
     {
         if ($e instanceof EnhancementException) {
             return $e->getMessage();
@@ -781,7 +798,8 @@ class McpEnhancements extends Component
                 429 => 'The remote service rate or quota limit was reached.',
                 default => $status >= 500 ? 'The remote service could not complete the request.' : 'The remote request failed.',
             };
-            return 'HTTP ' . $status . '. ' . $hint . ' No automatic paid retry was made.';
+            $details = ProviderErrorDetails::describe($e, $redactions);
+            return 'HTTP ' . $status . '. ' . $hint . ($details !== '' ? ' ' . $details . '.' : ' The service returned no usable structured error details.') . ' No automatic paid retry was made.';
         }
         for ($current = $e; $current !== null; $current = $current->getPrevious()) {
             if ($current instanceof TransferException) {

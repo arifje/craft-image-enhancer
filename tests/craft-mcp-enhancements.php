@@ -189,8 +189,11 @@ Craft::$container->set(GuzzleHttp\Client::class, static function($container, $pa
         // Captured by reference; later cases change the mode after the transport is constructed.
         // @phpstan-ignore identical.alwaysFalse
         if ($providerMode==='failure') throw new RuntimeException('PRIVATE_PROVIDER_SECRET diagnostic');
+        // @phpstan-ignore identical.alwaysFalse (the test changes this captured reference before execution)
+        if ($providerMode==='http400') return GuzzleHttp\Promise\Create::promiseFor(new GuzzleHttp\Psr7\Response(400, ['x-request-id'=>'req-diagnostic-test'], Json::encode(['error'=>['message'=>'Unsupported image size. TEST_KEY_NEVER_SEND https://example.test/private?token=HIDDEN', 'code'=>'invalid_image_size', 'param'=>'image', 'type'=>'invalid_request_error']])));
         return GuzzleHttp\Promise\Create::promiseFor(new GuzzleHttp\Psr7\Response(200,[],Json::encode(['data'=>[['b64_json'=>base64_encode(file_get_contents($sourceFile))]]])));
     };
+    $config['handler'] = GuzzleHttp\HandlerStack::create($config['handler']);
     return new GuzzleHttp\Client($config);
 });
 $settings=$plugin->getSettings();$settings->chatGptApiKey='TEST_KEY_NEVER_SEND';$settings->imageEnhancementProvider='openai';$settings->imageEnhancementModel='gpt-image-2';
@@ -227,6 +230,14 @@ $check($af['stage']==='attachment_failed'&&$af['generationSucceeded']&&$af['resu
 $unknown=$call(['operation'=>'preserve_scene','provider'=>'openai','model'=>'gpt-image-2']);
 $app->getDb()->createCommand()->update(Requests::TABLE,['status'=>'processing'],['requestId'=>$unknown['requestId']])->execute();$paidBefore=$providerCalls;$unknown=$process($unknown);
 $check($unknown['stage']==='uncertain'&&$providerCalls===$paidBefore,'Interrupted provider outcome never triggers automatic paid retry');
+$providerMode='http400';$bad=$process($call(['operation'=>'preserve_scene','provider'=>'openai','model'=>'gpt-image-2']));
+$details=$queue->getJobDetails((string)$bad['queueJobId']);
+foreach (['Unsupported image size','invalid_image_size','Parameter: image','req-diagnostic-test','Provider: openai','Model: gpt-image-2','Input: 1600x900','Target: 1200x675','Stage: processing'] as $detail) {
+    $check(str_contains($bad['error'],$detail) && str_contains($details['error'],$detail),'Provider diagnostic survives durable status and native queue details: '.$detail);
+}
+$check(!str_contains($details['error'],'TEST_KEY_NEVER_SEND') && !str_contains($details['error'],'HIDDEN') && !str_contains($bad['error'],'https://'),'Native diagnostics redact credentials and signed URLs');
+$paidBefore=$providerCalls;$originalError=$details['error'];$queue->retry((string)$bad['queueJobId']);$bad=$process($bad);
+$check($providerCalls===$paidBefore && $queue->getJobDetails((string)$bad['queueJobId'])['error']===$originalError,'Manual retry preserves original diagnostic without another provider request');
 $providerMode='failure';$pf=$process($call(['operation'=>'preserve_scene','provider'=>'openai','model'=>'gpt-image-2']));
 $check($pf['stage']==='failed'&&!str_contains(Json::encode($pf),'PRIVATE_PROVIDER_SECRET'),'Provider failure is actionable and secrets are redacted');$providerMode='success';
 $check($pf['queue']['status']==='failed','Provider exception remains failed in Craft queue');
